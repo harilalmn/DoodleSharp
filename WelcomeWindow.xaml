@@ -18,16 +18,35 @@
         <!--  Left Side: Branding/Recent  -->
         <Border Grid.Column="0" Background="#252526">
             <StackPanel Margin="40">
+                <!--
+                    Vector mark plus real type. The bitmap this replaces was square with a dark
+                    textured background baked in, so it sat on this #252526 panel as a visibly
+                    lighter rectangle, and its wordmark — 2048px of type resampled to 120 — was an
+                    unreadable smear. A TextBlock renders the name with proper hinting instead.
+                -->
                 <Image
-                    Width="120"
-                    Height="120"
-                    Margin="0,0,0,10"
+                    Width="150"
+                    Height="78"
+                    Margin="0,0,0,14"
                     HorizontalAlignment="Left"
-                    Source="pack://application:,,,/img/logo.png" />
+                    Source="{StaticResource LogoMark}" />
+
+                <TextBlock Margin="2,0,0,2">
+                    <Run
+                        FontSize="30"
+                        FontWeight="Light"
+                        Foreground="{StaticResource LogoRedBrush}"
+                        Text="Doodle" /><Run
+                        FontSize="30"
+                        FontWeight="Light"
+                        Foreground="{StaticResource LogoCyanBrush}"
+                        Text="Sharp" />
+                </TextBlock>
+
                 <TextBlock
-                    Margin="0,0,0,20"
-                    FontSize="18"
-                    Foreground="#888888"
+                    Margin="3,0,0,22"
+                    FontSize="14"
+                    Foreground="#8A8A8E"
                     Text="Visual Geometry Environment" />
 
                 <TextBlock

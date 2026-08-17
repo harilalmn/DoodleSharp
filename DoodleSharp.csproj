@@ -45,7 +45,8 @@
 
   <ItemGroup>
     <Resource Include="img\logo.ico" />
-    <Resource Include="img\logo.png" />
+    <!-- img/logo.png is the README lockup only. The app draws its mark from Assets/Logo.xaml, so
+         embedding the bitmap would put it in the assembly for nothing. -->
     <Resource Include="img\folder.png" />
     <Resource Include="img\file.png" />
   </ItemGroup>

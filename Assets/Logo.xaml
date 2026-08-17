@@ -1,0 +1,146 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        The DoodleSharp mark, as vector.
+
+        It is drawn rather than loaded from a bitmap for three reasons. It is sharp at any size and
+        any DPI, where the 2048px PNG it replaces was resampled down to 120px and came out muddy.
+        It has a genuinely transparent background, where the PNG carried a dark textured square that
+        sat on the panel as a visibly lighter rectangle — which is what made the welcome screen look
+        like a sticker had been pasted onto it. And it costs a few hundred bytes instead of
+        megabytes embedded in the assembly.
+
+        The wordmark is deliberately NOT part of the mark. Rasterised type at 120px is a grey smear;
+        as a real TextBlock beside the mark it renders with proper hinting and picks up the theme.
+
+        The idea is the app's own subject: a freehand doodle on the left resolving into exact
+        construction geometry on the right — the loose red loop meets a node, and from there it is a
+        true circular arc with its control polygon shown, the way a CAD editor draws one.
+    -->
+
+    <Color x:Key="LogoRedColor">#DD3A31</Color>
+    <Color x:Key="LogoCyanColor">#1BD1E6</Color>
+    <Color x:Key="LogoGreyColor">#8A8A8E</Color>
+
+    <SolidColorBrush x:Key="LogoRedBrush" Color="{StaticResource LogoRedColor}" />
+    <SolidColorBrush x:Key="LogoCyanBrush" Color="{StaticResource LogoCyanColor}" />
+    <SolidColorBrush x:Key="LogoGreyBrush" Color="{StaticResource LogoGreyColor}" />
+
+    <DrawingImage x:Key="LogoMark">
+        <DrawingImage.Drawing>
+            <DrawingGroup>
+
+                <!--
+                    The doodle. Two passes rather than one, because a single clean curve reads as a
+                    drawing rather than a sketch; and two rather than the original's four, because
+                    four overlapping strokes turn into a solid red blob below about 48px.
+                -->
+                <GeometryDrawing Geometry="M 58,32 C 40,3 8,10 9,30 C 10,52 42,54 58,32">
+                    <GeometryDrawing.Pen>
+                        <Pen
+                            Brush="{StaticResource LogoRedBrush}"
+                            EndLineCap="Round"
+                            LineJoin="Round"
+                            StartLineCap="Round"
+                            Thickness="3.4" />
+                    </GeometryDrawing.Pen>
+                </GeometryDrawing>
+
+                <GeometryDrawing Geometry="M 57,34 C 39,9 12,15 13,31 C 14,48 40,50 57,34">
+                    <GeometryDrawing.Pen>
+                        <Pen
+                            Brush="{StaticResource LogoRedBrush}"
+                            EndLineCap="Round"
+                            LineJoin="Round"
+                            StartLineCap="Round"
+                            Thickness="2.2" />
+                    </GeometryDrawing.Pen>
+                </GeometryDrawing>
+
+                <!--  The exact half: a true circular arc, not a curve that merely looks like one.  -->
+                <GeometryDrawing Geometry="M 58,32 A 27,27 0 0 1 112,32">
+                    <GeometryDrawing.Pen>
+                        <Pen
+                            Brush="{StaticResource LogoGreyBrush}"
+                            EndLineCap="Round"
+                            StartLineCap="Round"
+                            Thickness="2.6" />
+                    </GeometryDrawing.Pen>
+                </GeometryDrawing>
+
+                <!--  Its control polygon — the CAD idiom that says "this one is constructed".  -->
+                <GeometryDrawing Geometry="M 58,32 L 85,5 L 112,32">
+                    <GeometryDrawing.Pen>
+                        <Pen
+                            Brush="{StaticResource LogoCyanBrush}"
+                            LineJoin="Round"
+                            Thickness="1.3" />
+                    </GeometryDrawing.Pen>
+                </GeometryDrawing>
+
+                <!--  Control handles, hollow, as an editor shows off-curve points.  -->
+                <GeometryDrawing Geometry="M 85,5 m -2.6,0 a 2.6,2.6 0 1,0 5.2,0 a 2.6,2.6 0 1,0 -5.2,0">
+                    <GeometryDrawing.Pen>
+                        <Pen Brush="{StaticResource LogoCyanBrush}" Thickness="1.3" />
+                    </GeometryDrawing.Pen>
+                </GeometryDrawing>
+
+                <GeometryDrawing Geometry="M 112,32 m -2.6,0 a 2.6,2.6 0 1,0 5.2,0 a 2.6,2.6 0 1,0 -5.2,0">
+                    <GeometryDrawing.Pen>
+                        <Pen Brush="{StaticResource LogoCyanBrush}" Thickness="1.3" />
+                    </GeometryDrawing.Pen>
+                </GeometryDrawing>
+
+                <!--
+                    The join. Filled and solid, because this is the point the whole mark is about:
+                    where the freehand stroke becomes exact geometry. It is also the one element
+                    still legible at 16px.
+                -->
+                <GeometryDrawing Brush="{StaticResource LogoCyanBrush}" Geometry="M 58,27.4 L 62.6,32 L 58,36.6 L 53.4,32 Z" />
+
+            </DrawingGroup>
+        </DrawingImage.Drawing>
+    </DrawingImage>
+
+    <!--
+        The same mark reduced for small sizes — the title bar, the taskbar, Explorer's list view.
+
+        Below about 40px the control polygon and its handle circles are sub-pixel lines that simply
+        disappear, and on a light background the grey arc goes with them; what survives is a red
+        squiggle next to some noise. So this variant drops the construction detail, thickens what
+        is left, and keeps only the three things that still carry the idea at 16px: the loose loop,
+        the exact arc, and the node where one becomes the other. Shipping different artwork per
+        size is what an ICO is for.
+    -->
+    <DrawingImage x:Key="LogoMarkSmall">
+        <DrawingImage.Drawing>
+            <DrawingGroup>
+
+                <GeometryDrawing Geometry="M 58,32 C 40,3 8,10 9,30 C 10,52 42,54 58,32">
+                    <GeometryDrawing.Pen>
+                        <Pen
+                            Brush="{StaticResource LogoRedBrush}"
+                            EndLineCap="Round"
+                            LineJoin="Round"
+                            StartLineCap="Round"
+                            Thickness="7" />
+                    </GeometryDrawing.Pen>
+                </GeometryDrawing>
+
+                <GeometryDrawing Geometry="M 58,32 A 27,27 0 0 1 112,32">
+                    <GeometryDrawing.Pen>
+                        <Pen
+                            Brush="{StaticResource LogoCyanBrush}"
+                            EndLineCap="Round"
+                            StartLineCap="Round"
+                            Thickness="7" />
+                    </GeometryDrawing.Pen>
+                </GeometryDrawing>
+
+            </DrawingGroup>
+        </DrawingImage.Drawing>
+    </DrawingImage>
+
+</ResourceDictionary>

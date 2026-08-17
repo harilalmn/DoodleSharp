@@ -292,6 +292,12 @@ from this fork; a new note takes the next unused number.
 
 85. **`Shape`'s eight animation fields are behind a lazily-allocated `AnimationState`.** Almost nothing in a drawing is animated, but every shape carried five doubles and two references — about 56 bytes — whether or not it ever moved, which on a million-shape document is 56 MB holding nothing but defaults. The properties keep their names, types and defaults, so no caller changed. Reads never allocate; the first write does. Measured after: 400k shapes in a 318 MB working set, index build 173 ms. A clean before-number was not captured, so no improvement figure is claimed.
 
+86. **The logo is vector, in `Assets/Logo.xaml`, and the app never loads a bitmap for it.** It was a 2048px PNG with a dark textured background baked in, drawn at 120px — so it resampled to a blur, and its opaque square sat on the `#252526` welcome panel as a visibly lighter rectangle, which is what made the screen look like a sticker had been stuck to it. As a `DrawingImage` it is sharp at any DPI, genuinely transparent, and costs a few hundred bytes rather than megabytes in the assembly.
+    - **The wordmark is a `TextBlock`, not part of the mark.** Rasterised type at 120px is a grey smear; real type renders with hinting and picks up the theme's font.
+    - **Two variants, and the `.ico` ships different artwork per size.** Below about 40px the control polygon and its handle circles are sub-pixel lines that vanish — and on a light taskbar the grey arc goes with them — leaving a red squiggle beside some noise. `LogoMarkSmall` drops the construction detail and thickens what remains. The icon uses the full mark at 256/128/64/48 and the reduced one at 32/24/16.
+    - **An `.ico` whose directory entry disagrees with its payload is not a build error.** The previous one declared 256×256 while the embedded PNG was 2048×2048, and carried no small frames at all; the build succeeded and it would simply have looked wrong on other machines. If you regenerate it, check the headers against the payloads.
+    - Rendered to PNG/ICO with a throwaway WPF app built **outside** the repository (note 69) — a second `Main()` under the project root breaks the app's build with a duplicate entry point. `img/logo.png` is the README lockup only and is deliberately **not** a `<Resource>`.
+
 ## Keyboard Shortcuts (Key Bindings)
 
 ### File/Run
