@@ -1,0 +1,121 @@
+using System.Collections.Generic;
+
+namespace C2VGeometry;
+
+/// <summary>
+/// Interface for curve shapes that support geometric operations like division, projection, and offset.
+/// </summary>
+public interface ICurve : IDrawable
+{
+    /// <summary>
+    /// Gets the start point of the curve.
+    /// </summary>
+    VXYZ StartPoint { get; }
+
+    /// <summary>
+    /// Gets the end point of the curve.
+    /// For closed curves, this returns the same point as StartPoint.
+    /// </summary>
+    VXYZ EndPoint { get; }
+
+    /// <summary>
+    /// Gets the key vertices/control points of the curve.
+    /// For lines: start and end points.
+    /// For arcs/circles: center and endpoint(s).
+    /// For polygons/polylines: all vertices.
+    /// For beziers/splines: all control points.
+    /// </summary>
+    List<VXYZ> Vertices { get; }
+
+    /// <summary>
+    /// Indicates whether the curve intersects itself.
+    /// Simple curves (Line, Circle, Arc, Ellipse) are never self-intersecting.
+    /// Complex curves (Polyline, Polygon, Bezier, Spline) may be self-intersecting.
+    /// </summary>
+    bool SelfIntersecting { get; }
+
+    /// <summary>
+    /// Divides the curve into the specified number of segments.
+    /// </summary>
+    /// <returns>A list of points including the start and end points.</returns>
+    List<VXYZ> Divide(int numberOfSegments);
+
+    /// <summary>
+    /// Measures points along the curve at fixed intervals.
+    /// </summary>
+    /// <returns>A list of points separated by the specified length.</returns>
+    List<VXYZ> Measure(double segmentLength);
+
+    /// <summary>
+    /// Gets the total length of the curve.
+    /// </summary>
+    double GetLength();
+
+    /// <summary>
+    /// Projects a point onto the curve.
+    /// </summary>
+    VXYZ Project(VXYZ point);
+
+    /// <summary>
+    /// Returns a point at a given distance along the curve from the start.
+    /// </summary>
+    VXYZ PointAtSegmentLength(double segmentLength);
+
+    /// <summary>
+    /// Creates an offset curve at the specified distance.
+    /// </summary>
+    ICurve Offset(double distance);
+
+    /// <summary>
+    /// Creates multiple offset curves at the specified distances.
+    /// </summary>
+    List<ICurve> Offset(List<double> distances);
+
+    /// <summary>
+    /// Finds points on the curve that are at a specific chord length from a given point.
+    /// If the point is not on the curve, it is projected first.
+    /// </summary>
+    List<VXYZ> PointsAtChordLengthFromPoint(VXYZ point, double chordLength);
+
+    /// <summary>
+    /// Splits the curve at the specified point.
+    /// Returns a tuple of two segments.
+    /// </summary>
+    (ICurve, ICurve) SplitAtPoint(VXYZ point);
+
+    /// <summary>
+    /// Calculates the normal vector at a specific point on the curve.
+    /// </summary>
+    VXYZ NormalAtPoint(VXYZ p);
+
+    /// <summary>
+    /// Computes the intersection between this curve and another curve.
+    /// Returns an IntersectionResult containing points and/or overlapping curves.
+    /// </summary>
+    IntersectionResult Intersect(ICurve other);
+
+    /// <summary>
+    /// Returns a point on the curve at the given normalized parameter.
+    /// </summary>
+    /// <param name="parameter">A value from 0 to 1, where 0 is the start and 1 is the end of the curve.</param>
+    /// <returns>The point on the curve at the specified parameter.</returns>
+    VXYZ PointAtParameter(double parameter);
+
+    /// <summary>
+    /// Returns the normalized parameter (0 to 1) for the closest point on the curve to the given point.
+    /// </summary>
+    /// <param name="point">The point to find the parameter for.</param>
+    /// <returns>A value from 0 to 1 representing the position along the curve.</returns>
+    double ParameterAtPoint(VXYZ point);
+
+    /// <summary>
+    /// Trims this curve in place so that its parameter range [<paramref name="startParameter"/>, <paramref name="endParameter"/>]
+    /// becomes the new [0, 1] range. Parameters are clamped to [0, 1]; if startParameter > endParameter they are swapped.
+    /// </summary>
+    /// <remarks>
+    /// Closed curves (VCircle, VPolygon) and infinite curves (VRay, VXLine) throw
+    /// <see cref="NotSupportedException"/> because a trimmed result is no longer the same shape type
+    /// (e.g. a trimmed circle would be an arc). Use <see cref="SplitAtPoint"/> on those types instead.
+    /// </remarks>
+    void SetBounds(double startParameter, double endParameter);
+}

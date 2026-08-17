@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>C2VGeometry</RootNamespace>
+    <AssemblyName>C2VGeometry</AssemblyName>
+    <Description>Standalone 2D geometry library extracted from DoodleSharp. Provides shapes, curves, transformations, and boolean operations without any WPF dependencies.</Description>
+    <Authors>DoodleSharp</Authors>
+    <PackageId>C2VGeometry</PackageId>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Clipper2" Version="2.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- So the test suite can reach non-registering internals (VLine.Internal,
+         Shape.SuspendAutoRegistration) that exist specifically to keep phantom shapes off the
+         canvas — the guards for CLAUDE.md notes 6/10/27 need to assert on them directly. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>DoodleSharp.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+</Project>
