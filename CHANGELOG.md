@@ -10,6 +10,18 @@ tags; this file is the curated, human-friendly summary.
 ## [Unreleased]
 
 ### Added
+- **Dockable panels.** The Canvas, Console, Find Results, Timeline, Explorer, Outliner, Properties and
+  Global Parameters are now tool windows you can drag anywhere: to another edge, into a tab group with
+  another panel, or out onto a second monitor. Guide diamonds appear while you drag to show where a
+  panel will land. Code and Settings became document tabs. The intended arrangement for two screens —
+  code on one, canvas and console on the other — is now just a drag.
+
+  Your arrangement is remembered between sessions, including which monitor a floating panel was on,
+  and **View ▸ Reset Layout (Ctrl+R)** puts everything back. A panel left on a monitor that is no
+  longer attached is brought back onto the desktop rather than stranded off-screen. If a layout ever
+  misbehaves, deleting `%APPDATA%\DoodleSharp\layout.xml` restores the default.
+
+  Reset Layout used to reset only the canvas/console split; it now restores the whole window.
 - **Mouse events for your code** — `Mouse.OnMove`, `OnDown`, `OnUp`, `OnClick`, `OnDoubleClick`,
   `OnDrag`, `OnWheel`, `OnEnter` and `OnLeave` hand the canvas's mouse input to a callback, in the
   style of the browser's `onmousemove(e)`. The event carries the cursor position in world
@@ -47,6 +59,10 @@ tags; this file is the curated, human-friendly summary.
   loops running at once and the motion visibly sped up as it went.
 - Removed the leftover **Show Toolbar** setting, which controlled a drawing toolbar that was replaced
   by the Draw menu and had done nothing since.
+- **Dragging the console divider no longer ignores the timeline**, so the console can no longer be
+  dragged over the canvas's minimum height while the timeline is showing.
+- The floating Properties window used to contain **two overlapping copies** of the panel, one of them
+  permanently blank. It is now an ordinary dockable panel and the duplicate is gone.
 - **F1 Help now lists events.** Every public event was missing from its page and from Help search —
   including `Frame.CallbackFailed` and `GlobalParameters.Changed`, which had written descriptions no
   reader could reach.

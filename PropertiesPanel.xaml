@@ -1,4 +1,4 @@
-<UserControl x:Class="DoodleSharp.PropertiesPanel"
+﻿<UserControl x:Class="DoodleSharp.PropertiesPanel"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -61,15 +61,6 @@
                            Foreground="{StaticResource ForegroundBrush}"
                            Text="PROPERTIES"
                            VerticalAlignment="Center" />
-                <Button x:Name="DockFloatButton"
-                        Grid.Column="1"
-                        Content="Dock"
-                        Padding="8,2"
-                        FontSize="10"
-                        Click="DockFloatButton_Click"
-                        Background="{StaticResource BackgroundBrush}"
-                        Foreground="{StaticResource ForegroundBrush}"
-                        BorderBrush="{StaticResource BorderBrush}" />
             </Grid>
         </Border>
 

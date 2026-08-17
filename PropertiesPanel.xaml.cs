@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -20,15 +20,6 @@ public partial class PropertiesPanel : UserControl
     /// thrash the editor. The single code-sync happens on commit via <see cref="ShapePropertyChanged"/>.
     /// </summary>
     public event EventHandler<ShapePropertyChangedEventArgs>? ShapeLivePreview;
-
-    /// <summary>Raised when the user wants to dock the panel.</summary>
-    public event EventHandler? DockRequested;
-
-    /// <summary>Raised when the user wants to float the panel.</summary>
-    public event EventHandler? FloatRequested;
-
-    /// <summary>Whether this panel is currently docked.</summary>
-    public bool IsDocked { get; set; }
 
     public PropertiesPanel()
     {
@@ -588,20 +579,6 @@ public partial class PropertiesPanel : UserControl
             if (visible) shape.Show(); else shape.Hide();
         }
         RaisePropertyChanged(_selectedShapes[0], "IsVisible");
-    }
-
-    private void DockFloatButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (IsDocked)
-            FloatRequested?.Invoke(this, EventArgs.Empty);
-        else
-            DockRequested?.Invoke(this, EventArgs.Empty);
-    }
-
-    /// <summary>Updates the dock/float button text.</summary>
-    public void UpdateDockFloatButton()
-    {
-        DockFloatButton.Content = IsDocked ? "Float" : "Dock";
     }
 
     private void RaisePropertyChanged(Shape shape, string? propertyName = null, string? oldValue = null)

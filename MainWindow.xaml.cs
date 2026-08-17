@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.RegularExpressions;
 using System.Linq;
 using System.Windows;
@@ -149,7 +149,6 @@ public partial class MainWindow : Window
     private FindReplaceDialog? _findReplaceDialog;
 
     // Properties Panel
-    private PropertiesWindow? _propertiesWindow;
     private PropertiesPanel? _propertiesPanel;
     private bool _suppressAutoUpdate;
 
@@ -173,6 +172,13 @@ public partial class MainWindow : Window
         Journal.RegisterStateProvider("MainWindow", DescribeStateForJournal);
 
         InitializeComponent();
+
+        // Capture the arrangement declared in the XAML before anything touches it. This is what
+        // Reset Layout restores, and taking it from the live tree rather than a second copy on disk
+        // is what stops the default and the markup drifting apart. The ordering is load-bearing:
+        // one Hide() or a restored layout before this line and the "default" is no longer default.
+        _defaultLayoutXml = SerializeLayout();
+        InitializeDockPanels();
 
         VersionText.Text = $"v{UpdateChecker.CurrentVersion}";
 
@@ -269,8 +275,9 @@ public partial class MainWindow : Window
         RenderCanvas.ShowGrid = settings.ShowGrid;
         GridMenuItem.IsChecked = settings.ShowGrid;
 
-        // Apply window visibility settings
-        ApplyWindowVisibilitySettings();
+        // Restore the docking arrangement. Falls back to the XAML default plus the saved visibility
+        // booleans when there is no layout file yet, or when the one on disk cannot be trusted.
+        RestoreLayout();
 
         _ = CheckForUpdatesAsync();
     }
@@ -675,67 +682,34 @@ public partial class MainWindow : Window
         System.Windows.Clipboard.SetText(text);
     }
 
-    private bool _isResizingConsole;
-    private double _consoleSplitterClickOffset;
 
-    private void ConsoleSplitter_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        // Handle double-click to reset layout
-        if (e.ClickCount == 2)
-        {
-            ResetCanvasConsoleLayout();
-            e.Handled = true;
-            return;
-        }
 
-        _isResizingConsole = true;
-        ConsoleRow.MaxHeight = double.PositiveInfinity;
-
-        // Store click offset within the splitter so the grab point stays under the cursor
-        _consoleSplitterClickOffset = e.GetPosition((Border)sender).Y;
-
-        // Switch console to pixel sizing before dragging to prevent layout jumps
-        ConsoleRow.Height = new GridLength(ConsoleRow.ActualHeight);
-        CanvasRow.Height = new GridLength(1, GridUnitType.Star);
-
-        ((Border)sender).CaptureMouse();
-        e.Handled = true;
-    }
-
-    private void ConsoleSplitter_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        if (_isResizingConsole)
-        {
-            _isResizingConsole = false;
-            ((Border)sender).ReleaseMouseCapture();
-            e.Handled = true;
-        }
-    }
-
-    private void ConsoleSplitter_MouseMove(object sender, MouseEventArgs e)
-    {
-        if (_isResizingConsole)
-        {
-            var mouseY = e.GetPosition(CanvasConsoleGrid).Y;
-
-            // Console extends from the drag point to the bottom of the grid
-            var consoleTop = mouseY - _consoleSplitterClickOffset;
-            var newHeight = CanvasConsoleGrid.ActualHeight - consoleTop;
-
-            // Apply min/max constraints
-            var minHeight = 80.0;
-            var maxHeight = CanvasConsoleGrid.ActualHeight - 200; // Keep canvas at least 200px
-            newHeight = Math.Max(minHeight, Math.Min(maxHeight, newHeight));
-
-            ConsoleRow.Height = new GridLength(newHeight);
-
-            e.Handled = true;
-        }
-    }
 
     private void ResetLayout_Click(object sender, RoutedEventArgs e)
     {
-        ResetCanvasConsoleLayout();
+        ResetLayoutToDefault();
+    }
+
+    /// <summary>
+    /// Puts every panel back where it ships — the arrangement captured from the XAML at start-up.
+    ///
+    /// <para>
+    /// Also restores the Ribbon and Minimap, which are not in the DockingManager and so are not
+    /// described by the captured layout. "Reset Layout" means the whole window; leaving the ribbon
+    /// hidden afterwards is the kind of half-measure that reads as a bug.
+    /// </para>
+    /// </summary>
+    private void ResetLayoutToDefault()
+    {
+        ApplyLayoutXml(_defaultLayoutXml);
+
+        ApplicationSettings.Instance.ShowRibbon = true;
+        ApplicationSettings.Instance.ShowMinimap = false;
+        SetRibbonVisibility(true);
+        SetMinimapVisibility(false);
+        ApplicationSettings.Save();
+
+        SetStatus("Layout reset", isError: false);
     }
 
     private void HelpNav_Click(object sender, RoutedEventArgs e)
@@ -754,12 +728,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ResetCanvasConsoleLayout()
-    {
-        // Reset the canvas/console splitter to default 3:1 ratio
-        CanvasRow.Height = new GridLength(3, GridUnitType.Star);
-        ConsoleRow.Height = new GridLength(1, GridUnitType.Star);
-    }
 
     private void Caret_PositionChanged(object? sender, EventArgs e)
     {
@@ -4665,6 +4633,9 @@ public partial class MainWindow : Window
         // Stop auto-save so it can't fire a prompt while the window is closing
         _autoSaveTimer?.Stop();
 
+        // After the prompt, so a cancelled close does not persist a layout the user keeps editing.
+        SaveLayout();
+
         Journal.Info("MW.CLOSED", "Main window teardown complete");
     }
 
@@ -4749,7 +4720,7 @@ public partial class MainWindow : Window
         // Show console tab when running code, unless the user has hidden it via Windows > Console
         if (ShowConsoleMenuItem.IsChecked)
         {
-            ShowConsoleTab();
+            SetPaneVisible("ds.tool.console", true);
         }
 
         try
@@ -5672,14 +5643,171 @@ public partial class MainWindow : Window
 
     #region Windows Menu - Visibility Controls
 
-    private void ShowProjectBrowserMenuItem_Click(object sender, RoutedEventArgs e)
-    {
-        var isVisible = ShowProjectBrowserMenuItem.IsChecked;
-        SetProjectBrowserVisibility(isVisible);
+    /// <summary>
+    /// The dockable panels, keyed by the ContentId their pane carries in the XAML — which is also the
+    /// identity a saved layout refers to.
+    ///
+    /// <para>
+    /// Each entry pairs a pane with its Windows-menu item and any side effect that must follow the
+    /// panel appearing or disappearing. The registry exists so that show/hide has exactly one
+    /// implementation: before docking, nine near-identical <c>Set*Visibility</c> methods each poked a
+    /// Visibility, a splitter, a GridLength and a MinWidth by hand, and the console's checkmark had to
+    /// be re-derived from its tab because the two had drifted apart.
+    /// </para>
+    /// </summary>
+    private readonly Dictionary<string, DockPanelEntry> _dockPanels = new();
 
-        ApplicationSettings.Instance.ShowProjectBrowser = isVisible;
+    /// <summary>
+    /// ContentId to the panel's actual content, which is what a restored layout has to be re-attached
+    /// to — the saved file records the arrangement and the ids, never the controls themselves.
+    /// </summary>
+    private readonly Dictionary<string, object> _dockContent = new();
+
+    private sealed record DockPanelEntry(
+        AvalonDock.Layout.LayoutAnchorable Pane,
+        MenuItem? MenuItem,
+        Action<bool>? OnVisibilityChanged);
+
+    /// <summary>
+    /// Guards the visibility handler while the layout itself is being swapped. Deserializing a layout
+    /// raises IsVisibleChanged for every pane it touches, and reacting to those would overwrite the
+    /// user's saved settings with intermediate states of the restore.
+    /// </summary>
+    private bool _isApplyingLayout;
+
+    /// <summary>
+    /// Wires every dockable panel to its menu item. Called once, from the constructor.
+    ///
+    /// <para>
+    /// The rule that keeps menu and panels in step: a menu click only ever asks the pane to change,
+    /// and the pane's own <c>IsVisibleChanged</c> is the single writer of the checkmark and of the
+    /// persisted setting. Closing a panel with its X button, dragging the last one out of a pane, and
+    /// toggling the menu then all converge on the same code instead of each maintaining the others.
+    /// </para>
+    /// </summary>
+    private void InitializeDockPanels()
+    {
+        Register("ds.tool.canvas", CanvasPane, ShowCanvasMenuItem, visible =>
+        {
+            // Running and drawing both need somewhere to draw.
+            RunButton.IsEnabled = visible;
+            RunMenuItem.IsEnabled = visible;
+            DrawMenu.IsEnabled = visible;
+        });
+
+        Register("ds.tool.console", ConsolePane, ShowConsoleMenuItem);
+        Register("ds.tool.findresults", FindResultsPane, null);
+        Register("ds.tool.timeline", TimelinePane, ShowTimelineMenuItem);
+        Register("ds.tool.projectbrowser", ProjectBrowserPane, ShowProjectBrowserMenuItem);
+        Register("ds.tool.outliner", OutlinerPane, ShowOutlinerMenuItem);
+
+        Register("ds.tool.properties", PropertiesPane, ShowPropertiesMenuItem, visible =>
+        {
+            if (!visible) return;
+            InitializePropertiesPanel();
+            DockedPropertiesContainer.Child = _propertiesPanel;
+            _propertiesPanel?.UpdateSelection(RenderCanvas.SelectionTool.SelectedShapes.ToList());
+        });
+
+        Register("ds.tool.globalparameters", GlobalParametersPane, ShowGlobalParametersMenuItem, visible =>
+        {
+            if (!visible) return;
+            InitializeGlobalParametersPanel();
+            GlobalParamsContainer.Child = _globalParametersPanel;
+            _globalParametersPanel?.Rebuild();
+        });
+
+        void Register(string contentId, AvalonDock.Layout.LayoutAnchorable pane, MenuItem? menuItem,
+                      Action<bool>? onChanged = null)
+        {
+            _dockPanels[contentId] = new DockPanelEntry(pane, menuItem, onChanged);
+            if (pane.Content != null) _dockContent[contentId] = pane.Content;
+            pane.IsVisibleChanged += (_, __) => OnPaneVisibilityChanged(contentId);
+        }
+    }
+
+    /// <summary>
+    /// The single writer of a panel's menu checkmark and persisted visibility. Fires for a menu
+    /// toggle, the pane's own close button, a drag that empties a pane, and a layout restore.
+    /// </summary>
+    private void OnPaneVisibilityChanged(string contentId)
+    {
+        if (_isApplyingLayout) return;
+        if (!_dockPanels.TryGetValue(contentId, out var entry)) return;
+
+        var visible = entry.Pane.IsVisible;
+
+        if (entry.MenuItem != null) entry.MenuItem.IsChecked = visible;
+        entry.OnVisibilityChanged?.Invoke(visible);
+
+        StoreVisibility(contentId, visible);
         ApplicationSettings.Save();
     }
+
+    /// <summary>Shows or hides a panel by ContentId. Hide, never Close — Close is not reversible.</summary>
+    private void SetPaneVisible(string contentId, bool visible)
+    {
+        if (!_dockPanels.TryGetValue(contentId, out var entry)) return;
+
+        if (visible)
+        {
+            entry.Pane.Show();
+            entry.Pane.IsActive = true;
+        }
+        else
+        {
+            // Hide moves the pane to LayoutRoot.Hidden, where it remembers the container it came from
+            // so a later Show() puts it back where it was. Close would remove it from the tree for
+            // good, and its menu item would become a one-way trip.
+            entry.Pane.Hide();
+        }
+    }
+
+    private static void StoreVisibility(string contentId, bool visible)
+    {
+        var settings = ApplicationSettings.Instance;
+        switch (contentId)
+        {
+            case "ds.tool.canvas": settings.ShowCanvas = visible; break;
+            case "ds.tool.console": settings.ShowConsole = visible; break;
+            case "ds.tool.timeline": settings.ShowTimeline = visible; break;
+            case "ds.tool.projectbrowser": settings.ShowProjectBrowser = visible; break;
+            case "ds.tool.outliner": settings.ShowOutliner = visible; break;
+            case "ds.tool.properties": settings.ShowProperties = visible; break;
+            case "ds.tool.globalparameters": settings.ShowGlobalParameters = visible; break;
+        }
+    }
+
+    // ── Menu handlers. Each only asks the pane to change; the pane reports back. ─────────────────
+
+    private void ShowCanvasMenuItem_Click(object sender, RoutedEventArgs e)
+        => SetPaneVisible("ds.tool.canvas", ShowCanvasMenuItem.IsChecked);
+
+    private void ShowConsoleMenuItem_Click(object sender, RoutedEventArgs e)
+        => SetPaneVisible("ds.tool.console", ShowConsoleMenuItem.IsChecked);
+
+    private void ShowTimelineMenuItem_Click(object sender, RoutedEventArgs e)
+        => SetPaneVisible("ds.tool.timeline", ShowTimelineMenuItem.IsChecked);
+
+    private void ShowProjectBrowserMenuItem_Click(object sender, RoutedEventArgs e)
+        => SetPaneVisible("ds.tool.projectbrowser", ShowProjectBrowserMenuItem.IsChecked);
+
+    private void ShowOutlinerMenuItem_Click(object sender, RoutedEventArgs e)
+        => SetPaneVisible("ds.tool.outliner", ShowOutlinerMenuItem.IsChecked);
+
+    private void ShowPropertiesMenuItem_Click(object sender, RoutedEventArgs e)
+        => SetPaneVisible("ds.tool.properties", ShowPropertiesMenuItem.IsChecked);
+
+    private void ShowGlobalParametersMenuItem_Click(object sender, RoutedEventArgs e)
+        => SetPaneVisible("ds.tool.globalparameters", ShowGlobalParametersMenuItem.IsChecked);
+
+    /// <summary>Brings the Find Results panel forward. Called when a search produces results.</summary>
+    private void ShowFindResultsTab() => SetPaneVisible("ds.tool.findresults", true);
+
+    // ── The two panels that are not in the DockingManager ────────────────────────────────────────
+    // The Ribbon is a horizontal command strip and the Minimap is bound to the editor's scroll
+    // position; floating either would be meaningless. Both keep a plain visibility toggle and their
+    // own settings key, which is also why Reset Layout has to restore them separately.
 
     private void ShowRibbonMenuItem_Click(object sender, RoutedEventArgs e)
     {
@@ -5695,338 +5823,282 @@ public partial class MainWindow : Window
         RibbonPanel.Visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void SetProjectBrowserVisibility(bool isVisible)
-    {
-        // Update Project Browser row visibility within the right panel
-        if (isVisible)
-        {
-            // Show Project Browser rows
-            // The grid rows for explorer header and tree will be visible by default
-        }
-
-        // Update right panel visibility based on whether Project Browser OR Outliner is visible
-        UpdateRightPanelVisibility();
-    }
-
-    private void UpdateRightPanelVisibility()
-    {
-        // Right panel is visible if either Project Browser or Outliner is checked
-        var showRightPanel = ShowProjectBrowserMenuItem.IsChecked || ShowOutlinerMenuItem.IsChecked;
-
-        ProjectBrowserPanel.Visibility = showRightPanel ? Visibility.Visible : Visibility.Collapsed;
-        RightPanelSplitter.Visibility = showRightPanel ? Visibility.Visible : Visibility.Collapsed;
-
-        if (showRightPanel)
-        {
-            RightPanelColumn.Width = new GridLength(250);
-            RightPanelColumn.MinWidth = 150;
-        }
-        else
-        {
-            RightPanelColumn.Width = new GridLength(0);
-            RightPanelColumn.MinWidth = 0;
-        }
-
-        // Update internal row heights based on which panels are visible
-        var showProjectBrowser = ShowProjectBrowserMenuItem.IsChecked;
-        var showOutliner = ShowOutlinerMenuItem.IsChecked;
-
-        if (showProjectBrowser && showOutliner)
-        {
-            // Both visible - split space
-            OutlinerSplitterRow.Height = GridLength.Auto;
-            OutlinerSplitter.Visibility = Visibility.Visible;
-            OutlinerHeaderRow.Height = GridLength.Auto;
-            OutlinerHeader.Visibility = Visibility.Visible;
-            OutlinerTreeRow.Height = new GridLength(1, GridUnitType.Star);
-            OutlinerTreeView.Visibility = Visibility.Visible;
-        }
-        else if (showProjectBrowser)
-        {
-            // Only Project Browser - hide outliner rows
-            OutlinerSplitterRow.Height = new GridLength(0);
-            OutlinerSplitter.Visibility = Visibility.Collapsed;
-            OutlinerHeaderRow.Height = new GridLength(0);
-            OutlinerHeader.Visibility = Visibility.Collapsed;
-            OutlinerTreeRow.Height = new GridLength(0);
-            OutlinerTreeView.Visibility = Visibility.Collapsed;
-        }
-        else if (showOutliner)
-        {
-            // Only Outliner - hide project browser, show outliner in full space
-            OutlinerSplitterRow.Height = new GridLength(0);
-            OutlinerSplitter.Visibility = Visibility.Collapsed;
-            OutlinerHeaderRow.Height = GridLength.Auto;
-            OutlinerHeader.Visibility = Visibility.Visible;
-            OutlinerTreeRow.Height = new GridLength(1, GridUnitType.Star);
-            OutlinerTreeView.Visibility = Visibility.Visible;
-        }
-    }
-
-    private void ShowOutlinerMenuItem_Click(object sender, RoutedEventArgs e)
-    {
-        var isVisible = ShowOutlinerMenuItem.IsChecked;
-        SetOutlinerVisibility(isVisible);
-
-        ApplicationSettings.Instance.ShowOutliner = isVisible;
-        ApplicationSettings.Save();
-    }
-
-    private void SetOutlinerVisibility(bool isVisible)
-    {
-        // Update right panel visibility based on whether Project Browser OR Outliner is visible
-        UpdateRightPanelVisibility();
-    }
-
-    private void ShowTimelineMenuItem_Click(object sender, RoutedEventArgs e)
-    {
-        var isVisible = ShowTimelineMenuItem.IsChecked;
-        SetTimelineVisibility(isVisible);
-
-        ApplicationSettings.Instance.ShowTimeline = isVisible;
-        ApplicationSettings.Save();
-    }
-
-    private void SetTimelineVisibility(bool isVisible)
-    {
-        TimelinePanel.Visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
-        TimelineSplitter.Visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
-        TimelineRow.Height = isVisible ? new GridLength(150) : new GridLength(0);
-    }
-
-    private void ShowConsoleMenuItem_Click(object sender, RoutedEventArgs e)
-    {
-        var isVisible = ShowConsoleMenuItem.IsChecked;
-        if (isVisible)
-        {
-            ShowConsoleTab();
-        }
-        else
-        {
-            ConsoleTab.Visibility = Visibility.Collapsed;
-            if (FindResultsTab.Visibility != Visibility.Visible)
-            {
-                SetConsoleVisibility(false);
-            }
-        }
-
-        ApplicationSettings.Instance.ShowConsole = isVisible;
-        ApplicationSettings.Save();
-    }
-
-    private void SetConsoleVisibility(bool isVisible)
-    {
-        bool wasVisible = ConsolePanel.Visibility == Visibility.Visible;
-        ConsolePanel.Visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
-        ShowConsoleMenuItem.IsChecked = isVisible || ConsoleTab.Visibility == Visibility.Visible;
-
-        bool canvasVisible = RenderCanvas.Visibility == Visibility.Visible;
-
-        // Splitter only needed when both canvas and console are visible
-        ConsoleSplitter.Visibility = (isVisible && canvasVisible) ? Visibility.Visible : Visibility.Collapsed;
-
-        if (isVisible)
-        {
-            ConsoleRow.MinHeight = 80;
-
-            // Only reset height when transitioning from hidden to visible,
-            // not when already visible (preserves user's drag-resize)
-            if (!wasVisible)
-            {
-                ConsoleRow.MaxHeight = double.PositiveInfinity;
-                ConsoleRow.Height = new GridLength(1, GridUnitType.Star);
-            }
-        }
-        else
-        {
-            ConsoleRow.Height = new GridLength(0);
-            ConsoleRow.MinHeight = 0;
-            ConsoleRow.MaxHeight = double.PositiveInfinity;
-        }
-
-        UpdateCanvasConsoleColumn();
-    }
-
-    // When both canvas and console are hidden, collapse their shared column so the
-    // code editor expands to fill the freed width; restore the column otherwise.
-    private void UpdateCanvasConsoleColumn()
-    {
-        bool canvasVisible = RenderCanvas.Visibility == Visibility.Visible;
-        bool consoleVisible = ConsolePanel.Visibility == Visibility.Visible;
-        bool anyVisible = canvasVisible || consoleVisible;
-
-        if (anyVisible)
-        {
-            if (CanvasConsoleColumn.MinWidth == 0)
-            {
-                CanvasConsoleColumn.MinWidth = 200;
-                CanvasConsoleColumn.Width = new GridLength(1, GridUnitType.Star);
-            }
-            CodeEditorSplitter.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            CanvasConsoleColumn.MinWidth = 0;
-            CanvasConsoleColumn.Width = new GridLength(0);
-            CodeEditorSplitter.Visibility = Visibility.Collapsed;
-        }
-    }
-
-    private void ShowConsoleTab()
-    {
-        ConsoleTab.Visibility = Visibility.Visible;
-        BottomTabControl.SelectedItem = ConsoleTab;
-        SetConsoleVisibility(true);
-        ShowConsoleMenuItem.IsChecked = true;
-    }
-
-    private void ShowFindResultsTab()
-    {
-        FindResultsTab.Visibility = Visibility.Visible;
-        BottomTabControl.SelectedItem = FindResultsTab;
-        SetConsoleVisibility(true);
-    }
-
-    private void CloseConsoleTab_Click(object sender, RoutedEventArgs e)
-    {
-        ConsoleTab.Visibility = Visibility.Collapsed;
-        ShowConsoleMenuItem.IsChecked = false;
-
-        // If Find Results tab is visible, switch to it
-        if (FindResultsTab.Visibility == Visibility.Visible)
-        {
-            BottomTabControl.SelectedItem = FindResultsTab;
-        }
-        else
-        {
-            // Both tabs hidden, hide the entire panel
-            SetConsoleVisibility(false);
-        }
-    }
-
-    private void CloseFindResultsTab_Click(object sender, RoutedEventArgs e)
-    {
-        FindResultsTab.Visibility = Visibility.Collapsed;
-
-        // If Console tab is visible, switch to it
-        if (ConsoleTab.Visibility == Visibility.Visible)
-        {
-            BottomTabControl.SelectedItem = ConsoleTab;
-        }
-        else
-        {
-            // Both tabs hidden, hide the entire panel
-            SetConsoleVisibility(false);
-        }
-    }
-
-    private void ShowCanvasMenuItem_Click(object sender, RoutedEventArgs e)
-    {
-        var isVisible = ShowCanvasMenuItem.IsChecked;
-        SetCanvasVisibility(isVisible);
-
-        ApplicationSettings.Instance.ShowCanvas = isVisible;
-        ApplicationSettings.Save();
-    }
-
-    private void SetCanvasVisibility(bool isVisible)
-    {
-        RenderCanvas.Visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
-
-        bool consoleVisible = ConsolePanel.Visibility == Visibility.Visible;
-
-        // Splitter only needed when both canvas and console are visible
-        ConsoleSplitter.Visibility = (isVisible && consoleVisible) ? Visibility.Visible : Visibility.Collapsed;
-
-        if (isVisible)
-        {
-            CanvasRow.Height = new GridLength(3, GridUnitType.Star);
-            CanvasRow.MinHeight = 200;
-
-            if (consoleVisible)
-            {
-                // Both visible: use star sizing, let drag handle control bounds
-                ConsoleRow.Height = new GridLength(1, GridUnitType.Star);
-                ConsoleRow.MaxHeight = double.PositiveInfinity;
-            }
-        }
-        else
-        {
-            CanvasRow.Height = new GridLength(0);
-            CanvasRow.MinHeight = 0;
-
-            if (consoleVisible)
-            {
-                // Only console visible: let it take full height
-                ConsoleRow.Height = new GridLength(1, GridUnitType.Star);
-                ConsoleRow.MaxHeight = double.PositiveInfinity;
-            }
-        }
-
-        // Disable Run and Draw when canvas is not visible
-        RunButton.IsEnabled = isVisible;
-        RunMenuItem.IsEnabled = isVisible;
-        DrawMenu.IsEnabled = isVisible;
-
-        UpdateCanvasConsoleColumn();
-    }
-
+    /// <summary>
+    /// Applies the saved panel visibility at start-up, for the case where there is no layout to
+    /// restore from — a first run, or a layout file that was rejected.
+    /// </summary>
     private void ApplyWindowVisibilitySettings()
     {
-        // Apply saved settings on startup
         var settings = ApplicationSettings.Instance;
+
+        SetPaneVisible("ds.tool.canvas", settings.ShowCanvas);
+        SetPaneVisible("ds.tool.console", settings.ShowConsole);
+        SetPaneVisible("ds.tool.findresults", false);
+        SetPaneVisible("ds.tool.timeline", settings.ShowTimeline);
+        SetPaneVisible("ds.tool.projectbrowser", settings.ShowProjectBrowser);
+        SetPaneVisible("ds.tool.outliner", settings.ShowOutliner);
+        SetPaneVisible("ds.tool.properties", settings.ShowProperties);
+        SetPaneVisible("ds.tool.globalparameters", settings.ShowGlobalParameters);
 
         ShowRibbonMenuItem.IsChecked = settings.ShowRibbon;
         SetRibbonVisibility(settings.ShowRibbon);
 
-        ShowProjectBrowserMenuItem.IsChecked = settings.ShowProjectBrowser;
-        SetProjectBrowserVisibility(settings.ShowProjectBrowser);
-
-        ShowOutlinerMenuItem.IsChecked = settings.ShowOutliner;
-        SetOutlinerVisibility(settings.ShowOutliner);
-
-        ShowTimelineMenuItem.IsChecked = settings.ShowTimeline;
-        SetTimelineVisibility(settings.ShowTimeline);
-
-        // Toolbar has been removed
-
-        // Console visibility
-        ShowConsoleMenuItem.IsChecked = settings.ShowConsole;
-        if (settings.ShowConsole)
-        {
-            ShowConsoleTab();
-        }
-        else
-        {
-            // Collapse the tab before hiding the panel; SetConsoleVisibility re-evaluates
-            // IsChecked from ConsoleTab.Visibility (XAML default is Visible) and would
-            // otherwise leave the menu showing checked even though the panel is hidden.
-            ConsoleTab.Visibility = Visibility.Collapsed;
-            SetConsoleVisibility(false);
-        }
-
-        ShowCanvasMenuItem.IsChecked = settings.ShowCanvas;
-        SetCanvasVisibility(settings.ShowCanvas);
-
-        // Properties panel
-        ShowPropertiesMenuItem.IsChecked = settings.ShowProperties;
-        if (settings.ShowProperties)
-        {
-            InitializePropertiesPanel();
-            SetPropertiesVisibility(true, settings.PropertiesDocked);
-        }
-
-        // Global Parameters panel
-        ShowGlobalParametersMenuItem.IsChecked = settings.ShowGlobalParameters;
-        if (settings.ShowGlobalParameters)
-        {
-            InitializeGlobalParametersPanel();
-            SetGlobalParametersVisibility(true);
-        }
-
-        // Minimap
         ShowMinimapMenuItem.IsChecked = settings.ShowMinimap;
         SetMinimapVisibility(settings.ShowMinimap);
+    }
+
+    #endregion
+
+    #region Docking layout persistence
+
+    /// <summary>
+    /// The arrangement declared in the XAML, captured in the constructor before anything mutates it.
+    /// Reset Layout restores this.
+    /// </summary>
+    private string _defaultLayoutXml = string.Empty;
+
+    private static string LayoutFilePath => System.IO.Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "DoodleSharp", "layout.xml");
+
+    /// <summary>
+    /// Serializes the current arrangement.
+    ///
+    /// <para>
+    /// AvalonDock 5 dropped the old <c>XmlLayoutSerializer</c> in favour of a DTO: the layout maps to
+    /// a plain object graph, and how that graph reaches disk is the host's business. The DTO carries
+    /// <c>[XmlRoot]</c>, so <see cref="System.Xml.Serialization.XmlSerializer"/> is the intended
+    /// pairing — and the result stays human-readable, which matters for a file users may need to
+    /// delete or send in with a bug report.
+    /// </para>
+    /// </summary>
+    private string SerializeLayout()
+    {
+        var dto = new AvalonDock.Serialization.LayoutDtoMapper().ToDto(Dock.Layout);
+
+        var serializer = new System.Xml.Serialization.XmlSerializer(dto.GetType());
+        using var writer = new System.IO.StringWriter();
+        serializer.Serialize(writer, dto);
+        return writer.ToString();
+    }
+
+    /// <summary>
+    /// Replaces the current arrangement. Used by both the start-up restore and Reset Layout, so the
+    /// two cannot drift apart.
+    /// </summary>
+    private void ApplyLayoutXml(string layoutXml)
+    {
+        if (string.IsNullOrWhiteSpace(layoutXml)) return;
+
+        _isApplyingLayout = true;
+        try
+        {
+            var serializer = new System.Xml.Serialization.XmlSerializer(
+                typeof(AvalonDock.Core.Serialization.Dto.LayoutRootDto));
+
+            using var reader = new System.IO.StringReader(layoutXml);
+            var dto = (AvalonDock.Core.Serialization.Dto.LayoutRootDto)serializer.Deserialize(reader)!;
+
+            var restored = (AvalonDock.Layout.LayoutRoot)new AvalonDock.Serialization.LayoutDtoMapper().FromDto(dto);
+
+            Dock.Layout = restored;
+
+            ReattachPanelContent();
+            RestoreMissingPanels();
+            Dock.Layout.CollectGarbage();
+            RecoverOffScreenFloatingPanels();
+        }
+        finally
+        {
+            _isApplyingLayout = false;
+        }
+
+        // The panes settled while the guard was up, so bring the menu back into step in one pass.
+        foreach (var contentId in _dockPanels.Keys.ToList())
+            OnPaneVisibilityChanged(contentId);
+    }
+
+    /// <summary>
+    /// Puts the real controls back into the restored panes.
+    ///
+    /// <para>
+    /// A serialized layout records the arrangement and each pane's ContentId — never the controls,
+    /// which cannot be serialized and in any case must remain the same instances the code-behind
+    /// holds by name. So every restored pane comes back empty and is matched to its content here.
+    /// A pane whose id this version no longer knows keeps no content and is dropped by the caller's
+    /// <c>CollectGarbage</c>, rather than being restored as an empty panel.
+    /// </para>
+    /// </summary>
+    private void ReattachPanelContent()
+    {
+        foreach (var content in AvalonDock.Layout.Extensions.Descendents(Dock.Layout).OfType<AvalonDock.Layout.LayoutContent>())
+        {
+            if (content.ContentId is string id && _dockContent.TryGetValue(id, out var control))
+                content.Content = control;
+        }
+
+        // Hidden anchorables live outside the visual tree walk above, but must still be re-attached
+        // or showing one from the Windows menu would produce an empty panel.
+        foreach (var hidden in Dock.Layout.Hidden)
+        {
+            if (hidden.ContentId is string id && _dockContent.TryGetValue(id, out var control))
+                hidden.Content = control;
+        }
+
+        // The registry's pane references now point at the previous layout's objects, so rebuild the
+        // map against the restored tree; otherwise every menu toggle would act on a detached pane.
+        RebindPanesAfterRestore();
+    }
+
+    /// <summary>Re-points the panel registry at the panes belonging to the layout just restored.</summary>
+    private void RebindPanesAfterRestore()
+    {
+        var byId = AvalonDock.Layout.Extensions.Descendents(Dock.Layout)
+            .OfType<AvalonDock.Layout.LayoutAnchorable>()
+            .Concat(Dock.Layout.Hidden)
+            .Where(a => a.ContentId != null)
+            .GroupBy(a => a.ContentId!)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        foreach (var (contentId, entry) in _dockPanels.ToList())
+        {
+            if (!byId.TryGetValue(contentId, out var pane) || ReferenceEquals(pane, entry.Pane)) continue;
+
+            _dockPanels[contentId] = entry with { Pane = pane };
+            pane.IsVisibleChanged += (_, __) => OnPaneVisibilityChanged(contentId);
+        }
+    }
+
+    /// <summary>
+    /// Re-inserts any registered panel the restored layout does not mention, hidden. Without this a
+    /// panel added after a layout was saved simply would not exist, and its menu entry would be inert.
+    /// </summary>
+    private void RestoreMissingPanels()
+    {
+        var present = AvalonDock.Layout.Extensions.Descendents(Dock.Layout)
+            .OfType<AvalonDock.Layout.LayoutAnchorable>()
+            .Concat(Dock.Layout.Hidden)
+            .Select(a => a.ContentId)
+            .Where(id => id != null)
+            .Select(id => id!);
+
+        foreach (var id in Docking.LayoutFile.FindMissingIds(_dockPanels.Keys, present))
+        {
+            if (!_dockPanels.TryGetValue(id, out var entry)) continue;
+
+            try
+            {
+                Dock.Layout.Hidden.Add(entry.Pane);
+            }
+            catch (Exception ex)
+            {
+                Journal.Warn("MW.LAYOUT.PANELADD",
+                    "Could not re-insert a panel missing from the saved layout",
+                    $"contentId={id} error={ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Brings back any floating panel whose saved position is off the current desktop — the case where
+    /// a layout was saved across two monitors and reopened on one.
+    /// </summary>
+    private void RecoverOffScreenFloatingPanels()
+    {
+        var desktop = Docking.ScreenBounds.VirtualScreen;
+
+        foreach (var window in Dock.Layout.FloatingWindows.ToList())
+        {
+            // Position lives on the positionable group that roots the floating window.
+            if (window is not AvalonDock.Layout.LayoutAnchorableFloatingWindow { RootPanel: { } panel }) continue;
+
+            var current = new Rect(panel.FloatingLeft, panel.FloatingTop,
+                                   panel.FloatingWidth, panel.FloatingHeight);
+
+            var corrected = Docking.ScreenBounds.ClampToVirtualScreen(current, desktop);
+            if (corrected == current) continue;
+
+            panel.FloatingLeft = corrected.Left;
+            panel.FloatingTop = corrected.Top;
+            panel.FloatingWidth = corrected.Width;
+            panel.FloatingHeight = corrected.Height;
+
+            Journal.Info("MW.LAYOUT.RECOVER",
+                "Moved an off-screen floating panel back onto the desktop",
+                $"from={current} to={corrected} desktop={desktop}");
+        }
+    }
+
+    /// <summary>
+    /// Restores the saved arrangement, falling back to the XAML default whenever the file cannot be
+    /// trusted. Falling back costs nothing: the default is already loaded, so it just means not
+    /// deserializing.
+    /// </summary>
+    private void RestoreLayout()
+    {
+        string? saved = null;
+        try
+        {
+            if (System.IO.File.Exists(LayoutFilePath))
+                saved = Docking.LayoutFile.Unwrap(System.IO.File.ReadAllText(LayoutFilePath));
+        }
+        catch (Exception ex)
+        {
+            Journal.Warn("MW.LAYOUT.READ", "Could not read the saved layout", ex.Message);
+        }
+
+        if (saved == null)
+        {
+            // No layout, or one this version will not accept. The visibility booleans are still
+            // meaningful, so honour those on top of the default arrangement.
+            ApplyWindowVisibilitySettings();
+            return;
+        }
+
+        try
+        {
+            ApplyLayoutXml(saved);
+        }
+        catch (Exception ex)
+        {
+            Journal.Warn("MW.LAYOUT.RESTORE", "Saved layout could not be applied; using the default",
+                ex.Message);
+            TryQuarantineLayoutFile();
+            ApplyLayoutXml(_defaultLayoutXml);
+            ApplyWindowVisibilitySettings();
+        }
+    }
+
+    /// <summary>Persists the arrangement. Called once, from the close path.</summary>
+    private void SaveLayout()
+    {
+        try
+        {
+            var dir = System.IO.Path.GetDirectoryName(LayoutFilePath);
+            if (dir != null) System.IO.Directory.CreateDirectory(dir);
+
+            System.IO.File.WriteAllText(LayoutFilePath,
+                Docking.LayoutFile.Wrap(SerializeLayout(), UpdateChecker.CurrentVersion?.ToString() ?? ""));
+        }
+        catch (Exception ex)
+        {
+            // A layout is a convenience; failing to save one must never obstruct shutdown.
+            Journal.Warn("MW.LAYOUT.SAVE", "Could not save the layout", ex.Message);
+        }
+    }
+
+    /// <summary>Keeps a rejected layout file around once, so a bug report can show what went wrong.</summary>
+    private static void TryQuarantineLayoutFile()
+    {
+        try
+        {
+            System.IO.File.Copy(LayoutFilePath,
+                System.IO.Path.ChangeExtension(LayoutFilePath, ".bad.xml"), overwrite: true);
+        }
+        catch
+        {
+            // Best effort only.
+        }
     }
 
     #endregion
@@ -6264,41 +6336,7 @@ public partial class MainWindow : Window
         return null;
     }
 
-    private void ShowGlobalParametersMenuItem_Click(object sender, RoutedEventArgs e)
-    {
-        var isVisible = ShowGlobalParametersMenuItem.IsChecked;
 
-        if (isVisible) InitializeGlobalParametersPanel();
-        SetGlobalParametersVisibility(isVisible);
-
-        ApplicationSettings.Instance.ShowGlobalParameters = isVisible;
-        ApplicationSettings.Save();
-    }
-
-    private void SetGlobalParametersVisibility(bool isVisible)
-    {
-        if (isVisible && _globalParametersPanel != null)
-        {
-            GlobalParamsContainer.Child = _globalParametersPanel;
-            GlobalParamsContainer.Visibility = Visibility.Visible;
-            GlobalParamsSplitter.Visibility = Visibility.Visible;
-            GlobalParamsSplitterColumn.Width = new GridLength(4);
-            GlobalParamsColumn.Width = new GridLength(300);
-            GlobalParamsColumn.MinWidth = 220;
-            _globalParametersPanel.Rebuild();
-        }
-        else
-        {
-            GlobalParamsContainer.Child = null;
-            GlobalParamsContainer.Visibility = Visibility.Collapsed;
-            GlobalParamsSplitter.Visibility = Visibility.Collapsed;
-            GlobalParamsSplitterColumn.Width = new GridLength(0);
-            GlobalParamsColumn.Width = new GridLength(0);
-            GlobalParamsColumn.MinWidth = 0;
-        }
-
-        ShowGlobalParametersMenuItem.IsChecked = isVisible;
-    }
 
     #endregion
 
@@ -6312,8 +6350,6 @@ public partial class MainWindow : Window
         _propertiesPanel.ShapePropertyChanged += OnPropertiesPanelPropertyChanged;
         // Flex-slider drag: redraw the canvas only (no source-code sync) so dragging stays smooth.
         _propertiesPanel.ShapeLivePreview += (_, __) => RenderCanvas.Refresh();
-        _propertiesPanel.DockRequested += OnPropertiesPanelDockRequested;
-        _propertiesPanel.FloatRequested += OnPropertiesPanelFloatRequested;
     }
 
     #region Interactive mode (user Mouse handlers)
@@ -6359,7 +6395,7 @@ public partial class MainWindow : Window
             // Drop any selection made before the run so no stale handles are left on screen and the
             // outliner does not keep reporting a selection the canvas will not honour.
             RenderCanvas.SelectionTool.ClearSelection();
-            SetPropertiesVisibility(false, ApplicationSettings.Instance.PropertiesDocked);
+            SetPaneVisible("ds.tool.properties", false);
 
             // Deliberately not persisted: this is a temporary consequence of the running project, not
             // a preference. Leaving ShowProperties alone means the panel comes back by itself when the
@@ -6368,8 +6404,7 @@ public partial class MainWindow : Window
         }
         else if (ApplicationSettings.Instance.ShowProperties)
         {
-            InitializePropertiesPanel();
-            SetPropertiesVisibility(true, ApplicationSettings.Instance.PropertiesDocked);
+            SetPaneVisible("ds.tool.properties", true);
         }
 
         RenderCanvas.Refresh();
@@ -6399,120 +6434,10 @@ public partial class MainWindow : Window
 
     #endregion
 
-    private void ShowPropertiesMenuItem_Click(object sender, RoutedEventArgs e)
-    {
-        var isVisible = ShowPropertiesMenuItem.IsChecked;
 
-        if (isVisible)
-        {
-            InitializePropertiesPanel();
-            SetPropertiesVisibility(true, ApplicationSettings.Instance.PropertiesDocked);
-        }
-        else
-        {
-            SetPropertiesVisibility(false, ApplicationSettings.Instance.PropertiesDocked);
-        }
 
-        ApplicationSettings.Instance.ShowProperties = isVisible;
-        ApplicationSettings.Save();
-    }
 
-    private void SetPropertiesVisibility(bool isVisible, bool docked)
-    {
-        if (_propertiesPanel == null) return;
 
-        if (!isVisible)
-        {
-            // Hide everything
-            if (_propertiesWindow != null)
-                _propertiesWindow.Hide();
-            UndockPropertiesPanel();
-            ShowPropertiesMenuItem.IsChecked = false;
-            return;
-        }
-
-        ShowPropertiesMenuItem.IsChecked = true;
-
-        if (docked)
-        {
-            DockPropertiesPanel();
-        }
-        else
-        {
-            FloatPropertiesPanel();
-        }
-
-        // Update selection in panel
-        _propertiesPanel.UpdateSelection(RenderCanvas.SelectionTool.SelectedShapes.ToList());
-    }
-
-    private void DockPropertiesPanel()
-    {
-        if (_propertiesPanel == null) return;
-
-        // Remove from floating window if present
-        if (_propertiesWindow != null)
-        {
-            _propertiesWindow.Hide();
-            var grid = (System.Windows.Controls.Grid)_propertiesWindow.Content;
-            grid.Children.Remove(_propertiesPanel);
-        }
-
-        // Add to docked container
-        DockedPropertiesContainer.Child = _propertiesPanel;
-        DockedPropertiesContainer.Visibility = Visibility.Visible;
-        PropertiesSplitter.Visibility = Visibility.Visible;
-        PropertiesSplitterColumn.Width = new GridLength(4);
-        PropertiesColumn.Width = new GridLength(280);
-        PropertiesColumn.MinWidth = 200;
-
-        _propertiesPanel.IsDocked = true;
-        _propertiesPanel.UpdateDockFloatButton();
-
-        ApplicationSettings.Instance.PropertiesDocked = true;
-        ApplicationSettings.Save();
-    }
-
-    private void UndockPropertiesPanel()
-    {
-        DockedPropertiesContainer.Child = null;
-        DockedPropertiesContainer.Visibility = Visibility.Collapsed;
-        PropertiesSplitter.Visibility = Visibility.Collapsed;
-        PropertiesSplitterColumn.Width = new GridLength(0);
-        PropertiesColumn.Width = new GridLength(0);
-        PropertiesColumn.MinWidth = 0;
-    }
-
-    private void FloatPropertiesPanel()
-    {
-        if (_propertiesPanel == null) return;
-
-        // Remove from docked container if present
-        UndockPropertiesPanel();
-
-        // Create floating window if needed
-        if (_propertiesWindow == null)
-        {
-            _propertiesWindow = new PropertiesWindow { Owner = this };
-            // Position to the right of the main window
-            _propertiesWindow.Left = Left + Width - 20;
-            _propertiesWindow.Top = Top + 100;
-        }
-
-        // Set panel into window
-        var grid = (System.Windows.Controls.Grid)_propertiesWindow.Content;
-        if (!grid.Children.Contains(_propertiesPanel))
-        {
-            grid.Children.Add(_propertiesPanel);
-        }
-
-        _propertiesPanel.IsDocked = false;
-        _propertiesPanel.UpdateDockFloatButton();
-        _propertiesWindow.Show();
-
-        ApplicationSettings.Instance.PropertiesDocked = false;
-        ApplicationSettings.Save();
-    }
 
     private void OnPropertiesPanelPropertyChanged(object? sender, ShapePropertyChangedEventArgs e)
     {
@@ -6593,15 +6518,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnPropertiesPanelDockRequested(object? sender, EventArgs e)
-    {
-        DockPropertiesPanel();
-    }
 
-    private void OnPropertiesPanelFloatRequested(object? sender, EventArgs e)
-    {
-        FloatPropertiesPanel();
-    }
 
     #endregion
 
@@ -6951,7 +6868,7 @@ public partial class MainWindow : Window
                     e.Handled = true;
                     break;
                 case Key.R:
-                    ResetCanvasConsoleLayout();
+                    ResetLayoutToDefault();
                     e.Handled = true;
                     break;
                 case Key.D:
@@ -10654,11 +10571,8 @@ public class {typeName}
         Console.ConsoleOutput.Instance.AddEntry(new string('-', 50));
         Console.ConsoleOutput.Instance.AddEntry("Double-click to navigate to reference");
 
-        // Ensure console panel is visible
-        if (ConsoleRow.Height.Value < 0.5)
-        {
-            ConsoleRow.Height = new GridLength(1, GridUnitType.Star);
-        }
+        // Make sure the results are actually on screen.
+        SetPaneVisible("ds.tool.console", true);
     }
 
     private void NavigateToLocation(string filePath, int line, int column)
@@ -11864,9 +11778,7 @@ public class {typeName}
         if (DoodleSharp.Sketching.SketchRuntime.Instance.IsRunning)
         {
             AnimationControlsPanel.Visibility = Visibility.Visible;
-            TimelinePanel.Visibility = Visibility.Collapsed;
-            TimelineSplitter.Visibility = Visibility.Collapsed;
-            TimelineRow.Height = new GridLength(0);
+            SetPaneVisible("ds.tool.timeline", false);
             TimeDisplay.Text = $"frame {DoodleSharp.Sketching.SketchRuntime.Instance.Active?.FrameCount ?? 0}";
             PlayPauseBtn.Content = "⏸"; // pause symbol — clicking it triggers the existing Stop path
             return;
@@ -11882,9 +11794,7 @@ public class {typeName}
             bool userWantsTimeline = ShowTimelineMenuItem.IsChecked;
             if (userWantsTimeline)
             {
-                TimelinePanel.Visibility = Visibility.Visible;
-                TimelineSplitter.Visibility = Visibility.Visible;
-                TimelineRow.Height = new GridLength(120);
+                SetPaneVisible("ds.tool.timeline", true);
             }
 
             // Update time display
@@ -11917,9 +11827,7 @@ public class {typeName}
         else
         {
             AnimationControlsPanel.Visibility = Visibility.Collapsed;
-            TimelinePanel.Visibility = Visibility.Collapsed;
-            TimelineSplitter.Visibility = Visibility.Collapsed;
-            TimelineRow.Height = new GridLength(0);
+            SetPaneVisible("ds.tool.timeline", false);
             _isPaused = false;
 
             if (_lastTimeline != null)
