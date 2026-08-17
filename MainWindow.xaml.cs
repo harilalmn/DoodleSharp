@@ -4111,6 +4111,16 @@ public partial class MainWindow : Window
         SettingsLineWeightModeCombo.SelectedIndex = appSettings.LineWeightRelativeToZoom ? 1 : 0;
         SettingsLineTypeScaleModeCombo.SelectedIndex = appSettings.LineTypeScaleRelativeToZoom ? 1 : 0;
 
+        // Render backend. An unrecognised value in the settings file behaves as Auto, matching
+        // ShouldUseRasterBackend, rather than leaving the combo blank.
+        SettingsRenderBackendCombo.SelectedIndex = appSettings.RenderBackend?.Trim().ToLowerInvariant() switch
+        {
+            "legacy" => 1,
+            "managed" => 2,
+            "gpu" => 3,
+            _ => 0,
+        };
+
         // Update Button colors for Project Settings
         UpdateColorButton(SettingsColorBtn, SettingsColorBox.Text);
         UpdateColorButton(SettingsFillColorBtn, SettingsFillColorBox.Text);
@@ -4344,6 +4354,28 @@ public partial class MainWindow : Window
         settings.LineWeightRelativeToZoom = SettingsLineWeightModeCombo.SelectedIndex == 1;
         settings.LineTypeScaleRelativeToZoom = SettingsLineTypeScaleModeCombo.SelectedIndex == 1;
         ApplicationSettings.Save();
+        RenderCanvas.Refresh();
+    }
+
+    /// <summary>
+    /// The render backend had no UI at all — it was reachable only by hand-editing
+    /// <c>appsettings.json</c>, which is not a setting a user can be expected to discover.
+    /// </summary>
+    private void SettingsRenderBackendCombo_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        // Fires during InitializeComponent, before the control field is assigned.
+        if (_loadingSettings || SettingsRenderBackendCombo == null) return;
+
+        ApplicationSettings.Instance.RenderBackend = SettingsRenderBackendCombo.SelectedIndex switch
+        {
+            1 => "Legacy",
+            2 => "Managed",
+            3 => "GPU",
+            _ => "Auto",
+        };
+        ApplicationSettings.Save();
+
+        // A backend switch changes layer ordering, so the whole scene has to be rebuilt.
         RenderCanvas.Refresh();
     }
 
@@ -4928,6 +4960,10 @@ public partial class MainWindow : Window
         bool wasGridShown = RenderCanvas.ShowGrid;
         var originalBackground = RenderCanvas.CanvasBackground;
 
+        // The overlay layer is a visual child of the canvas and every capture below renders the
+        // canvas, so without this the F10 readout and any selection handles land in the PNG.
+        using var overlayOff = RenderCanvas.SuppressOverlayForCapture();
+
         try
         {
             // Apply export settings
@@ -5195,6 +5231,9 @@ public partial class MainWindow : Window
         var originalBackground = RenderCanvas.CanvasBackground;
         bool wasPlaying = timeline.IsPlaying;
 
+        // Keep the F10 readout and selection handles out of every captured frame.
+        using var overlayOff = RenderCanvas.SuppressOverlayForCapture();
+
         try
         {
             // Apply export settings
@@ -5319,6 +5358,9 @@ public partial class MainWindow : Window
         bool wasGridShown = RenderCanvas.ShowGrid;
         var originalBackground = RenderCanvas.CanvasBackground;
         bool wasPlaying = timeline.IsPlaying;
+
+        // Keep the F10 readout and selection handles out of every captured frame.
+        using var overlayOff = RenderCanvas.SuppressOverlayForCapture();
 
         try
         {

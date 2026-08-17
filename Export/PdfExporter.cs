@@ -451,25 +451,31 @@ public class PdfExporter
         // Draw main line
         gfx.DrawLine(pen, arrow.Start.X, arrow.Start.Y, arrow.End.X, arrow.End.Y);
 
-        // Draw arrowhead
-        double dx = arrow.End.X - arrow.Start.X;
-        double dy = arrow.End.Y - arrow.Start.Y;
-        double length = Math.Sqrt(dx * dx + dy * dy);
+        // Arrowhead geometry comes from VArrow, the one place it is defined, so a PDF matches what
+        // was on screen. This used to compute its own wings AND clamp the head to 20% of the shaft
+        // length, so a short arrow exported with a smaller head than it was drawn with; it also
+        // ignored DoubleEnded, silently dropping the second head.
+        DrawArrowHead(gfx, arrow, arrow.End, arrow.Start, pen);
+        if (arrow.DoubleEnded)
+            DrawArrowHead(gfx, arrow, arrow.Start, arrow.End, pen);
+    }
 
-        if (length > 0)
-        {
-            double headSize = Math.Min(length * 0.2, arrow.HeadLength);
-            double angle = Math.Atan2(dy, dx);
-            double headAngleRad = arrow.HeadAngle * Math.PI / 180;
+    private void DrawArrowHead(XGraphics gfx, VArrow arrow, VXYZ tip, VXYZ from, XPen pen)
+    {
+        var (wing1, wing2) = arrow.GetArrowheadPoints(tip, from);
+        if (wing1.IsAlmostEqualTo(tip) && wing2.IsAlmostEqualTo(tip)) return;
 
-            double x1 = arrow.End.X - headSize * Math.Cos(angle - headAngleRad);
-            double y1 = arrow.End.Y - headSize * Math.Sin(angle - headAngleRad);
-            double x2 = arrow.End.X - headSize * Math.Cos(angle + headAngleRad);
-            double y2 = arrow.End.Y - headSize * Math.Sin(angle + headAngleRad);
-
-            gfx.DrawLine(pen, arrow.End.X, arrow.End.Y, x1, y1);
-            gfx.DrawLine(pen, arrow.End.X, arrow.End.Y, x2, y2);
-        }
+        // Filled in the STROKE colour, matching RenderCanvas.DrawArrow, SvgExporter and this
+        // exporter's own DrawDimensionArrowhead. Stroking the three edges instead would make an
+        // arrow's head hollow in a PDF while a dimension's head on the same page was solid.
+        // XGraphicsPath rather than DrawPolygon: reliable under the Y-flipped transform.
+        var path = new XGraphicsPath();
+        path.AddPolygon([
+            new XPoint(tip.X, tip.Y),
+            new XPoint(wing1.X, wing1.Y),
+            new XPoint(wing2.X, wing2.Y),
+        ]);
+        gfx.DrawPath(new XSolidBrush(ParseColor(arrow.Color)), path);
     }
 
     private void DrawText(XGraphics gfx, VText text)
@@ -649,24 +655,15 @@ public class PdfExporter
 
     private static void DrawDimensionArrowhead(XGraphics gfx, XBrush brush, VXYZ tipPoint, VXYZ tailPoint, double arrowSize)
     {
-        var dx = tipPoint.X - tailPoint.X;
-        var dy = tipPoint.Y - tailPoint.Y;
-        var length = Math.Sqrt(dx * dx + dy * dy);
-        if (length < 1e-10) return;
-
-        var dirX = dx / length;
-        var dirY = dy / length;
-        var perpX = -dirY;
-        var perpY = dirX;
-        var halfWidth = arrowSize / 6.0;
+        // Shared geometry — this used to use a fixed arrowSize/6 half-width (≈9.5°) while the
+        // tessellator drew dimension heads at 20°, so a PDF did not match the drawing.
+        var (w1, w2) = VArrow.ArrowheadWings(
+            tipPoint, tailPoint, arrowSize, VDimension.DimensionArrowAngleDegrees);
+        if (w1.IsAlmostEqualTo(tipPoint) && w2.IsAlmostEqualTo(tipPoint)) return;
 
         var tip = new XPoint(tipPoint.X, tipPoint.Y);
-        var wing1 = new XPoint(
-            tipPoint.X - dirX * arrowSize + perpX * halfWidth,
-            tipPoint.Y - dirY * arrowSize + perpY * halfWidth);
-        var wing2 = new XPoint(
-            tipPoint.X - dirX * arrowSize - perpX * halfWidth,
-            tipPoint.Y - dirY * arrowSize - perpY * halfWidth);
+        var wing1 = new XPoint(w1.X, w1.Y);
+        var wing2 = new XPoint(w2.X, w2.Y);
 
         // Use XGraphicsPath for reliable filled rendering under Y-flipped transforms.
         var path = new XGraphicsPath();

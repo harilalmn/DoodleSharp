@@ -247,31 +247,39 @@ public sealed class ShapeTessellator
         _points.Add(arrow.End);
         sink.EmitPolyline(_points, closed: false);
 
-        EmitArrowHead(arrow.End, arrow.Start, arrow.HeadLength, arrow.HeadAngle, sink);
+        EmitArrowHead(arrow, arrow.End, arrow.Start, sink);
         if (arrow.DoubleEnded)
-            EmitArrowHead(arrow.Start, arrow.End, arrow.HeadLength, arrow.HeadAngle, sink);
+            EmitArrowHead(arrow, arrow.Start, arrow.End, sink);
     }
 
-    /// <summary>A open V at <paramref name="tip"/>, opening back towards <paramref name="from"/>.</summary>
+    /// <summary>
+    /// The arrowhead triangle at <paramref name="tip"/>, opening back towards
+    /// <paramref name="from"/>. Geometry comes from <see cref="VArrow.GetArrowheadPoints"/> — the one
+    /// place it is defined — rather than being recomputed here, which is what let the head's width
+    /// drift between this path and the canvas renderer.
+    ///
+    /// <para>
+    /// Closed, not an open V: the canvas draws a solid triangle, so emitting two bare wings made the
+    /// same arrow a different shape depending on which backend drew the frame.
+    /// </para>
+    /// </summary>
+    private void EmitArrowHead(VArrow arrow, VXYZ tip, VXYZ from, IPrimitiveSink sink)
+        => EmitArrowHead(tip, from, arrow.HeadLength, arrow.HeadAngle, sink);
+
+    /// <summary>
+    /// The same triangle for a caller that supplies the size and angle itself — the dimension shapes,
+    /// which use their own <c>ArrowSize</c> and <see cref="VDimension.DimensionArrowAngleDegrees"/>.
+    /// </summary>
     private void EmitArrowHead(VXYZ tip, VXYZ from, double length, double angleDeg, IPrimitiveSink sink)
     {
-        var dx = tip.X - from.X;
-        var dy = tip.Y - from.Y;
-        var len = Math.Sqrt(dx * dx + dy * dy);
-        if (!double.IsFinite(len) || len < GeometryTolerance.Epsilon) return;
-
-        dx /= len; dy /= len;
-        var a = angleDeg * Math.PI / 180.0;
-        var cos = Math.Cos(a);
-        var sin = Math.Sin(a);
+        var (wing1, wing2) = VArrow.ArrowheadWings(tip, from, length, angleDeg);
+        if (wing1.IsAlmostEqualTo(tip) && wing2.IsAlmostEqualTo(tip)) return;
 
         _points.Clear();
-        _points.Add(new VXYZ(tip.X - length * (dx * cos + dy * sin),
-                             tip.Y - length * (dy * cos - dx * sin)));
+        _points.Add(wing1);
         _points.Add(tip);
-        _points.Add(new VXYZ(tip.X - length * (dx * cos - dy * sin),
-                             tip.Y - length * (dy * cos + dx * sin)));
-        sink.EmitPolyline(_points, closed: false);
+        _points.Add(wing2);
+        sink.EmitPolyline(_points, closed: true);
     }
 
     private void EmitDimension(VDimension dim, IPrimitiveSink sink)
@@ -295,8 +303,8 @@ public sealed class ShapeTessellator
             _points.Clear(); _points.Add(a); _points.Add(b);
             sink.EmitPolyline(_points, closed: false);
 
-            EmitArrowHead(a, b, dim.ArrowSize, 20, sink);
-            EmitArrowHead(b, a, dim.ArrowSize, 20, sink);
+            EmitArrowHead(a, b, dim.ArrowSize, VDimension.DimensionArrowAngleDegrees, sink);
+            EmitArrowHead(b, a, dim.ArrowSize, VDimension.DimensionArrowAngleDegrees, sink);
         }
 
         if (!dim.SuppressExtLine1)
@@ -337,8 +345,8 @@ public sealed class ShapeTessellator
         _points.Add(onCurve);
         sink.EmitPolyline(_points, closed: false);
 
-        EmitArrowHead(onCurve, start, rad.ArrowSize, 20, sink);
-        if (rad.ShowDiameter) EmitArrowHead(start, onCurve, rad.ArrowSize, 20, sink);
+        EmitArrowHead(onCurve, start, rad.ArrowSize, VDimension.DimensionArrowAngleDegrees, sink);
+        if (rad.ShowDiameter) EmitArrowHead(start, onCurve, rad.ArrowSize, VDimension.DimensionArrowAngleDegrees, sink);
 
         sink.EmitText(Label(new VXYZ((start.X + onCurve.X) * 0.5, (start.Y + onCurve.Y) * 0.5),
                             rad.DisplayText, rad.TextHeight, rad.TextColor ?? rad.Color));

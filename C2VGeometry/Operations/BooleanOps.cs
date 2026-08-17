@@ -139,30 +139,43 @@ public static class BooleanOps
 
     // Convenience overloads so Region boolean ops can be reached through the same BooleanOps
     // entry point. These simply forward to RegionBooleanOps (the canonical region API).
+    //
+    // Every one of them takes segmentsPerCurve. They used to be bare forwards, which meant the
+    // precision argument existed on RegionBooleanOps but was unreachable through this facade — so
+    // reaching a region boolean the documented-convenient way silently pinned curve sampling to the
+    // default, and the only way to control it was to know to call the other class.
 
     /// <summary>Computes the union of two regions (single Region, or null if disjoint).</summary>
-    public static Region? Union(Region a, Region b) => RegionBooleanOps.Union(a, b);
+    public static Region? Union(Region a, Region b, int segmentsPerCurve = RegionBooleanOps.DefaultSegmentsPerCurve)
+        => RegionBooleanOps.Union(a, b, segmentsPerCurve);
 
     /// <summary>Computes the union of a collection of regions (e.g. a List&lt;Region&gt;).</summary>
-    public static Region? Union(IEnumerable<Region> regions) => RegionBooleanOps.Union(regions);
+    public static Region? Union(IEnumerable<Region> regions, int segmentsPerCurve = RegionBooleanOps.DefaultSegmentsPerCurve)
+        => RegionBooleanOps.Union(regions, segmentsPerCurve);
 
     /// <summary>Computes the intersection of two regions.</summary>
-    public static List<Region> Intersect(Region a, Region b) => RegionBooleanOps.Intersect(a, b);
+    public static List<Region> Intersect(Region a, Region b, int segmentsPerCurve = RegionBooleanOps.DefaultSegmentsPerCurve)
+        => RegionBooleanOps.Intersect(a, b, segmentsPerCurve);
 
     /// <summary>Computes the intersection common to a collection of regions.</summary>
-    public static List<Region> Intersect(IEnumerable<Region> regions) => RegionBooleanOps.Intersect(regions);
+    public static List<Region> Intersect(IEnumerable<Region> regions, int segmentsPerCurve = RegionBooleanOps.DefaultSegmentsPerCurve)
+        => RegionBooleanOps.Intersect(regions, segmentsPerCurve);
 
     /// <summary>Computes the difference of two regions (a - b).</summary>
-    public static List<Region> Difference(Region a, Region b) => RegionBooleanOps.Difference(a, b);
+    public static List<Region> Difference(Region a, Region b, int segmentsPerCurve = RegionBooleanOps.DefaultSegmentsPerCurve)
+        => RegionBooleanOps.Difference(a, b, segmentsPerCurve);
 
     /// <summary>Computes the first region minus every subsequent region in the collection.</summary>
-    public static List<Region> Difference(IEnumerable<Region> regions) => RegionBooleanOps.Difference(regions);
+    public static List<Region> Difference(IEnumerable<Region> regions, int segmentsPerCurve = RegionBooleanOps.DefaultSegmentsPerCurve)
+        => RegionBooleanOps.Difference(regions, segmentsPerCurve);
 
     /// <summary>Computes the symmetric difference (XOR) of two regions.</summary>
-    public static List<Region> Xor(Region a, Region b) => RegionBooleanOps.Xor(a, b);
+    public static List<Region> Xor(Region a, Region b, int segmentsPerCurve = RegionBooleanOps.DefaultSegmentsPerCurve)
+        => RegionBooleanOps.Xor(a, b, segmentsPerCurve);
 
     /// <summary>Computes the running symmetric difference (XOR) of a collection of regions.</summary>
-    public static List<Region> Xor(IEnumerable<Region> regions) => RegionBooleanOps.Xor(regions);
+    public static List<Region> Xor(IEnumerable<Region> regions, int segmentsPerCurve = RegionBooleanOps.DefaultSegmentsPerCurve)
+        => RegionBooleanOps.Xor(regions, segmentsPerCurve);
 
     #endregion
 

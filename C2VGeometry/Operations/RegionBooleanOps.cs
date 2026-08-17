@@ -11,7 +11,9 @@ namespace C2VGeometry;
 /// </summary>
 public static class RegionBooleanOps
 {
-    private const int DefaultSegmentsPerCurve = 32;
+    /// <summary>Curve sampling density used when a caller does not specify one. Internal callers and
+    /// the BooleanOps facade share it so the default cannot drift between the two entry points.</summary>
+    public const int DefaultSegmentsPerCurve = 32;
 
     #region Standard Boolean Operations
 
@@ -36,26 +38,34 @@ public static class RegionBooleanOps
     /// Returns a single Region if successful, or null if a single region cannot be formed.
     /// </summary>
     public static Region? Union(params Region[] regions)
-    {
-        if (regions.Length == 0) return null;
-        if (regions.Length == 1) return (Region)regions[0].Clone();
+        => Union((IEnumerable<Region>)regions);
 
-        var current = regions[0];
-        for (int i = 1; i < regions.Length; i++)
+    /// <summary>
+    /// Computes the union of a list of regions, folding the binary operation across all of them.
+    ///
+    /// <para>
+    /// <paramref name="segmentsPerCurve"/> is how finely a curve-bounded region is sampled before
+    /// clipping. It was missing here while <see cref="Intersect(IEnumerable{Region}, int)"/>,
+    /// <see cref="Difference(IEnumerable{Region}, int)"/> and <see cref="Xor(IEnumerable{Region}, int)"/>
+    /// all accepted it — so a union was the one operation that silently ignored the caller's chosen
+    /// precision and always used the default. Note the <c>params</c> overload cannot take it (an
+    /// optional parameter cannot follow <c>params</c>), so pass a list to control precision.
+    /// </para>
+    /// </summary>
+    public static Region? Union(IEnumerable<Region> regions, int segmentsPerCurve = DefaultSegmentsPerCurve)
+    {
+        var list = regions?.ToList() ?? new List<Region>();
+        if (list.Count == 0) return null;
+        if (list.Count == 1) return (Region)list[0].Clone();
+
+        var current = list[0];
+        for (int i = 1; i < list.Count; i++)
         {
-            var result = Union(current, regions[i]);
+            var result = Union(current, list[i], segmentsPerCurve);
             if (result == null) return null;
             current = result;
         }
         return current;
-    }
-
-    /// <summary>
-    /// Computes the union of a list of regions.
-    /// </summary>
-    public static Region? Union(IEnumerable<Region> regions)
-    {
-        return Union(regions.ToArray());
     }
 
     /// <summary>

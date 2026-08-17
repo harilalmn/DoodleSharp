@@ -1011,9 +1011,50 @@ public class RenderCanvas : FrameworkElement
         }
     }
 
+    private bool _overlaySuppressed;
+
+    /// <summary>
+    /// Blanks the overlay layer for the lifetime of the returned scope, so a capture of this canvas
+    /// contains only the drawing.
+    ///
+    /// <para>
+    /// The overlay is a visual child of the canvas (see <see cref="GetVisualChild"/>), and every image
+    /// and video export renders the canvas itself — so without this the F10 frame-timing readout,
+    /// selection handles, the rubber band, snap markers and the measuring overlay all end up baked
+    /// into the exported PNG, GIF or MP4. That is never what someone exporting a drawing wants.
+    /// </para>
+    ///
+    /// <para>
+    /// <see cref="RedrawOverlay"/> checks the flag itself rather than relying on nothing else calling
+    /// it, so an overlay repaint triggered mid-capture cannot put the chrome back.
+    /// </para>
+    /// </summary>
+    public IDisposable SuppressOverlayForCapture() => new OverlaySuppression(this);
+
+    private sealed class OverlaySuppression : IDisposable
+    {
+        private readonly RenderCanvas _canvas;
+
+        public OverlaySuppression(RenderCanvas canvas)
+        {
+            _canvas = canvas;
+            _canvas._overlaySuppressed = true;
+            _canvas.RedrawOverlay();
+        }
+
+        public void Dispose()
+        {
+            _canvas._overlaySuppressed = false;
+            _canvas.RedrawOverlay();
+        }
+    }
+
     private void RedrawOverlay()
     {
+        // Opening and closing the context with nothing drawn is what actually clears the layer.
         using var dc = _overlayVisual.RenderOpen();
+
+        if (_overlaySuppressed) return;
 
         if (ActualWidth <= 0 || ActualHeight <= 0) return;
 
@@ -2697,21 +2738,18 @@ public class RenderCanvas : FrameworkElement
         var currentEndX = arrow.Start.X + arrow.OffsetX + arrowDirX * arrow.DrawFactor;
         var currentEndY = arrow.Start.Y + arrow.OffsetY + arrowDirY * arrow.DrawFactor;
 
-        // Get arrowhead wings relative to current end position
+        // Get arrowhead wings relative to current end position. The geometry comes from VArrow so
+        // that HeadAngle is honoured here exactly as it is by the tessellator and the PDF exporter —
+        // this used to recompute a fixed HeadLength/6 half-width and ignore HeadAngle entirely.
         var length = Math.Sqrt(arrowDirX * arrowDirX + arrowDirY * arrowDirY);
         if (length > 0)
         {
-            var dirX = arrowDirX / length;
-            var dirY = arrowDirY / length;
-            var perpX = -dirY;
-            var perpY = dirX;
-            var headLen = arrow.HeadLength;
-            var halfWidth = headLen / 6.0;  // Match VArrow's calculation
+            var currentTip = new VXYZ(currentEndX, currentEndY);
+            var shaftFrom = new VXYZ(currentEndX - arrowDirX, currentEndY - arrowDirY);
+            var (wing1, wing2) = arrow.GetArrowheadPoints(currentTip, shaftFrom);
 
-            var w1 = WorldToScreen(currentEndX - dirX * headLen + perpX * halfWidth,
-                                   currentEndY - dirY * headLen + perpY * halfWidth);
-            var w2 = WorldToScreen(currentEndX - dirX * headLen - perpX * halfWidth,
-                                   currentEndY - dirY * headLen - perpY * halfWidth);
+            var w1 = WorldToScreen(wing1.X, wing1.Y);
+            var w2 = WorldToScreen(wing2.X, wing2.Y);
 
             var arrowHead = new StreamGeometry();
             using (var ctx = arrowHead.Open())
@@ -2935,22 +2973,16 @@ public class RenderCanvas : FrameworkElement
     private void DrawDimensionArrowhead(DrawingContext dc, Brush brush, Pen pen,
         VXYZ tipPoint, VXYZ tailPoint, double arrowSize)
     {
-        var dx = tipPoint.X - tailPoint.X;
-        var dy = tipPoint.Y - tailPoint.Y;
-        var length = Math.Sqrt(dx * dx + dy * dy);
-        if (length < 1e-10) return;
-
-        var dirX = dx / length;
-        var dirY = dy / length;
-        var perpX = -dirY;
-        var perpY = dirX;
-        var halfWidth = arrowSize / 6.0;
+        // Shared geometry, so a dimension's arrowheads are the same width here as on the raster and
+        // GPU backends and in an export. This used to use a fixed arrowSize/6 half-width (≈9.5°)
+        // while the tessellator drew them at 20°.
+        var (wing1, wing2) = VArrow.ArrowheadWings(
+            tipPoint, tailPoint, arrowSize, VDimension.DimensionArrowAngleDegrees);
+        if (wing1.IsAlmostEqualTo(tipPoint) && wing2.IsAlmostEqualTo(tipPoint)) return;
 
         var tip = WorldToScreen(tipPoint.X, tipPoint.Y);
-        var w1 = WorldToScreen(tipPoint.X - dirX * arrowSize + perpX * halfWidth,
-                               tipPoint.Y - dirY * arrowSize + perpY * halfWidth);
-        var w2 = WorldToScreen(tipPoint.X - dirX * arrowSize - perpX * halfWidth,
-                               tipPoint.Y - dirY * arrowSize - perpY * halfWidth);
+        var w1 = WorldToScreen(wing1.X, wing1.Y);
+        var w2 = WorldToScreen(wing2.X, wing2.Y);
 
         var arrowHead = new StreamGeometry();
         using (var ctx = arrowHead.Open())

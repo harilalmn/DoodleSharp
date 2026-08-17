@@ -57,30 +57,60 @@ public class VArrow : Shape
         return GetArrowheadPoints(Start, End);
     }
 
-    private (VXYZ wing1, VXYZ wing2) GetArrowheadPoints(VXYZ tip, VXYZ from)
+    /// <summary>
+    /// The two wing tips of an arrowhead pointing at <paramref name="tip"/>, coming from
+    /// <paramref name="from"/>. Each wing is <see cref="HeadLength"/> long and sits
+    /// <see cref="HeadAngle"/> degrees off the shaft, so the head spans twice
+    /// <see cref="HeadAngle"/> at the tip.
+    ///
+    /// <para>
+    /// This is the single source of the arrowhead's geometry, and every renderer and exporter must
+    /// use it. It used to be duplicated three ways that disagreed: this method and
+    /// <c>RenderCanvas.DrawArrow</c> both hard-coded <c>HeadLength / 6</c> (a ≈9.5° half-angle) and
+    /// never read <see cref="HeadAngle"/> at all, while <c>ShapeTessellator</c> and the PDF exporter
+    /// honoured it — so setting <see cref="HeadAngle"/> did nothing on screen but did change the
+    /// raster, GPU and PDF output, and the head was a different width depending on which backend
+    /// drew the frame. Same failure as the rotation bug in note 68: per-renderer geometry means a
+    /// property can be honoured in one path and silently dropped in another.
+    /// </para>
+    /// </summary>
+    public (VXYZ wing1, VXYZ wing2) GetArrowheadPoints(VXYZ tip, VXYZ from)
+        => ArrowheadWings(tip, from, HeadLength, HeadAngle);
+
+    /// <summary>
+    /// The wing tips of an arrowhead of the given length and half-angle, pointing at
+    /// <paramref name="tip"/> and opening back towards <paramref name="from"/>. Returns
+    /// <c>(tip, tip)</c> for a degenerate direction.
+    ///
+    /// <para>
+    /// Static and public because arrowheads are drawn for dimensions and radial dimensions too, at
+    /// their own <c>ArrowSize</c>, and those had drifted apart in exactly the same way: the
+    /// tessellator drew dimension heads at a hard-coded 20° while the canvas used a fixed
+    /// <c>ArrowSize / 6</c> (≈9.5°). Every arrowhead in the application now comes from here.
+    /// </para>
+    /// </summary>
+    public static (VXYZ wing1, VXYZ wing2) ArrowheadWings(
+        VXYZ tip, VXYZ from, double headLength, double headAngleDegrees)
     {
         double dx = tip.X - from.X;
         double dy = tip.Y - from.Y;
         double length = Math.Sqrt(dx * dx + dy * dy);
 
-        if (length < 1e-10) return (tip, tip);
+        if (!double.IsFinite(length) || length < GeometryTolerance.Epsilon) return (tip, tip);
 
         // Normalize direction (pointing from -> tip)
         dx /= length;
         dy /= length;
 
-        // Calculate base of arrowhead (HeadLength back from tip)
-        double baseX = tip.X - dx * HeadLength;
-        double baseY = tip.Y - dy * HeadLength;
+        // Each wing is the shaft direction rotated by ±headAngle and walked back from the tip.
+        double a = headAngleDegrees * Math.PI / 180.0;
+        double cos = Math.Cos(a);
+        double sin = Math.Sin(a);
 
-        // Perpendicular direction for wing width (3:1 ratio means width = HeadLength/3)
-        double halfWidth = HeadLength / 6.0;  // Half of (HeadLength / 3)
-        double perpX = -dy;  // Perpendicular
-        double perpY = dx;
-
-        // Wing points at the base
-        var wing1 = new VXYZ(baseX + perpX * halfWidth, baseY + perpY * halfWidth);
-        var wing2 = new VXYZ(baseX - perpX * halfWidth, baseY - perpY * halfWidth);
+        var wing1 = new VXYZ(tip.X - headLength * (dx * cos + dy * sin),
+                             tip.Y - headLength * (dy * cos - dx * sin));
+        var wing2 = new VXYZ(tip.X - headLength * (dx * cos - dy * sin),
+                             tip.Y - headLength * (dy * cos + dx * sin));
 
         return (wing1, wing2);
     }

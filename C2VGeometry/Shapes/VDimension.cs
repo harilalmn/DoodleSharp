@@ -11,11 +11,30 @@ public class VDimension : Shape
     /// <summary>Offset distance of the dimension line from the points</summary>
     public double Offset { get; set; } = 20;
 
-    /// <summary>Length of the extension lines</summary>
+    /// <summary>
+    /// Has no effect, and never did. An extension line runs from <see cref="OffsetFromOrigin"/> away
+    /// from the measured point to <see cref="Offset"/> + <see cref="ExtendBeyondDimLines"/> past it,
+    /// so those three properties already determine its length completely and leave nothing for this
+    /// one to control — nothing has ever read it. It is kept, deprecated rather than deleted, so that
+    /// existing code assigning it still compiles; the compiler warning is what tells you the
+    /// assignment does nothing.
+    /// </summary>
+    [Obsolete("ExtensionLength has no effect: an extension line's length is fully determined by " +
+              "OffsetFromOrigin, Offset and ExtendBeyondDimLines. Set those instead. " +
+              "Nothing has ever read this property.")]
     public double ExtensionLength { get; set; } = 10;
 
     /// <summary>Size of the arrowheads</summary>
     public double ArrowSize { get; set; } = 8;
+
+    /// <summary>
+    /// Half-angle, in degrees, of a dimension arrowhead off its dimension line. Shared by the canvas
+    /// renderer, the tessellator (and so the raster and GPU backends) and the exporters, which had
+    /// each hard-coded their own value — the tessellator 20°, the canvas a fixed
+    /// <see cref="ArrowSize"/><c> / 6</c> (≈9.5°) — so a dimension's arrowheads changed width
+    /// depending on which backend drew the frame, and again when it was exported.
+    /// </summary>
+    public const double DimensionArrowAngleDegrees = 20;
 
     /// <summary>Custom text (if null, shows the calculated distance)</summary>
     public string? CustomText { get; set; }
@@ -182,7 +201,9 @@ public class VDimension : Shape
         var clone = new VDimension(Point1.Clone(), Point2.Clone())
         {
             Offset = Offset,
+#pragma warning disable CS0618 // Inert, but a clone should still read back what was set on the source.
             ExtensionLength = ExtensionLength,
+#pragma warning restore CS0618
             ArrowSize = ArrowSize,
             CustomText = CustomText,
             DecimalPlaces = DecimalPlaces,
@@ -226,7 +247,8 @@ public class VDimension : Shape
         Point1 = GeometryHelper.ScalePoint(Point1, center, factor);
         Point2 = GeometryHelper.ScalePoint(Point2, center, factor);
         Offset *= Math.Abs(factor);
-        ExtensionLength *= Math.Abs(factor);
+        // ExtensionLength is deliberately not scaled: it controls nothing, so scaling it only
+        // maintained the illusion that it did.
         TextHeight *= Math.Abs(factor);
         ArrowSize *= Math.Abs(factor);
         ExtendBeyondDimLines *= Math.Abs(factor);

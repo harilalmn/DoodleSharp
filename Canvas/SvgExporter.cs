@@ -180,12 +180,20 @@ public static class SvgExporter
 
     private static string ArrowToSvg(VArrow arrow)
     {
-        var (w1, w2) = arrow.GetEndArrowhead();
         var sb = new StringBuilder();
         // Main line
         sb.Append($"<line x1=\"{F(arrow.Start.X)}\" y1=\"{F(arrow.Start.Y)}\" x2=\"{F(arrow.End.X)}\" y2=\"{F(arrow.End.Y)}\" stroke=\"{arrow.Color}\" stroke-width=\"{F(arrow.LineWeight)}\" />");
-        // Filled arrowhead polygon
+
+        // Filled arrowhead polygons. DoubleEnded was ignored here, so the start head was dropped.
+        var (w1, w2) = arrow.GetEndArrowhead();
         sb.Append($"<polygon points=\"{F(arrow.End.X)},{F(arrow.End.Y)} {F(w1.X)},{F(w1.Y)} {F(w2.X)},{F(w2.Y)}\" fill=\"{arrow.Color}\" stroke=\"{arrow.Color}\" stroke-width=\"{F(arrow.LineWeight)}\" />");
+
+        if (arrow.DoubleEnded)
+        {
+            var (s1, s2) = arrow.GetStartArrowhead();
+            sb.Append($"<polygon points=\"{F(arrow.Start.X)},{F(arrow.Start.Y)} {F(s1.X)},{F(s1.Y)} {F(s2.X)},{F(s2.Y)}\" fill=\"{arrow.Color}\" stroke=\"{arrow.Color}\" stroke-width=\"{F(arrow.LineWeight)}\" />");
+        }
+
         return $"<g>{sb}</g>";
     }
 
@@ -210,20 +218,13 @@ public static class SvgExporter
 
     private static string DimensionArrowheadSvg(VXYZ tip, VXYZ tail, double arrowSize, string color, double lineWeight)
     {
-        var dx = tip.X - tail.X;
-        var dy = tip.Y - tail.Y;
-        var length = Math.Sqrt(dx * dx + dy * dy);
-        if (length < 1e-10) return "";
-        var dirX = dx / length;
-        var dirY = dy / length;
-        var perpX = -dirY;
-        var perpY = dirX;
-        var halfWidth = arrowSize / 6.0;
-        var w1X = tip.X - dirX * arrowSize + perpX * halfWidth;
-        var w1Y = tip.Y - dirY * arrowSize + perpY * halfWidth;
-        var w2X = tip.X - dirX * arrowSize - perpX * halfWidth;
-        var w2Y = tip.Y - dirY * arrowSize - perpY * halfWidth;
-        return $"<polygon points=\"{F(tip.X)},{F(tip.Y)} {F(w1X)},{F(w1Y)} {F(w2X)},{F(w2Y)}\" fill=\"{color}\" stroke=\"{color}\" stroke-width=\"{F(lineWeight)}\" />";
+        // Shared geometry — this used to compute its own arrowSize/6 half-width (≈9.5°) while the
+        // tessellator used 20°, so an SVG's dimension arrowheads did not match the drawing.
+        var (w1, w2) = VArrow.ArrowheadWings(
+            tip, tail, arrowSize, VDimension.DimensionArrowAngleDegrees);
+        if (w1.IsAlmostEqualTo(tip) && w2.IsAlmostEqualTo(tip)) return "";
+
+        return $"<polygon points=\"{F(tip.X)},{F(tip.Y)} {F(w1.X)},{F(w1.Y)} {F(w2.X)},{F(w2.Y)}\" fill=\"{color}\" stroke=\"{color}\" stroke-width=\"{F(lineWeight)}\" />";
     }
 
     private static string GroupToSvg(VGroup group)

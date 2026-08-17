@@ -345,36 +345,33 @@ public class DxfExporter
         WriteCoord(10, 20, 30, arrow.Start.X, arrow.Start.Y, 0);
         WriteCoord(11, 21, 31, arrow.End.X, arrow.End.Y, 0);
 
-        // Calculate arrowhead
-        double dx = arrow.End.X - arrow.Start.X;
-        double dy = arrow.End.Y - arrow.Start.Y;
-        double length = Math.Sqrt(dx * dx + dy * dy);
-        if (length > 0)
-        {
-            double headSize = Math.Min(length * 0.2, 10);
-            double angle = Math.Atan2(dy, dx);
+        // Arrowhead geometry comes from VArrow, so a DXF matches the drawing. This used to hard-code
+        // both the angle (30°) and the size (min(length * 0.2, 10)) — ignoring HeadLength and
+        // HeadAngle entirely — and it dropped the second head of a double-ended arrow.
+        WriteArrowHead(arrow, arrow.End, arrow.Start);
+        if (arrow.DoubleEnded)
+            WriteArrowHead(arrow, arrow.Start, arrow.End);
+    }
 
-            double x1 = arrow.End.X - headSize * Math.Cos(angle - Math.PI / 6);
-            double y1 = arrow.End.Y - headSize * Math.Sin(angle - Math.PI / 6);
-            double x2 = arrow.End.X - headSize * Math.Cos(angle + Math.PI / 6);
-            double y2 = arrow.End.Y - headSize * Math.Sin(angle + Math.PI / 6);
+    private void WriteArrowHead(VArrow arrow, VXYZ tip, VXYZ from)
+    {
+        var (wing1, wing2) = arrow.GetArrowheadPoints(tip, from);
+        if (wing1.IsAlmostEqualTo(tip) && wing2.IsAlmostEqualTo(tip)) return;
 
-            // First arrowhead line
-            _sb.AppendLine("0");
-            _sb.AppendLine("LINE");
-            WriteHandle();
-            WriteLayer();
-            WriteCoord(10, 20, 30, arrow.End.X, arrow.End.Y, 0);
-            WriteCoord(11, 21, 31, x1, y1, 0);
+        // Closed triangle, matching the solid head the canvas draws.
+        WriteLineEntity(tip, wing1);
+        WriteLineEntity(wing1, wing2);
+        WriteLineEntity(wing2, tip);
+    }
 
-            // Second arrowhead line
-            _sb.AppendLine("0");
-            _sb.AppendLine("LINE");
-            WriteHandle();
-            WriteLayer();
-            WriteCoord(10, 20, 30, arrow.End.X, arrow.End.Y, 0);
-            WriteCoord(11, 21, 31, x2, y2, 0);
-        }
+    private void WriteLineEntity(VXYZ from, VXYZ to)
+    {
+        _sb.AppendLine("0");
+        _sb.AppendLine("LINE");
+        WriteHandle();
+        WriteLayer();
+        WriteCoord(10, 20, 30, from.X, from.Y, 0);
+        WriteCoord(11, 21, 31, to.X, to.Y, 0);
     }
 
     private void WriteText(VText text)

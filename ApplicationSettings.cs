@@ -33,6 +33,20 @@ public class AppSettingsData
     /// 107 ms into 45 ms, and makes a near-empty view four times slower. Choosing per frame gets
     /// both: exact vector semantics while a drawing is light, and a usable frame rate when it is not.
     /// </para>
+    ///
+    /// <para>
+    /// <c>GPU</c> forces the Direct3D 11 path, which uploads geometry once in world coordinates so
+    /// that panning and zooming cost almost nothing — the only backend with a flat frame time across
+    /// navigation, and the only one that holds up at 4K. It falls back to the software rasterizer
+    /// when no device can be created, recording the reason in the journal, so selecting it is safe
+    /// on a machine without a usable GPU.
+    /// </para>
+    ///
+    /// <para>
+    /// Recognised values are <c>Auto</c>, <c>Legacy</c>, <c>Managed</c> and <c>GPU</c>, matched
+    /// case-insensitively; anything else behaves as <c>Auto</c>. Settable from
+    /// <c>Settings &gt; Application Settings &gt; Rendering</c>.
+    /// </para>
     /// </summary>
     public string RenderBackend { get; set; } = "Auto";
 
