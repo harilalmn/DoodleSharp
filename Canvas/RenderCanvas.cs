@@ -869,6 +869,16 @@ public class RenderCanvas : FrameworkElement
             // Push/Pop from a half-drawn group and corrupt every later frame.
             try
             {
+                // Stroke-only shapes accumulate into one geometry per pen; anything else flushes
+                // the batch first, so draw order stays exact against filled shapes, text, hatches
+                // and regions. Only consecutive runs of unfilled strokes are reordered among
+                // themselves, and hairlines do not occlude each other visibly.
+                if (shape is Shape batchable && Rendering.StrokeBatcher.CanBatch(batchable))
+                {
+                    if (TryBatchStrokes(batchable)) continue;
+                }
+
+                _strokeBatcher.Flush(dc);
                 DispatchShapeDraw(dc, shape);
             }
             catch (Exception ex)
@@ -880,6 +890,7 @@ public class RenderCanvas : FrameworkElement
             }
         }
 
+        _strokeBatcher.Flush(dc);
         FlushDots(dc);
         _frameMetrics.EndStage();
 
@@ -3020,6 +3031,58 @@ public class RenderCanvas : FrameworkElement
         }
 
         if (applyOpacity) dc.Pop();
+    }
+
+    private readonly Rendering.StrokeBatcher _strokeBatcher = new();
+
+    /// <summary>
+    /// Adds a stroke-only shape's segments to the pen batch. Returns false if the shape turns out
+    /// not to be expressible as plain segments after all, in which case the caller draws it normally.
+    /// </summary>
+    private bool TryBatchStrokes(Shape shape)
+    {
+        var pen = GetShapePen(shape.Color, shape.LineWeight, shape.LineType, shape.LineTypeScale);
+        var ox = shape.OffsetX;
+        var oy = shape.OffsetY;
+
+        switch (shape)
+        {
+            case VLine line:
+                _strokeBatcher.Add(pen,
+                    WorldToScreen(line.Start.X + ox, line.Start.Y + oy),
+                    WorldToScreen(line.End.X + ox, line.End.Y + oy));
+                return true;
+
+            case VPolygon polygon:
+            {
+                var pts = polygon.Points;
+                if (pts == null || pts.Count < 2) return false;
+                for (int i = 0; i < pts.Count; i++)
+                {
+                    // Closed: the last vertex joins back to the first.
+                    var next = pts[(i + 1) % pts.Count];
+                    _strokeBatcher.Add(pen,
+                        WorldToScreen(pts[i].X + ox, pts[i].Y + oy),
+                        WorldToScreen(next.X + ox, next.Y + oy));
+                }
+                return true;
+            }
+
+            case VPolyline polyline:
+            {
+                var pts = polyline.Points;
+                if (pts == null || pts.Count < 2) return false;
+                for (int i = 0; i < pts.Count - 1; i++)
+                {
+                    _strokeBatcher.Add(pen,
+                        WorldToScreen(pts[i].X + ox, pts[i].Y + oy),
+                        WorldToScreen(pts[i + 1].X + ox, pts[i + 1].Y + oy));
+                }
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // ── Batched level-of-detail dots ─────────────────────────────────────────────────────────
