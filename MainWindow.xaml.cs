@@ -5009,9 +5009,29 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Makes sure the canvas is on screen and laid out before a capture reads its size.
+    ///
+    /// <para>
+    /// Every export renders <c>RenderCanvas</c> at its own <c>ActualWidth</c>/<c>ActualHeight</c>,
+    /// and a pane that is hidden — or merely sitting on a non-selected tab, which an AvalonDock tab
+    /// group unloads — reports zero. Before the panels were dockable that took deliberate effort to
+    /// reach; now it is one click away, and the symptom is an "Invalid Canvas Dimensions: 0x0"
+    /// exception rather than anything a user could act on.
+    /// </para>
+    /// </summary>
+    private void EnsureCanvasReadyForCapture()
+    {
+        SetPaneVisible("ds.tool.canvas", true);
+        UpdateLayout();
+        RenderCanvas.UpdateLayout();
+    }
+
     private void ExportCanvasToPng(string filePath, Brush? overrideBackground = null, bool includeGrid = true,
         int customWidth = 0, int customHeight = 0)
     {
+        EnsureCanvasReadyForCapture();
+
         // Save current state
         bool wasGridShown = RenderCanvas.ShowGrid;
         var originalBackground = RenderCanvas.CanvasBackground;
@@ -5282,6 +5302,8 @@ public partial class MainWindow : Window
     private void ExportCanvasToGif(string filePath, Timeline timeline, double duration, int fps,
         Brush? overrideBackground, bool includeGrid, ProgressDialog? progressDialog = null)
     {
+        EnsureCanvasReadyForCapture();
+
         // Save current state
         bool wasGridShown = RenderCanvas.ShowGrid;
         var originalBackground = RenderCanvas.CanvasBackground;
@@ -5411,6 +5433,8 @@ public partial class MainWindow : Window
         uint bitrateMbps, int outputWidth, int outputHeight, Brush? overrideBackground, bool includeGrid,
         ProgressDialog? progressDialog = null)
     {
+        EnsureCanvasReadyForCapture();
+
         bool wasGridShown = RenderCanvas.ShowGrid;
         var originalBackground = RenderCanvas.CanvasBackground;
         bool wasPlaying = timeline.IsPlaying;

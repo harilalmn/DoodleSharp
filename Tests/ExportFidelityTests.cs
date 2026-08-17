@@ -56,6 +56,11 @@ public class ExportFidelityTests
 
         Assert.Contains("SuppressOverlayForCapture", body);
         Assert.Contains("rtb.Render(RenderCanvas)", body); // the scan is still looking at a capture path
+
+        // A capture reads the canvas's own ActualWidth/Height, and a dockable pane that is hidden — or
+        // sitting on a non-selected tab, which AvalonDock unloads — reports zero. Before the panels
+        // were dockable that took deliberate effort to reach; now it is one click away.
+        Assert.Contains("EnsureCanvasReadyForCapture();", body);
     }
 
     /// <summary>

@@ -2740,7 +2740,30 @@ public class RenderCanvas : FrameworkElement
 
     private static readonly Dictionary<(VFont font, VFontWeight weight), Typeface> _typefaceCache = new();
 
+    /// <summary>
+    /// Pixel density for <see cref="FormattedText"/>, cached because every <c>VText</c> in a frame
+    /// needs it. Invalidated in <see cref="OnDpiChanged"/> — see the note there.
+    /// </summary>
     private double? _cachedPixelsPerDip;
+
+    /// <summary>
+    /// Drops the cached pixel density when the canvas moves to a monitor with different scaling.
+    ///
+    /// <para>
+    /// This only started mattering when panels became dockable. Previously the canvas could only
+    /// change DPI along with the whole window, which is rare; now it can be floated onto a 150%
+    /// second monitor on its own, and a stale density renders every glyph at the wrong size — subtly
+    /// blurry rather than obviously broken, which is the kind of bug that goes unreported for a long
+    /// time.
+    /// </para>
+    /// </summary>
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+
+        _cachedPixelsPerDip = null;
+        RedrawAll();
+    }
 
     private static Typeface GetCachedTypeface(VFont font, VFontWeight weight)
     {

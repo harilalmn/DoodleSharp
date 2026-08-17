@@ -63,6 +63,12 @@ tags; this file is the curated, human-friendly summary.
   dragged over the canvas's minimum height while the timeline is showing.
 - The floating Properties window used to contain **two overlapping copies** of the panel, one of them
   permanently blank. It is now an ordinary dockable panel and the duplicate is gone.
+- **Canvas text stays crisp when the canvas moves between monitors with different scaling.** The
+  pixel density was cached once and never refreshed, which only became reachable now that the canvas
+  can be floated onto a second screen by itself.
+- **Exporting works with the canvas hidden or behind another tab.** Every export reads the canvas's
+  on-screen size, so a hidden panel produced an "Invalid Canvas Dimensions" error; the canvas is now
+  brought forward first.
 - **F1 Help now lists events.** Every public event was missing from its page and from Help search —
   including `Frame.CallbackFailed` and `GlobalParameters.Changed`, which had written descriptions no
   reader could reach.
