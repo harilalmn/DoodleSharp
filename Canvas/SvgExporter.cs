@@ -83,8 +83,44 @@ public static class SvgExporter
             VDimension d => DimensionToSvg(d),
             VText t => TextToSvg(t),
             VGroup g => GroupToSvg(g),
+
+            // Anything with no native SVG element is flattened rather than dropped. This arm used
+            // to return "" and the shape simply vanished from the file, with no error and nothing
+            // to notice -- and each exporter's switch covered a different subset, so the same
+            // drawing could survive one format and lose shapes in another.
+            Shape other => TessellatedToSvg(other),
             _ => ""
         };
+    }
+
+    [ThreadStatic] private static C2VGeometry.Rendering.ShapeTessellator? _fallbackTessellator;
+
+    private static string TessellatedToSvg(Shape shape)
+    {
+        _fallbackTessellator ??= new C2VGeometry.Rendering.ShapeTessellator();
+
+        var sb = new StringBuilder();
+        var sink = new C2VGeometry.Rendering.PolylineFallbackSink
+        {
+            OnPolyline = (pts, closed, pen) =>
+            {
+                if (pts.Count < 2) return;
+                var d = new StringBuilder("M ");
+                for (int i = 0; i < pts.Count; i++)
+                {
+                    if (i > 0) d.Append(" L ");
+                    d.Append(F(pts[i].X)).Append(' ').Append(F(pts[i].Y));
+                }
+                if (closed) d.Append(" Z");
+                sb.Append($"<path d=\"{d}\" fill=\"none\" stroke=\"{pen.Color}\" stroke-width=\"{F(pen.LineWeight)}\" />");
+            },
+            OnPoint = (pt, pen) =>
+                sb.Append($"<circle cx=\"{F(pt.X)}\" cy=\"{F(pt.Y)}\" r=\"1\" fill=\"{pen.Color}\" />"),
+            OnText = t => sb.Append(TextToSvg(t)),
+        };
+
+        _fallbackTessellator.Tessellate(shape, sink);
+        return sb.ToString();
     }
 
     private static string TextToSvg(VText t)

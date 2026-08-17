@@ -237,7 +237,38 @@ public class PdfExporter
             case VHatch hatch:
                 DrawHatch(gfx, hatch, pen);
                 break;
+
+            // No native PDF form: flatten rather than drop. See the note in DxfExporter.
+            default:
+                DrawTessellated(gfx, shape, pen);
+                break;
         }
+    }
+
+    private C2VGeometry.Rendering.ShapeTessellator? _fallbackTessellator;
+
+    private void DrawTessellated(XGraphics gfx, Shape shape, XPen pen)
+    {
+        _fallbackTessellator ??= new C2VGeometry.Rendering.ShapeTessellator();
+
+        var sink = new C2VGeometry.Rendering.PolylineFallbackSink
+        {
+            OnPolyline = (pts, closed, _) =>
+            {
+                if (pts.Count < 2) return;
+                var last = closed ? pts.Count : pts.Count - 1;
+                for (int i = 0; i < last; i++)
+                {
+                    var a = pts[i];
+                    var b = pts[(i + 1) % pts.Count];
+                    gfx.DrawLine(pen, new XPoint(a.X, a.Y), new XPoint(b.X, b.Y));
+                }
+            },
+            OnPoint = (p, _) => gfx.DrawLine(pen, new XPoint(p.X, p.Y), new XPoint(p.X, p.Y)),
+            OnText = t => DrawText(gfx, t),
+        };
+
+        _fallbackTessellator.Tessellate(shape, sink);
     }
 
     private void DrawHatch(XGraphics gfx, VHatch hatch, XPen pen)

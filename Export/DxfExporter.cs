@@ -157,7 +157,40 @@ public class DxfExporter
             case VText text:
                 WriteText(text);
                 break;
+
+            // Anything with no native DXF entity is flattened rather than dropped. Before this the
+            // switch simply fell off the end and the shape vanished from the file with no error --
+            // and because each exporter's switch was written separately, they covered different
+            // subsets, so the same drawing could export correctly to SVG and lose shapes here.
+            default:
+                WriteTessellated(shape);
+                break;
         }
+    }
+
+    private C2VGeometry.Rendering.ShapeTessellator? _fallbackTessellator;
+    private C2VGeometry.Rendering.PolylineFallbackSink? _fallbackSink;
+
+    private void WriteTessellated(Shape shape)
+    {
+        if (_fallbackSink == null)
+        {
+            _fallbackTessellator = new C2VGeometry.Rendering.ShapeTessellator();
+            _fallbackSink = new C2VGeometry.Rendering.PolylineFallbackSink
+            {
+                OnPolyline = (pts, closed, _) =>
+                {
+                    var buffer = new List<(double x, double y)>(pts.Count);
+                    for (int i = 0; i < pts.Count; i++) buffer.Add((pts[i].X, pts[i].Y));
+                    if (buffer.Count >= 2) WriteLwPolyline(buffer, closed);
+                },
+                OnFilled = (loops, _) => { },   // the outline is emitted separately as a polyline
+                OnPoint = (p, _) => WritePoint(new VPoint(p.X, p.Y)),
+                OnText = WriteText,
+            };
+        }
+
+        _fallbackTessellator!.Tessellate(shape, _fallbackSink);
     }
 
     private void WritePoint(VPoint point)

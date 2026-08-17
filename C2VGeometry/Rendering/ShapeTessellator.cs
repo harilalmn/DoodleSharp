@@ -23,6 +23,38 @@ public sealed class ShapeTessellator
     private readonly List<IReadOnlyList<VXYZ>> _loops = new(8);
 
     /// <summary>
+    /// Builds the <see cref="VText"/> that carries a dimension's measurement.
+    ///
+    /// <para>
+    /// A dimension holds its number as a string, not as a shape, so something has to present it as
+    /// text for the sink. It is constructed inside a suspended-registration scope, because a
+    /// <c>VText</c> auto-registers and would otherwise drop a phantom label onto the canvas for
+    /// every dimension drawn.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>A fresh instance each time, deliberately.</b> Reusing one and mutating it looks like the
+    /// obvious optimisation and is wrong: a sink is not required to consume text synchronously. The
+    /// raster sink defers text to the vector layer, holding the reference until the end of the
+    /// frame — so every deferred label ended up pointing at the same object, and the whole drawing
+    /// showed one dimension's number, or none. Dimensions are a small minority of any drawing; the
+    /// allocation is not worth the class of bug.
+    /// </para>
+    /// </summary>
+    private static VText Label(VXYZ at, string content, double height, string color)
+    {
+        using (Shape.SuspendAutoRegistration())
+        {
+            return new VText(at, content)
+            {
+                Height = height,
+                Color = color,
+                Anchor = VTextAnchor.MiddleCenter,
+            };
+        }
+    }
+
+    /// <summary>
     /// How deep <see cref="VGroup"/> recursion may go before it is abandoned. Groups can nest
     /// arbitrarily and nothing prevents a user constructing a cycle; without a limit that is a
     /// stack overflow, which .NET cannot catch.
@@ -163,13 +195,153 @@ public sealed class ShapeTessellator
                 sink.EmitPolyline(_points, closed: false);
                 return true;
 
-            // Everything else — VArrow, VDimension, VRadialDimension, VGrid, VSpatialGrid, VRay,
-            // VXLine — has drawing rules the geometry library does not own: arrowhead sizing in
-            // screen pixels, dimension text layout, viewport-clipped infinite lines. They stay with
-            // the host renderer rather than being half-reproduced here.
+            case VArrow arrow:
+                EmitArrow(arrow, sink);
+                return true;
+
+            case VDimension dim:
+                EmitDimension(dim, sink);
+                return true;
+
+            case VRadialDimension rad:
+                EmitRadialDimension(rad, sink);
+                return true;
+
+            // VRay and VXLine are semi-infinite: what to draw depends on the viewport, which the
+            // geometry library has no notion of. Their RenderExtent gives a finite stand-in, which
+            // is the right answer for a file format even though it is the wrong one for a screen.
+            case VRay ray:
+                _points.Clear();
+                _points.Add(ray.StartPoint);
+                _points.Add(ray.EndPoint);
+                sink.EmitPolyline(_points, closed: false);
+                return true;
+
+            case VXLine xline:
+                _points.Clear();
+                _points.Add(xline.StartPoint);
+                _points.Add(xline.EndPoint);
+                sink.EmitPolyline(_points, closed: false);
+                return true;
+
+            // VGrid and VSpatialGrid materialise their own children as real shapes, so they are
+            // reached through those rather than decomposed here.
             default:
                 return false;
         }
+    }
+
+    // ── Annotation decomposition ─────────────────────────────────────────────
+    //
+    // These were previously declined outright, on the grounds that their drawing rules belong to
+    // the host. That is true of *placement* details, but it left every exporter free to drop them:
+    // dimensions vanished from DXF and radial dimensions from SVG, silently, because each
+    // exporter's switch happened not to cover them. Their geometry is entirely world-space and
+    // derivable from their own public properties, so decomposing it here is both possible and the
+    // only thing that makes an export complete.
+
+    private void EmitArrow(VArrow arrow, IPrimitiveSink sink)
+    {
+        _points.Clear();
+        _points.Add(arrow.Start);
+        _points.Add(arrow.End);
+        sink.EmitPolyline(_points, closed: false);
+
+        EmitArrowHead(arrow.End, arrow.Start, arrow.HeadLength, arrow.HeadAngle, sink);
+        if (arrow.DoubleEnded)
+            EmitArrowHead(arrow.Start, arrow.End, arrow.HeadLength, arrow.HeadAngle, sink);
+    }
+
+    /// <summary>A open V at <paramref name="tip"/>, opening back towards <paramref name="from"/>.</summary>
+    private void EmitArrowHead(VXYZ tip, VXYZ from, double length, double angleDeg, IPrimitiveSink sink)
+    {
+        var dx = tip.X - from.X;
+        var dy = tip.Y - from.Y;
+        var len = Math.Sqrt(dx * dx + dy * dy);
+        if (!double.IsFinite(len) || len < GeometryTolerance.Epsilon) return;
+
+        dx /= len; dy /= len;
+        var a = angleDeg * Math.PI / 180.0;
+        var cos = Math.Cos(a);
+        var sin = Math.Sin(a);
+
+        _points.Clear();
+        _points.Add(new VXYZ(tip.X - length * (dx * cos + dy * sin),
+                             tip.Y - length * (dy * cos - dx * sin)));
+        _points.Add(tip);
+        _points.Add(new VXYZ(tip.X - length * (dx * cos - dy * sin),
+                             tip.Y - length * (dy * cos + dx * sin)));
+        sink.EmitPolyline(_points, closed: false);
+    }
+
+    private void EmitDimension(VDimension dim, IPrimitiveSink sink)
+    {
+        var dx = dim.Point2.X - dim.Point1.X;
+        var dy = dim.Point2.Y - dim.Point1.Y;
+        var len = Math.Sqrt(dx * dx + dy * dy);
+        if (!double.IsFinite(len) || len < GeometryTolerance.Epsilon) return;
+
+        // Offset perpendicular to the measured span, matching the renderer's convention.
+        var nx = -dy / len;
+        var ny = dx / len;
+        var ox = nx * dim.Offset;
+        var oy = ny * dim.Offset;
+
+        var a = new VXYZ(dim.Point1.X + ox, dim.Point1.Y + oy);
+        var b = new VXYZ(dim.Point2.X + ox, dim.Point2.Y + oy);
+
+        if (!dim.SuppressDimensionLine)
+        {
+            _points.Clear(); _points.Add(a); _points.Add(b);
+            sink.EmitPolyline(_points, closed: false);
+
+            EmitArrowHead(a, b, dim.ArrowSize, 20, sink);
+            EmitArrowHead(b, a, dim.ArrowSize, 20, sink);
+        }
+
+        if (!dim.SuppressExtLine1)
+        {
+            _points.Clear();
+            _points.Add(dim.Point1);
+            _points.Add(new VXYZ(a.X + nx * dim.ExtendBeyondDimLines, a.Y + ny * dim.ExtendBeyondDimLines));
+            sink.EmitPolyline(_points, closed: false);
+        }
+
+        if (!dim.SuppressExtLine2)
+        {
+            _points.Clear();
+            _points.Add(dim.Point2);
+            _points.Add(new VXYZ(b.X + nx * dim.ExtendBeyondDimLines, b.Y + ny * dim.ExtendBeyondDimLines));
+            sink.EmitPolyline(_points, closed: false);
+        }
+
+        // The measurement itself. Without this the dimension draws its lines and arrowheads and
+        // silently loses the number, which is the only part anyone actually reads.
+        sink.EmitText(Label(new VXYZ((a.X + b.X) * 0.5, (a.Y + b.Y) * 0.5),
+                            dim.DisplayText, dim.TextHeight, dim.TextColor ?? dim.Color));
+    }
+
+    private void EmitRadialDimension(VRadialDimension rad, IPrimitiveSink sink)
+    {
+        var a = rad.LeaderAngle * Math.PI / 180.0;
+        var dx = Math.Cos(a);
+        var dy = Math.Sin(a);
+
+        var onCurve = new VXYZ(rad.Center.X + dx * rad.Radius, rad.Center.Y + dy * rad.Radius);
+        var start = rad.ShowDiameter
+            ? new VXYZ(rad.Center.X - dx * rad.Radius, rad.Center.Y - dy * rad.Radius)
+            : rad.Center;
+
+        _points.Clear();
+        _points.Add(start);
+        _points.Add(onCurve);
+        sink.EmitPolyline(_points, closed: false);
+
+        EmitArrowHead(onCurve, start, rad.ArrowSize, 20, sink);
+        if (rad.ShowDiameter) EmitArrowHead(start, onCurve, rad.ArrowSize, 20, sink);
+
+        sink.EmitText(Label(new VXYZ((start.X + onCurve.X) * 0.5, (start.Y + onCurve.Y) * 0.5),
+                            rad.DisplayText, rad.TextHeight, rad.TextColor ?? rad.Color));
     }
 
     private bool EmitClosed(IReadOnlyList<VXYZ> points, in PenSpec pen, IPrimitiveSink sink)
