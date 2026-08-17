@@ -16,6 +16,7 @@ public static class Templates
             using System.Numerics;
             using System.Collections.Generic;
             using C2VGeometry;
+            using DoodleSharp.Animation;
             using DoodleSharp.Console;
 
             namespace {{safeName}}
@@ -67,6 +68,7 @@ public static class Templates
         using System.Numerics;
         using System.Collections.Generic;
         using C2VGeometry;
+        using DoodleSharp.Animation;
         using DoodleSharp.Console;
 
         namespace {0}
@@ -88,7 +90,9 @@ public static class Templates
 
         return $$"""
             using System;
+            using System.Collections.Generic;
             using C2VGeometry;
+            using DoodleSharp.Animation;
             using DoodleSharp.Sketching;
             using DoodleSharp.Console;
 

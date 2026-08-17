@@ -88,6 +88,40 @@ public class DocGeneratorTests
         Assert.Contains(expectedValue, RenderedText(type));
     }
 
+    /// <summary>
+    /// Public events had no section of their own, so none of them appeared on any page. The methods
+    /// query drops their <c>add_</c>/<c>remove_</c> accessors as <c>IsSpecialName</c>, and nothing
+    /// else looked at <c>GetEvents</c> — so five public events were unreachable in Help while four of
+    /// them already had descriptions written. That is note 91's exact shape: the prose exists, so
+    /// checking the dictionaries looks healthy and only the rendered page is missing them.
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(DoodleSharp.Animation.Mouse), "CallbackFailed")]
+    [InlineData(typeof(DoodleSharp.Animation.Frame), "CallbackFailed")]
+    [InlineData(typeof(C2VGeometry.GlobalParameters), "Changed")]
+    [InlineData(typeof(C2VGeometry.GlobalParameters), "Reloaded")]
+    public void PublicEventsAppearOnTheirPage(Type type, string expectedEvent)
+    {
+        var text = RenderedText(type);
+
+        Assert.Contains("Events", text);
+        Assert.Contains(expectedEvent, text);
+    }
+
+    /// <summary>
+    /// A static event must say so, for the same reason a static method does: it changes how the
+    /// member is reached. Staticness lives on the accessors, so the switch needs an EventInfo arm.
+    /// </summary>
+    [Fact]
+    public void StaticEventsAreFlaggedStatic()
+    {
+        var callbackFailed = typeof(DoodleSharp.Animation.Mouse)
+            .GetEvent("CallbackFailed", DocGenerator.MemberFlags);
+
+        Assert.NotNull(callbackFailed);
+        Assert.True(DocGenerator.IsStaticMember(callbackFailed!));
+    }
+
     /// <summary>Constants are the whole public surface of GeometryTolerance's tolerance trio.</summary>
     [Fact]
     public void ConstantFieldsAppearOnTheirPage()

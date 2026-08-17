@@ -77,6 +77,21 @@ namespace DoodleSharp
                     });
                 }
 
+                // Add events. The pages list these too, and a member that renders on a page but
+                // cannot be found by search (or the reverse) is the drift the shared MemberFlags
+                // constant exists to prevent.
+                foreach (var evt in type.GetEvents(DocGenerator.MemberFlags))
+                {
+                    _searchIndex.Add(new SearchableItem
+                    {
+                        Name = evt.Name,
+                        FullName = $"{cleanName}.{evt.Name}",
+                        ItemType = "Event",
+                        DeclaringType = type,
+                        Signature = evt.EventHandlerType?.Name ?? ""
+                    });
+                }
+
                 // Add methods
                 var methods = type.GetMethods(DocGenerator.MemberFlags)
                     .Where(m => !m.IsSpecialName && m.DeclaringType != typeof(object));

@@ -55,7 +55,9 @@ public class AppSettingsData
     public bool ShowProjectBrowser { get; set; } = false;
     public bool ShowOutliner { get; set; } = false;
     public bool ShowTimeline { get; set; } = false;
-    public bool ShowToolbar { get; set; } = false;
+    // ShowToolbar removed: the drawing toolbar it governed was replaced by the Draw menu, so nothing
+    // has read or written it since. An older appsettings.json still carrying the key deserializes
+    // fine — unknown members are ignored — and the key drops out on the next save.
     public bool ShowConsole { get; set; } = true;
     public bool ShowCanvas { get; set; } = true;
     public bool ShowProperties { get; set; } = false;

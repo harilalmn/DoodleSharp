@@ -17,6 +17,22 @@ public class CanvasRenderer : ICanvasRenderer, C2VGeometry.IShapeRegistry
     /// </summary>
     internal Timeline? ActiveTimeline { get; set; }
 
+    /// <summary>
+    /// Bumped whenever the shape *set* changes (add, remove, reorder) — not when an existing shape
+    /// is merely mutated.
+    ///
+    /// <para>
+    /// This exists because <see cref="RenderCanvas"/> does not share this list: it keeps its own
+    /// <c>_currentShapes</c> snapshot, assigned only by <c>Render()</c> and <c>SetFrameShapes()</c>.
+    /// So a per-frame path that calls <c>Refresh()</c> repaints the snapshot and a shape *created*
+    /// after the run silently never appears, while a shape *mutated* in place appears fine. The
+    /// per-frame paths compare this counter to decide between the cheap
+    /// <c>ReindexForAnimationFrame()</c> (boxes went stale) and the full <c>SetFrameShapes()</c>
+    /// (the set itself changed, so the snapshot has to be retaken).
+    /// </para>
+    /// </summary>
+    internal int RegistryVersion { get; private set; }
+
     public static CanvasRenderer Instance
     {
         get
@@ -69,6 +85,7 @@ public class CanvasRenderer : ICanvasRenderer, C2VGeometry.IShapeRegistry
             s.IsPlaced = true;
         }
         _shapes.Add(shape);
+        RegistryVersion++;
     }
 
     /// <summary>
@@ -80,7 +97,7 @@ public class CanvasRenderer : ICanvasRenderer, C2VGeometry.IShapeRegistry
         {
             s.IsPlaced = false;
         }
-        _shapes.Remove(shape);
+        if (_shapes.Remove(shape)) RegistryVersion++;
     }
 
     /// <summary>
@@ -96,7 +113,7 @@ public class CanvasRenderer : ICanvasRenderer, C2VGeometry.IShapeRegistry
                 s.IsPlaced = false;
             }
         }
-        _shapes.RemoveAll(s => shapeSet.Contains(s));
+        if (_shapes.RemoveAll(s => shapeSet.Contains(s)) > 0) RegistryVersion++;
     }
 
     /// <summary>
@@ -111,6 +128,7 @@ public class CanvasRenderer : ICanvasRenderer, C2VGeometry.IShapeRegistry
         // Re-find reference index after removal (it may have shifted)
         refIndex = _shapes.IndexOf(referenceShape);
         _shapes.Insert(refIndex + 1, shape);
+        RegistryVersion++;
     }
 
     /// <summary>
@@ -124,6 +142,7 @@ public class CanvasRenderer : ICanvasRenderer, C2VGeometry.IShapeRegistry
         if (!_shapes.Remove(shape)) return;
         refIndex = _shapes.IndexOf(referenceShape);
         _shapes.Insert(refIndex, shape);
+        RegistryVersion++;
     }
 
     public IReadOnlyList<IDrawable> GetShapes() => _shapes.AsReadOnly();
@@ -139,6 +158,7 @@ public class CanvasRenderer : ICanvasRenderer, C2VGeometry.IShapeRegistry
             }
         }
         _shapes.Clear();
+        RegistryVersion++;
         Shape.ResetIdCounter();
         ActiveTimeline?.Stop();
         ActiveTimeline = null;

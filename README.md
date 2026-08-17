@@ -22,6 +22,7 @@ DoodleSharp is a visual programming environment that lets you write C# code to c
 - **Properties Panel**: Floating or dockable panel to edit geometry and style properties (color, fill, weight, opacity, visibility, name) with full code sync — changes persist as code lines
 - **Global Parameters**: Declare named values once with `GlobalParameters.Set(...)`, read them anywhere, and tune them live from a sidebar of sliders and checkboxes — the canvas re-runs as you drag and the new value is written back into your code
 - **Animation System**: Create timeline-based animations with draw, move, rotate, flip, and fade effects
+- **Mouse Events**: Assign a callback per event — `Mouse.OnMove/OnDown/OnClick/OnDrag/OnWheel/…` — and get world coordinates, modifier keys and the shape under the cursor, in the shape JavaScript uses. Registering one hands the canvas's gestures to your code
 - **Interactive Canvas**: Zoom with mouse wheel, pan with middle-click, toggle grid display
 - **Scales to large drawings**: three renderers — WPF, a built-in software rasterizer, and a Direct3D 11 backend — with per-frame automatic selection, plus a frame-timing readout on `F10`. See [Render Backends](#render-backends)
 - **Export Options**: Save visualizations as PNG images, animated GIFs, or MP4 videos
@@ -1684,6 +1685,287 @@ function does not re-enter itself.
 If a callback throws, the loop stops and the error goes to the console rather than repeating sixty
 times a second.
 
+### Mouse and pointer events
+
+For interaction, assign a function per event — the shape JavaScript uses:
+
+```csharp
+var cursor = new VCircle(new VXYZ(0, 0), 8) { Name = "cursor", Color = "Yellow" };
+
+Mouse.OnMove(e => cursor.Center = e.Position);
+```
+
+Every callback receives a `MouseInfo`: where the pointer is in **world coordinates** (Y-up, origin at
+the canvas centre), which button and which modifier keys are involved, how far the wheel turned, and —
+only if you ask for it — which shape is underneath.
+
+**Registering replaces; it does not add.** Calling `Mouse.OnMove` twice leaves one handler, the
+second. That is deliberate, and it is *not* how `Frame.Request` behaves: `Main()` is re-invoked on
+every tick of a Global Parameters slider drag, so an additive API would silently stack hundreds of
+live handlers during one drag. Pass `null` to detach one:
+
+```csharp
+Mouse.OnMove(null);      // detach just the move handler
+Mouse.Clear();           // detach all of them
+```
+
+**Handlers are dropped at the start of every run, and by the Stop button.** Register them from
+`Main()` (or a sketch's `Setup()`) and let them be re-registered each time you press Run. A handler
+cannot outlive the run that created it — it is a delegate pointing into the collectible assembly your
+code was compiled into, and one left behind would keep that assembly alive and keep firing against
+shapes the next run has already replaced.
+
+#### Interactive mode
+
+**Registering any handler puts the canvas into interactive mode**, which is how your handlers get to
+see every gesture. While at least one handler is registered:
+
+- **click-to-select, wheel zoom and double-click-zoom-to-fit are suppressed** — the click, the wheel
+  and the double click are yours;
+- **floating zoom controls appear at the canvas's top-right** in their place — zoom in, zoom out, zoom
+  to fit, and a live zoom percentage;
+- **the properties panel is hidden and `F4` is inert**, because it edits the *selected* shape and there
+  is no longer a selection. It comes back by itself the next time you run something that registers
+  nothing;
+- **middle-button drag still pans.** It is the only way to pan, so it stays the canvas's own gesture.
+
+A project that registers no handlers behaves exactly as it always has — nothing was taken away.
+
+**The drawing tools (`P`/`L`/`C`/`R`) and the measuring tape (`Ctrl+M`) keep priority while armed.**
+Your handlers do not fire at all until you leave the tool with `Esc`. Code cannot override that: those
+are states you deliberately armed with a shortcut, and letting a script break the line tool has no
+upside.
+
+#### Hover highlighting
+
+`e.Target` is the topmost shape under the cursor, so "highlight what I am pointing at" is a few lines:
+
+```csharp
+for (int i = 0; i < 6; i++)
+{
+    new VCircle(new VXYZ(-250 + i * 100, 0), 40)
+    {
+        Name = $"dot{i}",
+        FillColor = "DimGray"
+    };
+}
+
+Shape? hot = null;
+
+Mouse.OnMove(e =>
+{
+    if (ReferenceEquals(e.Target, hot)) return;    // still over the same thing — leave the scene alone
+
+    if (hot != null) hot.FillColor = "DimGray";    // un-highlight the one we left
+    hot = e.Target;
+    if (hot != null) hot.FillColor = "Orange";
+});
+
+Mouse.OnLeave(e =>
+{
+    if (hot != null) { hot.FillColor = "DimGray"; hot = null; }
+});
+```
+
+**`Target` is lazy.** It is computed the first time a handler reads it and cached for that event, so a
+move handler that never asks pays nothing — which matters, because a move handler runs well over a
+hundred times a second. Two things to know about the answer it gives:
+
+- It uses the **same few-pixel tolerance the selection tool uses**, so it means *"what would clicking
+  here have picked?"*, not *"is the cursor strictly inside this shape?"*. Use
+  [`Shape.Contains(VXYZ)`](#geometry-utilities) for the strict question.
+- While a timeline or a `Frame` loop is animating, the spatial index it consults holds **start-of-frame
+  positions**, so it can lag a fast-moving shape.
+
+#### Click to create
+
+```csharp
+new VText(new VXYZ(-380, 260), "Click to place a dot, Shift-click for red, click a dot to remove it")
+{
+    Name = "hint", Color = "Gray", Height = 14
+};
+
+Mouse.OnClick(e =>
+{
+    if (e.Button != MouseButtonKind.Left) return;
+
+    if (e.Target != null)
+    {
+        e.Target.Remove();              // clicked an existing shape — delete it
+        VizConsole.Log("removed");
+        return;
+    }
+
+    new VCircle(e.Position, 15)
+    {
+        Name = $"dot{e.X:F0}_{e.Y:F0}",
+        FillColor = e.Shift ? "Tomato" : "Cyan"
+    };
+
+    VizConsole.Log($"placed at {e.X:F1}, {e.Y:F1}");
+});
+```
+
+**`OnClick` is synthesised** from a down and an up of the **same button** within about 3 pixels of each
+other, and it fires *after* `OnUp`. A drag therefore produces no click at all, which is what lets
+"click empty space to place" and "drag to do something else" coexist. `OnDoubleClick` fires **in place
+of** `OnDown` on the second click — the release after it is still an `OnUp`, and still an `OnClick` if
+the pointer did not move, so a double click reads as *click, double-click, click*.
+
+Note that the unnamed-shape sweep runs once, when `Main()` returns — so a shape created later by a
+handler is never hidden by it, named or not. Naming it anyway is still worth doing: the name is what
+the outliner and `VizConsole` show.
+
+#### Dragging
+
+```csharp
+var box = new VRectangle(new VXYZ(-40, -40), 80, 80) { Name = "box", FillColor = "SteelBlue" };
+VXYZ grab = VXYZ.Zero;
+bool dragging = false;
+
+Mouse.OnDown(e =>
+{
+    dragging = e.Target == box;
+    if (dragging) grab = e.Position - box.Corner;    // where inside the box we took hold of it
+});
+
+Mouse.OnDrag(e =>
+{
+    if (dragging) box.Corner = e.Position - grab;    // no e.Target read: the pointer may have outrun it
+});
+
+Mouse.OnUp(e => dragging = false);
+```
+
+**`OnDrag` fires instead of `OnMove` while a button is held, and does not fall back to `OnMove`** — if
+you register only a move handler, nothing happens while a button is down. The canvas captures the
+mouse for the duration of a drag, so it keeps reporting even once the pointer leaves the canvas, and a
+drag **always** finishes with an `OnUp`. That is also true of `OnLeave`: a drag in progress gets its
+`OnUp` first, so a handler tracking *"am I dragging?"* is never left stuck on.
+
+#### Snapped vs raw coordinates
+
+`Position` is the value the rest of the app uses, so it is **grid-snapped while Snap to Grid (`F9`) is
+on** and matches the coordinate readout in the status bar. `RawPosition` never snaps. `X` and `Y` are
+shorthand for `Position.X`/`Position.Y`.
+
+```csharp
+Mouse.OnClick(e =>
+{
+    new VPoint(e.Position);        // lands on the grid when F9 is on
+    VizConsole.Log($"snapped {e.Position}  true {e.RawPosition}");
+});
+```
+
+(Hit-testing always uses the raw position — a snapped point would report whatever sits at the grid
+intersection rather than what is under the cursor.)
+
+#### Mouse members
+
+Every registration method takes `Action<MouseInfo>?` and returns `void`. Passing `null` detaches.
+
+| Member | Description |
+|---|---|
+| `Mouse.OnMove(handler)` | pointer moved with **no** button held |
+| `Mouse.OnDown(handler)` | a button went down; `e.Button` says which |
+| `Mouse.OnUp(handler)` | a button was released |
+| `Mouse.OnClick(handler)` | synthesised down-and-up-in-the-same-place, dispatched after `OnUp` |
+| `Mouse.OnDoubleClick(handler)` | second click of a double click, **in place of** `OnDown` |
+| `Mouse.OnDrag(handler)` | pointer moved with a button held, **in place of** `OnMove` |
+| `Mouse.OnWheel(handler)` | wheel turned; read `e.WheelNotches`. The canvas does not zoom on the wheel in interactive mode |
+| `Mouse.OnEnter(handler)` | pointer entered the canvas |
+| `Mouse.OnLeave(handler)` | pointer left the canvas |
+| `Mouse.Clear()` | detaches every handler, which also leaves interactive mode |
+| `Mouse.HasHandlers` | `bool` — whether anything is registered, i.e. whether the canvas is in interactive mode |
+| `Mouse.X` / `Mouse.Y` | `double` — last known pointer position in world coordinates. Tracked **even with no handler registered** |
+| `Mouse.IsDown` | `bool` — whether any button is held over the canvas. Likewise always tracked |
+| `Mouse.CallbackFailed` | `event Action<Exception>` raised when a handler throws. The app subscribes for you and prints to the console; you rarely need it |
+
+`Mouse.X`/`Y`/`IsDown` are a **polled** alternative to callbacks — they are recorded on every mouse
+event whether or not anything is registered, so reading them from a `Frame` callback needs no
+registration and does not put the canvas into interactive mode:
+
+```csharp
+var dot = new VCircle(new VXYZ(0, 0), 10) { Name = "dot" };
+
+void Tick(double t)
+{
+    dot.Center = new VXYZ(Mouse.X, Mouse.Y);      // no handler registered; zoom and select still work
+    dot.FillColor = Mouse.IsDown ? "Red" : "Transparent";
+    Frame.Request(Tick);
+}
+
+Frame.Request(Tick);
+```
+
+#### MouseInfo members
+
+A fresh instance is created for every event, so it is safe to keep one — stash it in a field, put it
+in a list, compare it with the next. Nothing is pooled or reused. (`MouseInfo` has a public
+constructor, but it is there for the host and for tests; user code only ever reads one.)
+
+| Member | Type | Description |
+|---|---|---|
+| `Kind` | `MouseEventKind` | which event this is — useful when one method is registered for several |
+| `Position` | `VXYZ` | world coordinates, **grid-snapped** while Snap to Grid (`F9`) is on |
+| `RawPosition` | `VXYZ` | world coordinates, never snapped. Equals `Position` unless snapping is on |
+| `X` / `Y` | `double` | shorthand for `Position.X` / `Position.Y` |
+| `ScreenX` / `ScreenY` | `double` | device-independent pixels from the canvas's top-left corner; `ScreenY` increases **downwards**. Rarely needed |
+| `Button` | `MouseButtonKind` | the button this event is *about* — `None` for a move, wheel turn, enter or leave |
+| `LeftDown` / `RightDown` / `MiddleDown` | `bool` | which buttons are held **now**; this is what to read during a move or drag |
+| `Shift` / `Ctrl` / `Alt` | `bool` | modifier keys at the moment of the event |
+| `ClickCount` | `int` | `1` single, `2` double, `0` when the event is not about a button |
+| `WheelDelta` | `int` | wheel movement in WPF's units of 120 per notch, positive away from you; `0` unless `Kind` is `Wheel` |
+| `WheelNotches` | `double` | `WheelDelta / 120.0` — 1.0 per detent, the friendlier form |
+| `Scale` | `double` | canvas zoom when the event happened, in screen pixels per world unit. `8 / e.Scale` is "8 pixels" expressed in world units |
+| `Target` | `Shape?` | topmost shape under the cursor, or `null` over empty space. Computed on first read and cached — see above |
+
+`MouseEventKind` is `Move`, `Down`, `Up`, `Click`, `DoubleClick`, `Drag`, `Wheel`, `Enter`, `Leave`.
+`MouseButtonKind` is `None`, `Left`, `Right`, `Middle`, `XButton1`, `XButton2`.
+
+#### Errors, performance, and sketch mode
+
+**A handler that throws detaches every handler and reports the error once** to the console. It has to:
+user code runs in-process, a move handler can throw a hundred times a second, and an exception
+reaching WPF's dispatcher takes the application down. Fix the handler and press Run to re-register.
+
+**Handlers always run on the UI thread, one at a time**, so they can freely create, modify and remove
+shapes. The canvas then repaints **once per frame**, not once per event — a burst of moves coalesces
+into a single redraw. That is cheap, but not free: a move handler means the canvas re-snapshots and
+repaints every frame while the mouse is moving, which is worth knowing on a very large drawing. If a
+handler only needs to react occasionally, return early (as the hover example does) rather than
+touching shapes on every event.
+
+**In sketch mode, do not create shapes from a handler.** The sketch runtime clears the canvas before
+every `Draw()`, so anything a handler created is wiped on the next frame. Record what happened in a
+field and draw from `Draw()`:
+
+```csharp
+using System.Collections.Generic;
+using DoodleSharp.Animation;      // neither of these is in the sketch template — add them
+
+public class MySketch : Sketch
+{
+    private readonly List<VXYZ> _dots = new();
+
+    public override void Setup()
+    {
+        Mouse.OnClick(e => _dots.Add(e.Position));   // record only
+    }
+
+    public override void Draw()
+    {
+        foreach (var p in _dots)
+            new VCircle(p, 12) { FillColor = "Cyan" };
+    }
+}
+```
+
+A sketch can also skip registration entirely: `MouseX`, `MouseY` and `MousePressed` on `Sketch` are
+now populated on every frame from the same tracking that feeds `Mouse.X`/`Mouse.Y`/`Mouse.IsDown`.
+(They were declared from the start but nothing ever wrote them, so they sat at zero for every sketch
+ever run — that is fixed.)
+
 ### Timelines — for a finite sequence
 
 The `Animator` class builds a **seekable** timeline, which is what the scrub bar, GIF export and
@@ -2142,6 +2424,11 @@ surgically, leaving `min:`/`max:`/`group:` and your undo history intact — and 
 - **Middle-Click Drag**: Pan the canvas view
 - **Grid Toggle**: Show/hide reference grid lines (View menu)
 - **Auto Zoom Extents**: Fits all shapes after each run — enable *Zoom to fit on run* in Settings (off by default); double-clicking empty canvas does it on demand
+
+> **While your code has a mouse handler registered**, the canvas hands those gestures to you: wheel
+> zoom, click-to-select and double-click-zoom-to-fit are suppressed and floating zoom buttons appear
+> at the top-right instead. Middle-click drag still pans. See
+> [Mouse and pointer events](#mouse-and-pointer-events).
 
 ### Coordinate System
 DoodleSharp uses a **mathematical coordinate system**:
@@ -3119,12 +3406,12 @@ All cursors are visually indicated with white caret lines, and selections are hi
 | `Ctrl+A` | Select all shapes |
 | `Ctrl+G` | Zoom to shape by ID |
 | `Ctrl+M` | Toggle Measuring Tape tool |
-| `F4` | Toggle Properties panel |
+| `F4` | Toggle Properties panel (inert while your code has a [mouse handler](#mouse-and-pointer-events) registered — there is no selection to edit) |
 | `F6` | Toggle Global Parameters panel |
 | `F9` | Toggle Snap to Grid |
 | `F10` | Toggle the frame-timing readout |
 | `Ctrl+Shift+M` | Toggle Minimap |
-| `Esc` | Cancel current tool/operation |
+| `Esc` | Cancel current tool/operation — also what hands the mouse back to your handlers after using a drawing tool |
 
 ### Code Navigation & Intellisense
 | Shortcut | Action |
@@ -3299,7 +3586,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using C2VGeometry;          // Shapes: VPoint, VLine, VCircle, etc. and the VXYZ coordinate type
-using DoodleSharp.Animation;   // Animator, Frame, DrawAnimation, MoveAnimation, etc.
+using DoodleSharp.Animation;   // Animator, Frame, Mouse, DrawAnimation, MoveAnimation, etc.
 using DoodleSharp.Console;     // VizConsole.Log()
 ```
 

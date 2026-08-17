@@ -107,6 +107,12 @@ public partial class MainWindow : Window
     private readonly System.Diagnostics.Stopwatch _frameLoopClock = new();
     private double _lastAnimationFrameTime = -1;
 
+    /// <summary>
+    /// The <see cref="CanvasRenderer.RegistryVersion"/> the canvas snapshot was last taken at, so
+    /// <see cref="RepaintAfterUserCode"/> can tell "shapes moved" from "shapes were added or removed".
+    /// </summary>
+    private int _lastRepaintedRegistryVersion = -1;
+
     // Peek Definition popup
     private System.Windows.Controls.Primitives.Popup? _peekPopup;
 
@@ -297,6 +303,13 @@ public partial class MainWindow : Window
             CoordinatesText.Text = $"X: {pos.X:F2}  Y: {pos.Y:F2}";
         };
 
+        // Keeps the floating zoom readout honest no matter what changed the view — the buttons, a
+        // zoom-to-fit, or a middle-drag pan (which still works in interactive mode).
+        RenderCanvas.Viewport.TransformChanged += (s, e) =>
+        {
+            if (CanvasNavPanel.Visibility == Visibility.Visible) UpdateCanvasZoomReadout();
+        };
+
         // Selection changes
         RenderCanvas.SelectionTool.SelectionChanged += OnSelectionChanged;
 
@@ -331,6 +344,18 @@ public partial class MainWindow : Window
                 $"Frame callback threw; the loop has been stopped. {ex.GetType().Name}: {ex.Message}");
             Console.ConsoleOutput.Instance.Flush();
         };
+
+        DoodleSharp.Animation.Mouse.CallbackFailed += ex =>
+        {
+            Console.ConsoleOutput.Instance.WriteError("Mouse", 0,
+                $"Mouse handler threw; all handlers have been detached. {ex.GetType().Name}: {ex.Message}");
+            Console.ConsoleOutput.Instance.Flush();
+        };
+
+        // Registering or dropping a handler flips the canvas in and out of interactive mode, which
+        // changes visible chrome. Main() runs on a thread-pool thread, so this has to be marshalled.
+        DoodleSharp.Animation.Mouse.HandlersChanged += () =>
+            Dispatcher.BeginInvoke(new Action(SyncInteractiveModeChrome));
 
         bool _needsInitialZoom = true;
         TimeSpan _lastRenderTime = TimeSpan.Zero;
@@ -386,11 +411,17 @@ public partial class MainWindow : Window
             {
                 if (DoodleSharp.Animation.Frame.Pump(_frameLoopClock.Elapsed.TotalSeconds))
                 {
-                    // Callbacks mutate shapes in place, so the cull index holds stale boxes --
-                    // same reason the timeline branch below re-indexes.
-                    RenderCanvas.ReindexForAnimationFrame();
-                    RenderCanvas.Refresh();
+                    RepaintAfterUserCode();
                 }
+            }
+
+            // ── Mouse handlers ──
+            // Those are dispatched synchronously from the canvas's own input handlers, so by the time
+            // we get here they have already run; all that is left is one repaint for the frame. Doing
+            // it here rather than per event coalesces a burst of moves into a single redraw.
+            if (DoodleSharp.Animation.Mouse.ConsumeSceneDirty())
+            {
+                RepaintAfterUserCode();
             }
 
             var timeline = CanvasRenderer.Instance.ActiveTimeline;
@@ -437,6 +468,44 @@ public partial class MainWindow : Window
             // Update animation controls visibility and time display (after canvas draw)
             UpdateAnimationControlsVisibility();
         };
+    }
+
+    /// <summary>
+    /// Repaints the canvas after per-frame user code ran — a <c>Frame</c> callback or a <c>Mouse</c>
+    /// handler.
+    ///
+    /// <para>
+    /// <b>A shape the callback *created* needs <c>SetFrameShapes</c>, not <c>Refresh()</c>.</b>
+    /// <c>CanvasRenderer.AddShape</c> appends only to the registry's own list;
+    /// <c>RenderCanvas._currentShapes</c> is a separate snapshot assigned by <c>Render()</c> at the
+    /// end of a run. So <c>Refresh()</c> alone repaints the snapshot as it was when the run finished
+    /// and the new shape never appears — while a shape *mutated* in place appears fine, which is what
+    /// made this asymmetry easy to miss. <c>SetFrameShapes</c> retakes the snapshot and rebuilds the
+    /// cull index in one call.
+    /// </para>
+    ///
+    /// <para>
+    /// The snapshot is only retaken when <see cref="CanvasRenderer.RegistryVersion"/> moved, because
+    /// it costs a <c>ToList()</c> plus a full index rebuild. In the common case — a callback nudging
+    /// existing shapes — the shape objects are identical and only their cached bounds are stale, so
+    /// the cheaper re-index is enough.
+    /// </para>
+    /// </summary>
+    private void RepaintAfterUserCode()
+    {
+        var version = CanvasRenderer.Instance.RegistryVersion;
+        if (version != _lastRepaintedRegistryVersion)
+        {
+            _lastRepaintedRegistryVersion = version;
+            RenderCanvas.SetFrameShapes(CanvasRenderer.Instance.GetShapes());
+        }
+        else
+        {
+            // Shapes moved in place, so only the cull index's cached boxes went stale.
+            RenderCanvas.ReindexForAnimationFrame();
+        }
+
+        RenderCanvas.Refresh();
     }
 
     private void InitializeConsole()
@@ -4547,23 +4616,33 @@ public partial class MainWindow : Window
         // Clear active timeline reference
         CanvasRenderer.Instance.ActiveTimeline = null;
 
+        // Drop any queued frame callbacks and registered mouse handlers. This must be unconditional:
+        // SketchRuntime.Stop() returns immediately when no sketch is active, so before this line Stop
+        // did not stop a Frame loop at all — a Main()-mode script driving motion by rescheduling a
+        // callback kept animating after the user pressed Stop, with no way to halt it short of another
+        // Run. Dropping the mouse handlers here is also what takes the canvas back out of interactive
+        // mode, so Stop restores selection and wheel zoom.
+        DoodleSharp.Animation.Frame.Clear();
+        DoodleSharp.Animation.Mouse.Clear();
+
         // Stop any running sketch and unload its assembly context. Also reset the canvas
         // background in case the sketch called Background(color) — otherwise the user-set
         // color would leak into the next Run.
-        if (DoodleSharp.Sketching.SketchRuntime.Instance.IsRunning)
+        var wasSketchRunning = DoodleSharp.Sketching.SketchRuntime.Instance.IsRunning;
+        DoodleSharp.Sketching.SketchRuntime.Instance.Stop();
+        if (wasSketchRunning)
         {
-            DoodleSharp.Sketching.SketchRuntime.Instance.Stop();
             RenderCanvas.CanvasBackground = new System.Windows.Media.SolidColorBrush(
                 System.Windows.Media.Color.FromRgb(30, 30, 30));
-        }
-        else
-        {
-            DoodleSharp.Sketching.SketchRuntime.Instance.Stop();
         }
 
         // Hide animation controls
         AnimationControlsPanel.Visibility = Visibility.Collapsed;
         _isPaused = false;
+
+        // Handlers were just dropped, so interactive mode is over: restore selection, the properties
+        // panel and wheel zoom, and take the navigation overlay away.
+        SyncInteractiveModeChrome();
     }
 
     private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
@@ -4794,6 +4873,11 @@ public partial class MainWindow : Window
             // Flush any pending console output
             Console.ConsoleOutput.Instance.Flush();
             RunButton.IsEnabled = true;
+
+            // The run registered (or stopped registering) mouse handlers, so bring the canvas chrome
+            // into line. Done once here rather than per registration, so a Main() that assigns several
+            // handlers does not flicker the panel on and off.
+            SyncInteractiveModeChrome();
         }
     }
 
@@ -4886,6 +4970,7 @@ public partial class MainWindow : Window
         finally
         {
             Console.ConsoleOutput.Instance.Flush();
+            SyncInteractiveModeChrome();
         }
     }
 
@@ -5709,11 +5794,6 @@ public partial class MainWindow : Window
         TimelineRow.Height = isVisible ? new GridLength(150) : new GridLength(0);
     }
 
-    private void ShowToolbarMenuItem_Click(object sender, RoutedEventArgs e)
-    {
-        // Toolbar menu item has been removed
-    }
-
     private void ShowConsoleMenuItem_Click(object sender, RoutedEventArgs e)
     {
         var isVisible = ShowConsoleMenuItem.IsChecked;
@@ -6235,6 +6315,89 @@ public partial class MainWindow : Window
         _propertiesPanel.DockRequested += OnPropertiesPanelDockRequested;
         _propertiesPanel.FloatRequested += OnPropertiesPanelFloatRequested;
     }
+
+    #region Interactive mode (user Mouse handlers)
+
+    /// <summary>
+    /// True while user code has a mouse handler registered, which puts the canvas into interactive
+    /// mode: it stops competing for the mouse, so selection, wheel zoom and double-click zoom-to-fit
+    /// are suppressed and the floating navigation controls take their place.
+    /// </summary>
+    private static bool IsCanvasInteractive => DoodleSharp.Animation.Mouse.HasHandlers;
+
+    /// <summary>
+    /// Brings the window chrome into line with interactive mode. Called whenever the handler set
+    /// becomes empty or non-empty, and after every run.
+    ///
+    /// <para>
+    /// Idempotent, and deliberately driven off <c>Mouse.HasHandlers</c> rather than tracked separately:
+    /// handlers are dropped and re-registered on every run, so a flag maintained alongside them would
+    /// be one more thing to get out of step.
+    /// </para>
+    /// </summary>
+    private void SyncInteractiveModeChrome()
+    {
+        var interactive = IsCanvasInteractive;
+
+        CanvasNavPanel.Visibility = interactive ? Visibility.Visible : Visibility.Collapsed;
+        if (interactive) UpdateCanvasZoomReadout();
+
+        // The status-bar hint describes gestures that no longer do what it says once user code owns
+        // the mouse — scroll in particular is handed over wholesale.
+        CanvasHintText.Text = interactive
+            ? "Mouse: your code | Middle-click: Pan"
+            : "Scroll: Zoom | Middle-click: Pan";
+
+        // Selection is suppressed in interactive mode, so the properties panel has nothing to show and
+        // no way to be given anything — it edits the selected shape. Hide it rather than leaving a
+        // permanently empty panel taking up room, and disable the menu item and F4 so it cannot be
+        // brought back into that state.
+        ShowPropertiesMenuItem.IsEnabled = !interactive;
+
+        if (interactive)
+        {
+            // Drop any selection made before the run so no stale handles are left on screen and the
+            // outliner does not keep reporting a selection the canvas will not honour.
+            RenderCanvas.SelectionTool.ClearSelection();
+            SetPropertiesVisibility(false, ApplicationSettings.Instance.PropertiesDocked);
+
+            // Deliberately not persisted: this is a temporary consequence of the running project, not
+            // a preference. Leaving ShowProperties alone means the panel comes back by itself when the
+            // user runs something that does not register handlers.
+            ShowPropertiesMenuItem.IsChecked = false;
+        }
+        else if (ApplicationSettings.Instance.ShowProperties)
+        {
+            InitializePropertiesPanel();
+            SetPropertiesVisibility(true, ApplicationSettings.Instance.PropertiesDocked);
+        }
+
+        RenderCanvas.Refresh();
+    }
+
+    /// <summary>Updates the zoom percentage shown in the floating canvas controls.</summary>
+    private void UpdateCanvasZoomReadout()
+        => CanvasZoomText.Text = $"{RenderCanvas.Scale * 100:0.#}%";
+
+    private void CanvasZoomIn_Click(object sender, RoutedEventArgs e)
+    {
+        RenderCanvas.ZoomStep(zoomIn: true);
+        UpdateCanvasZoomReadout();
+    }
+
+    private void CanvasZoomOut_Click(object sender, RoutedEventArgs e)
+    {
+        RenderCanvas.ZoomStep(zoomIn: false);
+        UpdateCanvasZoomReadout();
+    }
+
+    private void CanvasZoomExtents_Click(object sender, RoutedEventArgs e)
+    {
+        RenderCanvas.ZoomExtents(CanvasRenderer.Instance.GetShapes());
+        UpdateCanvasZoomReadout();
+    }
+
+    #endregion
 
     private void ShowPropertiesMenuItem_Click(object sender, RoutedEventArgs e)
     {
@@ -6910,8 +7073,14 @@ public partial class MainWindow : Window
         }
         else if (e.Key == Key.F4 && Keyboard.Modifiers == ModifierKeys.None)
         {
-            ShowPropertiesMenuItem.IsChecked = !ShowPropertiesMenuItem.IsChecked;
-            ShowPropertiesMenuItem_Click(sender, e);
+            // Inert in interactive mode: the properties panel edits the selected shape, and selection
+            // is suppressed while user code owns the mouse. Swallow the key rather than letting it
+            // open a panel that could never be given anything.
+            if (!IsCanvasInteractive)
+            {
+                ShowPropertiesMenuItem.IsChecked = !ShowPropertiesMenuItem.IsChecked;
+                ShowPropertiesMenuItem_Click(sender, e);
+            }
             e.Handled = true;
         }
         else if (e.Key == Key.F6 && Keyboard.Modifiers == ModifierKeys.None)

@@ -132,8 +132,12 @@ namespace DoodleSharp.Documentation
                 { "ColorName", "Enum of 82 colour names, for when you want a colour as a value you can store, compare or switch on rather than as a string. Shape.Color and Shape.FillColor take STRINGS, not this enum, so convert on the way in: shape.Color = VColor.FromEnum(ColorName.Crimson). Every member's name is exactly the string it converts to, and exactly the WPF/CSS colour of the same name — so ColorName.Crimson, VColor.Crimson and the literal \"Crimson\" are three spellings of one colour, and the table below needs no per-value commentary. Rough grouping: the twelve basics (Red, Green, Blue, Yellow, Orange, Purple, Pink, Cyan, Magenta, White, Black, Gray) followed by 70 extended names in alphabetical order, Brown through YellowGreen — Dark*/Light*/Medium*/Pale* variants of the basics, plus the descriptive names (Coral, Crimson, Gold, Khaki, Salmon, Teal, Tomato, Wheat and so on). One duplicate to be aware of: Magenta and Fuchsia are two names for the same colour (#FF00FF), and both are in the list. Note this enum is NOT the full palette available to you — Color and FillColor accept any WPF colour name and any #RRGGBB or #AARRGGBB string, so the enum is a discoverability aid rather than a limit. For a colour you did not have a name for, use VColor.FromRgb, VColor.WithOpacity, or one of the random-colour helpers." },
 
                 // Animation
-                { "DoodleSharp.Animation", "Contains classes for animating shapes over time. Two models: Frame for per-frame callbacks that reschedule themselves (the requestAnimationFrame pattern), and Animator for a finite timeline that can be scrubbed and exported to GIF or video." },
+                { "DoodleSharp.Animation", "Contains the classes that make a drawing move and respond. Two motion models: Frame for per-frame callbacks that reschedule themselves (the requestAnimationFrame pattern), and Animator for a finite timeline that can be scrubbed and exported to GIF or video. Alongside them, Mouse is the input seam — JavaScript-style mouse callbacks (Mouse.OnMove, OnDown, OnClick, OnDrag, OnWheel and friends) that hand your code a MouseInfo for every gesture on the canvas, so a drawing can be interactive rather than only animated." },
                 { "Frame", "Per-frame callbacks, in the shape JavaScript uses: a function that asks for the next frame. Frame.Request(callback) queues it and returns a handle; call Frame.Request again from inside the callback to keep going, and simply stop asking to end. The callback receives elapsed seconds since the loop started - write motion as a function of that rather than accumulating state and it stays frame-rate independent. Frame.Cancel(handle) removes a queued callback. Requesting during a callback runs on the NEXT frame, never the current one. Use this for open-ended, interactive or procedural motion; use Animator when you need a finite sequence you can scrub or export, which a self-rescheduling callback cannot provide." },
+                { "Mouse", "Static class holding the mouse callbacks for the canvas, in the shape JavaScript uses: assign one function per event — Mouse.OnMove(e => cursor.Center = e.Position). The methods are OnMove, OnDown, OnUp, OnClick, OnDoubleClick, OnDrag, OnWheel, OnEnter and OnLeave, each taking an Action<MouseInfo> and each handing your code a MouseInfo describing the gesture. ASSIGNING REPLACES; IT DOES NOT ADD — calling OnMove twice leaves one handler, the second, and passing null detaches it. That is deliberately unlike Frame.Request, which queues each request separately: Main() is re-invoked on every tick of a Global Parameters slider drag, so an additive API would silently stack hundreds of live handlers during one drag. HANDLERS ARE DROPPED AT THE START OF EVERY RUN and by the Stop button, so register them from Main() (or a sketch's Setup()) and let them be re-registered each time you press Run; a handler is a delegate into the collectible assembly your code was compiled into and cannot outlive the run that created it. REGISTERING ANY HANDLER PUTS THE CANVAS INTO INTERACTIVE MODE: it stops competing for the mouse, so click-to-select, wheel zoom and double-click-zoom-to-fit are all suppressed and your handlers see every gesture; floating zoom controls appear over the top-right of the canvas in their place, middle-button drag still pans, and the F4 properties panel is hidden while interactive mode lasts (it edits the selected shape, and there is no selection). The drawing tools (P/L/C/R) and the measuring tape keep priority while armed — your handlers do not fire until you leave the tool with Esc. A project that registers nothing behaves exactly as it always has. Synthesis rules worth knowing: OnClick is manufactured from a down/up pair on the same button within about 3 pixels, so a drag produces no click; OnDoubleClick fires INSTEAD OF OnDown on the second click; and OnDrag fires INSTEAD OF OnMove while a button is held, with no fallback to OnMove. Handlers run on the UI thread, one at a time, so they can freely create and modify shapes, and the canvas repaints once per frame rather than once per event. A handler that throws detaches ALL handlers and is reported once through CallbackFailed (the console shows it tagged \"Mouse\") rather than throwing a hundred times a second. Polled state: X, Y and IsDown are tracked even with no handler registered, so a Frame callback or a sketch's Draw() can read them without registering anything. HasHandlers says whether interactive mode is on, and Clear() detaches everything." },
+                { "MouseInfo", "The event object handed to every Mouse callback — the equivalent of the e in a JavaScript onmousemove(e) handler. A fresh instance is created for each dispatched event, so it is safe to keep one, stash it in a field or compare it with the next; it is deliberately not pooled or reused. Position and geometry: Position (VXYZ in world coordinates, grid-snapped while Snap to Grid (F9) is on), RawPosition (the same point never snapped), X and Y (shorthand for Position.X/Y), ScreenX and ScreenY (device-independent pixels from the canvas's top-left, Y increasing downwards), Scale (canvas zoom, screen pixels per world unit — use 8 / e.Scale for \"within 8 pixels\"). Remember the world is Y-UP with (0, 0) at the centre of the canvas, so e.Position drops straight into a shape constructor with no conversion. Buttons and modifiers: Kind (MouseEventKind — which event this is), Button (MouseButtonKind — the button this event is ABOUT, None for a move, wheel, enter or leave), LeftDown, RightDown, MiddleDown (what is held right now, which is what you want during a drag), Shift, Ctrl, Alt, ClickCount (1 single, 2 double, 0 when not a button event), WheelDelta (raw WPF units, 120 per notch) and WheelNotches (the friendly form, 1.0 per detent). Target is the topmost shape under the cursor or null over empty space, computed on first read and cached, so a handler that never asks pays nothing. There is NO Handled property — the canvas's own gestures are already suppressed in interactive mode, so there is nothing to cancel. No WPF type appears anywhere on this class: coordinates are VXYZ and double, buttons and modifiers are its own enums and bools." },
+                { "MouseButtonKind", "Which mouse button a MouseInfo is about: None (a plain move, a wheel turn, or an enter/leave), Left, Right, Middle (the wheel pressed as a button), XButton1 or XButton2 (the extra side buttons, if the mouse has them). Read it from MouseInfo.Button on a down, up or click event. To ask what is HELD rather than what this event is about — during a drag, say — use MouseInfo.LeftDown / RightDown / MiddleDown instead. Note Middle is reported to your handlers, but a middle-button DRAG stays the canvas's own pan gesture." },
+                { "MouseEventKind", "What kind of event a MouseInfo describes, so one method can serve several callbacks and switch on MouseInfo.Kind. Values: Move (pointer moved with no button held), Down, Up, Click (synthesised from a down/up pair in the same place — see Mouse.OnClick), DoubleClick (a second click inside the system double-click time, delivered instead of Down), Drag (pointer moved with a button held, delivered instead of Move), Wheel, Enter and Leave. The kind always matches the callback the event arrived through, so it is informational rather than something you have to test." },
                 { "Animator", "Main class for creating animations. Manages sequencing automatically - animations added with AddToAnimations() play sequentially; pass a List<Animation> for parallel playback. Use Pause(seconds) to insert a time gap between animations. Call Animate() to start, Stop() to end. Properties: Duration (read-only total in seconds), Repeat (default false; when true each animation loops independently on its own duration), Speed (playback multiplier, default 1.0, shared with the toolbar speed slider), Fps (target frame rate, default 60, clamped to 1-120). Adding an animation also places its target on the canvas if it is not already there. Only one Animator plays at a time - Animate() replaces the active timeline, so put every animation into a single Animator." },
                 { "Animation", "Abstract base class for all animations. An animation attaches to one Shape and runs for a fixed Duration in seconds; the timeline feeds it a normalized time t (0 at its start, 1 at its end) which is passed through EasingFunction before being written into the target. Members: Target (the shape, null for ObjectPropertyAnimation), Duration, StartTime (assigned by the Animator when you add it), EasingFunction (defaults to EasingFunctions.Linear; any Func<double,double> works), Name (optional label for the timeline panel track), Apply(t) (called by the timeline, not by you)." },
                 { "DrawAnimation", "Animates the DrawFactor property to progressively draw a shape from 0% to 100%. Constructor: new DrawAnimation(shape, duration). Sets DrawFactor to 0 at construction so the shape stays invisible until its turn; a VGroup target is set recursively so children draw along with it." },
@@ -339,6 +343,18 @@ namespace DoodleSharp.Documentation
                 doc.Blocks.Add(GenerateMemberTable(fields, cleanName));
             }
 
+            // Events. Nothing listed these before, so every public event was unreachable in Help: the
+            // methods query drops add_*/remove_* as IsSpecialName and there was no section of their
+            // own. Descriptions had already been written for four of them, which is exactly note 91's
+            // shape — prose that exists for members no reader can get to, so a spot-check of the
+            // dictionaries looks healthy while the rendered page is missing them.
+            var events = type.GetEvents(MemberFlags);
+            if (events.Length > 0)
+            {
+                AddSectionHeader(doc, "Events");
+                doc.Blocks.Add(GenerateMemberTable(events, cleanName));
+            }
+
             // Methods
             var methods = type.GetMethods(MemberFlags)
                 .Where(m => !m.IsSpecialName && m.DeclaringType != typeof(object)) // Exclude getter/setter internal methods and Object methods
@@ -504,6 +520,12 @@ namespace DoodleSharp.Documentation
                         ? Convert.ToInt64(fi.GetRawConstantValue()).ToString()
                         : GetFriendlyTypeName(fi.FieldType)
                           + (fi.IsLiteral ? $" = {fi.GetRawConstantValue()}" : "");
+                }
+                else if (member is EventInfo ei)
+                {
+                    // The handler type is the whole point of an event row: it tells the reader what
+                    // signature to write. Without this branch an event rendered with a blank cell.
+                    sig = "event " + GetFriendlyTypeName(ei.EventHandlerType!);
                 }
 
                 // Flag staticness — it changes how the member is called, so it must be visible.
@@ -1799,6 +1821,154 @@ void Tick(double t)
 }
 
 Frame.Request(Tick);" },
+
+                { "Mouse", @"// One function per event - the JavaScript idiom. Register from Main():
+// handlers are dropped at the start of every run, so they are simply
+// re-registered each time you press Run.
+var cursor  = new VCircle(new VXYZ(0, 0), 8) { Color = ""Yellow"", Name = ""cursor"" };
+var readout = new VText(-380, 260, """", 14) { Name = ""readout"" };
+var box     = new VRectangle(new VXYZ(-60, -40), 120, 80) { Name = ""box"" };
+
+// The world is Y-up with (0, 0) at the centre of the canvas, so e.Position goes
+// straight into geometry. It is grid-snapped while Snap to Grid (F9) is on;
+// e.RawPosition is the true cursor position either way.
+Mouse.OnMove(e =>
+{
+    cursor.Center = e.Position;
+    readout.Content = $""{e.X:F1}, {e.Y:F1}  over {e.Target?.Name ?? ""empty space""}"";
+});
+
+// OnClick is synthesised from a down/up pair within a few pixels, so a drag
+// produces no click. OnDoubleClick arrives INSTEAD OF OnDown on the second click.
+Mouse.OnDown(e => VizConsole.Log($""{e.Button} down at {e.Position}""));
+Mouse.OnClick(e => new VCircle(e.Position, 20) { FillColor = e.Shift ? ""Red"" : ""Cyan"" }.Place());
+Mouse.OnDoubleClick(e => VizConsole.Log(""double click - OnDown did not fire""));
+
+// OnDrag replaces OnMove while a button is held; it does NOT fall back to OnMove.
+Mouse.OnDrag(e => new VPoint(e.Position) { Color = ""Lime"" });
+Mouse.OnUp(e => VizConsole.Log(""gesture finished""));
+
+// The canvas does not zoom on the wheel in interactive mode, so it is yours.
+Mouse.OnWheel(e => cursor.Radius = Math.Max(2, cursor.Radius + e.WheelNotches));
+
+Mouse.OnEnter(e => cursor.IsVisible = true);
+Mouse.OnLeave(e => cursor.IsVisible = false);
+
+// ASSIGNING REPLACES, IT DOES NOT ADD - this leaves one move handler, the second.
+Mouse.OnMove(e => cursor.Center = e.RawPosition);
+Mouse.OnUp(null);                 // and null detaches one
+
+VizConsole.Log($""interactive: {Mouse.HasHandlers}"");   // true - any handler does it
+
+// X / Y / IsDown are tracked even with no handler registered, so a Frame loop
+// (or a sketch's Draw()) can just poll them.
+void Trail(double t)
+{
+    if (Mouse.IsDown) new VPoint(new VXYZ(Mouse.X, Mouse.Y)) { Color = ""Orange"" };
+    if (t < 20.0) Frame.Request(Trail);
+}
+Frame.Request(Trail);
+
+// Registering anything puts the canvas into interactive mode: selection, wheel
+// zoom and double-click-zoom-to-fit are suppressed, floating zoom controls appear
+// top-right, and the F4 properties panel is hidden. Middle-drag still pans, and
+// the P/L/C/R tools and the measuring tape keep priority while armed.
+// A handler that throws detaches them all and reports once via CallbackFailed.
+// Mouse.Clear();                 // detach everything by hand" },
+
+                { "MouseInfo", @"// MouseInfo is the event object your handler receives - a fresh instance per
+// event, so it is safe to keep one and compare it with the next.
+Mouse.OnDown(e =>
+{
+    VizConsole.Log($""{e.Kind}: {e.Button}, ClickCount {e.ClickCount}"");
+
+    // Position is grid-snapped while Snap to Grid (F9) is on; RawPosition never is
+    VizConsole.Log($""world {e.Position}   raw {e.RawPosition}"");
+    VizConsole.Log($""screen {e.ScreenX:F0}, {e.ScreenY:F0} (pixels, Y down)"");
+
+    // Modifiers and held buttons are plain bools - no WPF types on this class
+    if (e.Shift && e.Ctrl)                 VizConsole.Log(""shift+ctrl"");
+    if (e.LeftDown || e.RightDown)         VizConsole.Log(""a button is still held"");
+    if (e.MiddleDown)                      VizConsole.Log(""middle held - the canvas pans"");
+    if (e.Alt)                             VizConsole.Log(""alt"");
+});
+
+// Target answers ""what would clicking here have picked?"" - it uses the selection
+// tool's few-pixel tolerance, is computed on first read and cached, and can lag a
+// fast-moving shape during animation. Use Shape.Contains for a strict interior test.
+var box = new VRectangle(new VXYZ(-60, -40), 120, 80) { Name = ""box"" };
+
+Mouse.OnMove(e =>
+{
+    box.FillColor = e.Target == box ? ""SteelBlue"" : ""Transparent"";
+
+    bool strictlyInside = box.Contains(e.RawPosition);
+
+    // Scale is screen pixels per world unit, so this reads ""within 8 pixels""
+    bool nearEdge = box.DistanceTo(e.RawPosition) < 8 / e.Scale;
+
+    VizConsole.Log($""inside {strictlyInside}, near edge {nearEdge}"");
+});
+
+// WheelDelta is raw WPF units (120 per notch); WheelNotches is the friendly form.
+Mouse.OnWheel(e => VizConsole.Log($""{e.WheelNotches} notches (delta {e.WheelDelta})""));
+
+// There is no Handled property: the canvas's own gestures are already suppressed
+// in interactive mode, so there is nothing to cancel." },
+
+                { "MouseButtonKind", @"// MouseButtonKind is which button a MouseInfo is ABOUT - read it from e.Button.
+Mouse.OnDown(e =>
+{
+    string what = e.Button switch
+    {
+        MouseButtonKind.Left     => ""left"",
+        MouseButtonKind.Right    => ""right"",
+        MouseButtonKind.Middle   => ""middle (a middle DRAG still pans the canvas)"",
+        MouseButtonKind.XButton1 => ""side button 1"",
+        MouseButtonKind.XButton2 => ""side button 2"",
+        _                        => ""no button""     // MouseButtonKind.None
+    };
+    VizConsole.Log($""{what} at {e.Position}"");
+});
+
+// On a move, wheel, enter or leave the button is None - ask what is HELD instead
+Mouse.OnDrag(e =>
+{
+    if (e.Button != MouseButtonKind.None) VizConsole.Log(""not reached on a drag"");
+    if (e.LeftDown)  new VPoint(e.Position) { Color = ""Cyan"" };
+    if (e.RightDown) new VPoint(e.Position) { Color = ""Red"" };
+});" },
+
+                { "MouseEventKind", @"// MouseEventKind lets one method serve several callbacks: switch on e.Kind.
+void Report(MouseInfo e)
+{
+    string note = e.Kind switch
+    {
+        MouseEventKind.Move        => ""moved, no button held"",
+        MouseEventKind.Down        => ""button pressed"",
+        MouseEventKind.Up          => ""button released"",
+        MouseEventKind.Click       => ""synthesised from a down/up in the same place"",
+        MouseEventKind.DoubleClick => ""second click - delivered instead of Down"",
+        MouseEventKind.Drag        => ""moved with a button held - instead of Move"",
+        MouseEventKind.Wheel       => $""wheel, {e.WheelNotches} notches"",
+        MouseEventKind.Enter       => ""pointer entered the canvas"",
+        MouseEventKind.Leave       => ""pointer left the canvas"",
+        _                          => ""unknown""
+    };
+    VizConsole.Log($""{e.Kind}: {note}"");
+}
+
+// The same method registered for every event - assignment replaces, so each of
+// these is the one and only handler for its own event.
+Mouse.OnMove(Report);
+Mouse.OnDown(Report);
+Mouse.OnUp(Report);
+Mouse.OnClick(Report);
+Mouse.OnDoubleClick(Report);
+Mouse.OnDrag(Report);
+Mouse.OnWheel(Report);
+Mouse.OnEnter(Report);
+Mouse.OnLeave(Report);" },
 
                 { "Animator", @"// Create shapes
 var line = new VLine(0, 0, 100, 50);
@@ -3588,6 +3758,63 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "Frame.Clear", "Drops every queued callback. Called automatically before each run, so a script never inherits the previous run's loops." },
                 { "Frame.HasPending", "True while at least one callback is queued." },
 
+                // Mouse
+                { "Mouse.OnMove", "Registers the handler called when the pointer moves with NO button held — Mouse.OnMove(e => cursor.Center = e.Position). Pass null to detach. ASSIGNING REPLACES: a second call leaves one handler, not two, unlike Frame.Request which queues each request. While a button is held the move goes to OnDrag INSTEAD, with no fallback here, so a handler that must run during a drag has to be registered on both. Register it from Main(): handlers are dropped at the start of every run." },
+                { "Mouse.OnDown", "Registers the handler called when a mouse button goes down; e.Button says which. Pass null to detach, and note that assigning replaces rather than adds. On the SECOND click of a double click this does not fire — OnDoubleClick fires in its place — so use OnClick if you want every click counted. Register it from Main(): handlers are dropped at the start of every run." },
+                { "Mouse.OnUp", "Registers the handler called when a mouse button is released. Pass null to detach; assigning replaces rather than adds. It runs before any synthesised OnClick, and a drag always finishes with one — the canvas captures the mouse for the duration, so an up arrives even when the pointer left the canvas, and a handler tracking \"am I dragging?\" is never left stuck on." },
+                { "Mouse.OnClick", "Registers the handler called after OnUp when the button went down and came back up within about 3 pixels — the usual \"the user clicked this\" event, which WPF does not give a bare canvas. A DRAG PRODUCES NO CLICK, which is exactly what makes it the right event for \"pick a shape\". The MouseInfo handed to it has Kind = Click and reuses the up event's Target, so hit-testing is not repeated. Pass null to detach; assigning replaces rather than adds." },
+                { "Mouse.OnDoubleClick", "Registers the handler called on the second click of a double click, IN PLACE OF OnDown — so a down handler and a double-click handler do not both fire for that click. e.ClickCount is 2. In interactive mode the canvas's own double-click-zoom-to-fit is suppressed, so the gesture is yours. Pass null to detach; assigning replaces rather than adds." },
+                { "Mouse.OnDrag", "Registers the handler called when the pointer moves with a button held, IN PLACE OF OnMove — it does NOT fall back to OnMove, so register both if the same work has to happen either way. Read e.LeftDown / e.RightDown / e.MiddleDown to see what is held (e.Button is None on a move). The canvas captures the mouse for the duration, so the drag keeps reporting even outside the canvas and always ends with an OnUp. Pass null to detach; assigning replaces rather than adds." },
+                { "Mouse.OnWheel", "Registers the handler called when the wheel turns; read e.WheelNotches for the amount (or e.WheelDelta for the raw 120-per-notch WPF value). In interactive mode the canvas does not zoom on the wheel, so the gesture is entirely yours — the floating zoom controls at the top-right of the canvas are there to replace it. Pass null to detach; assigning replaces rather than adds." },
+                { "Mouse.OnEnter", "Registers the handler called when the pointer enters the canvas. Pass null to detach; assigning replaces rather than adds. Useful for showing a custom cursor shape that OnLeave hides again." },
+                { "Mouse.OnLeave", "Registers the handler called when the pointer leaves the canvas. A drag in progress gets its OnUp FIRST, so a handler tracking \"am I dragging?\" is never left stuck on. Pass null to detach; assigning replaces rather than adds." },
+                { "Mouse.CallbackFailed", "Event raised when a handler throws. The handlers are detached FIRST and then this is raised once, rather than letting the exception escape on every mouse move — user code runs in-process, and an unhandled exception from a move handler would reach WPF's dispatcher a hundred times a second and take the application down. DoodleSharp subscribes to it and prints the type and message to the console tagged \"Mouse\", so you normally just read the console; subscribe yourself if you want to react in code. Any half-finished work the handler did before throwing still reaches the screen." },
+                { "Mouse.HasHandlers", "True while at least one handler is registered — which is also exactly what puts the canvas into interactive mode (selection, wheel zoom and double-click-zoom-to-fit suppressed, floating zoom controls shown, properties panel hidden). Read-only, and cheap: it is a plain field read, because the host tests it on every mouse event. Static." },
+                { "Mouse.Clear", "Detaches every handler at once, which also takes the canvas out of interactive mode and resets the click/drag tracking. X, Y and IsDown deliberately survive — they describe where the pointer is, which stays true. The host calls this before each run and from the Stop button, and it is not optional: user code is compiled into a collectible AssemblyLoadContext, so a handler left registered would pin that assembly and keep firing against shapes the next run has already replaced. You rarely need to call it yourself; pass null to a single On* method to detach just that one." },
+                { "Mouse.X", "Last known cursor X in world coordinates (Y-up, origin at the canvas centre). TRACKED EVEN WITH NO HANDLER REGISTERED, so it is usable from a Frame callback, a sketch's Draw(), or anywhere else that polls rather than reacts — reading it does not put the canvas into interactive mode. Static and read-only; it holds the last position seen and is not reset between runs." },
+                { "Mouse.Y", "Last known cursor Y in world coordinates (Y-up, origin at the canvas centre). Tracked even with no handler registered, so polling it from a Frame callback or a sketch's Draw() costs nothing and does not put the canvas into interactive mode. Static and read-only." },
+                { "Mouse.IsDown", "True while any mouse button is held over the canvas. Tracked even with no handler registered, so a Frame callback or a sketch's Draw() can poll it — the \"is the user pressing?\" flag for a paint-style sketch, with Mouse.X and Mouse.Y for where. It says nothing about WHICH button; register OnDown or OnDrag and read e.Button / e.LeftDown for that. Reset to false by Clear(). Static and read-only." },
+
+                // MouseInfo
+                { "MouseInfo.Kind", "Which kind of event this MouseInfo describes (MouseEventKind: Move, Down, Up, Click, DoubleClick, Drag, Wheel, Enter, Leave). It always matches the callback the event arrived through, so it is there for the case where one method is registered for several events and needs to switch on it." },
+                { "MouseInfo.Position", "Cursor position in world coordinates — Y-up with the origin at the canvas centre, so it drops straight into a shape constructor with no conversion. This is the same value the rest of the app uses, which means it is GRID-SNAPPED while Snap to Grid (F9) is on and matches the coordinate readout in the status bar. Use RawPosition when you want the true cursor position regardless of snapping." },
+                { "MouseInfo.RawPosition", "Cursor position in world coordinates, NEVER grid-snapped. Equal to Position unless Snap to Grid (F9) is on. This is also the point Target is hit-tested against, because hit-testing a snapped point would report whatever sits at the snap intersection rather than what is under the cursor — so pair RawPosition with Contains or DistanceTo when you are asking questions about what the pointer is over." },
+                { "MouseInfo.X", "Shorthand for Position.X — world X, so grid-snapped when Snap to Grid is on. Read-only." },
+                { "MouseInfo.Y", "Shorthand for Position.Y — world Y, measured UP from the canvas centre, and grid-snapped when Snap to Grid is on. Read-only." },
+                { "MouseInfo.ScreenX", "Cursor X in device-independent pixels from the canvas's LEFT edge. Rarely what you want — geometry is built in world coordinates — but useful for decisions that are genuinely about pixels. Read-only." },
+                { "MouseInfo.ScreenY", "Cursor Y in device-independent pixels from the canvas's TOP edge, INCREASING DOWNWARDS — the opposite of world Y, which increases upwards. Read-only." },
+                { "MouseInfo.Button", "The button this event is ABOUT (MouseButtonKind): the one pressed or released on a down, up, click or double click, and MouseButtonKind.None on a move, drag, wheel turn, enter or leave. To ask what is currently HELD — during a drag, say — read LeftDown, RightDown and MiddleDown instead. Read-only." },
+                { "MouseInfo.LeftDown", "Whether the left button is held down at the moment of this event. This is the one to read in an OnDrag handler, where Button is None. Read-only." },
+                { "MouseInfo.RightDown", "Whether the right button is held down at the moment of this event. Read-only." },
+                { "MouseInfo.MiddleDown", "Whether the middle button is held down at the moment of this event. Note that a middle-button DRAG remains the canvas's own pan gesture even in interactive mode — it is the only way to pan — so your drag handler does not run while it is in progress. Read-only." },
+                { "MouseInfo.Shift", "Whether Shift is held. A plain bool: MouseInfo exposes no WPF types, so there is no ModifierKeys to unpack. Read-only." },
+                { "MouseInfo.Ctrl", "Whether Ctrl is held. Read-only." },
+                { "MouseInfo.Alt", "Whether Alt is held. Read-only." },
+                { "MouseInfo.ClickCount", "1 for a single click, 2 for a double click, and 0 when the event is not about a button at all (a move, drag, wheel turn, enter or leave). On the synthesised click event it is at least 1. Read-only." },
+                { "MouseInfo.WheelDelta", "How far the wheel turned, in WPF's RAW units of 120 per notch, positive away from the user. 0 unless Kind is MouseEventKind.Wheel. WheelNotches is the friendlier form and is what most code should read. Read-only." },
+                { "MouseInfo.WheelNotches", "WheelDelta expressed in notches: 1.0 per detent, positive away from the user, computed as WheelDelta / 120.0. 0 unless the wheel turned. This is the value to scale a zoom or a step by. Read-only." },
+                { "MouseInfo.Scale", "The canvas zoom factor when the event happened — screen pixels per world unit. Use it to express a pixel tolerance in world units: 8 / e.Scale is \"within 8 pixels\" whatever the zoom. Read-only." },
+                { "MouseInfo.Target", "The topmost shape under the cursor, or null over empty space. Computed ON DEMAND and cached, so reading it costs nothing until you do and never costs twice — which matters because a move handler can run over a hundred times a second and most handlers never ask. Two things to know. It uses the same few-pixel tolerance the selection tool uses, so it answers \"what would clicking here have picked?\" rather than \"is the cursor strictly inside this shape?\" — use Shape.Contains(e.RawPosition) for the strict question. And while a timeline or a Frame loop is animating, the spatial index it consults holds the positions from the start of the frame, so it can LAG a fast-moving shape. The hit test runs against RawPosition, never the grid-snapped Position." },
+
+                // MouseButtonKind
+                { "MouseButtonKind.None", "No button — the value of MouseInfo.Button on a plain move, a drag, a wheel turn, or an enter/leave. Read LeftDown/RightDown/MiddleDown to find what is held on those events." },
+                { "MouseButtonKind.Left", "The left button." },
+                { "MouseButtonKind.Right", "The right button. It reaches your handlers in interactive mode, but only after an armed drawing tool has had its chance to treat the click as a cancel." },
+                { "MouseButtonKind.Middle", "The middle button (the wheel pressed as a button). Reported to a down/up/click handler, but a middle-button DRAG stays the canvas's own pan gesture and does not reach your drag handler." },
+                { "MouseButtonKind.XButton1", "The first extra button, if the mouse has one. Not present on most mice, so do not make it the only way to do something." },
+                { "MouseButtonKind.XButton2", "The second extra button, if the mouse has one." },
+
+                // MouseEventKind
+                { "MouseEventKind.Move", "The pointer moved with no button held — delivered to Mouse.OnMove." },
+                { "MouseEventKind.Down", "A button went down — delivered to Mouse.OnDown, except on the second click of a double click, where DoubleClick is delivered instead." },
+                { "MouseEventKind.Up", "A button was released — delivered to Mouse.OnUp, before any synthesised Click." },
+                { "MouseEventKind.Click", "A button went down and came back up within about 3 pixels. SYNTHESISED (see Mouse.OnClick), because WPF gives a bare canvas no click event; a drag therefore produces no Click." },
+                { "MouseEventKind.DoubleClick", "A second click arrived inside the system double-click time — delivered to Mouse.OnDoubleClick in place of Down, with ClickCount 2." },
+                { "MouseEventKind.Drag", "The pointer moved with a button held — delivered to Mouse.OnDrag in place of Move, and with no fallback to Move." },
+                { "MouseEventKind.Wheel", "The wheel turned — delivered to Mouse.OnWheel. Read WheelNotches for the amount." },
+                { "MouseEventKind.Enter", "The pointer entered the canvas — delivered to Mouse.OnEnter." },
+                { "MouseEventKind.Leave", "The pointer left the canvas — delivered to Mouse.OnLeave, after the OnUp of any drag that was in progress." },
+
                 // Animator
                 { "Animator.Duration", "Gets the total duration of all animations in seconds — the end of the last animation added, gaps from Pause() included. Read-only; it extends automatically as you add animations." },
                 { "Animator.Repeat", "Gets or sets whether playback loops. Default false. When true each animation loops independently on its own duration, so a 1-second and a 3-second animation drift apart rather than restarting together." },
@@ -4680,6 +4907,10 @@ double area = regionA.GetArea();                        // outer minus holes
             MethodInfo m => m.IsStatic,
             PropertyInfo p => (p.GetMethod ?? p.SetMethod)?.IsStatic == true,
             FieldInfo f => f.IsStatic && !(f.DeclaringType?.IsEnum ?? false),
+            // An event's staticness lives on its accessors, same as a property's. Without this a
+            // static event (Frame.CallbackFailed, Mouse.CallbackFailed) read as an instance member,
+            // which is precisely the "how do I call this?" confusion the static flag exists to answer.
+            EventInfo e => (e.AddMethod ?? e.RemoveMethod)?.IsStatic == true,
             _ => false
         };
 

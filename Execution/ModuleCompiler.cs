@@ -123,10 +123,11 @@ public class ModuleCompiler
             // we compile a fresh user assembly; otherwise the prior context would leak.
             DoodleSharp.Sketching.SketchRuntime.Instance.Stop();
 
-            // Frame callbacks hold delegates into the user assembly. Left queued, they pin the
-            // collectible load context so it never unloads, and the previous run's callbacks keep
-            // firing against shapes this run has already replaced.
+            // Frame callbacks and Mouse handlers hold delegates into the user assembly. Left
+            // registered, they pin the collectible load context so it never unloads, and the previous
+            // run's callbacks keep firing against shapes this run has already replaced.
             DoodleSharp.Animation.Frame.Clear();
+            DoodleSharp.Animation.Mouse.Clear();
 
             // Clear previous shapes and console
             CanvasRenderer.Instance.Clear();
@@ -253,6 +254,16 @@ public class ModuleCompiler
         _residentContext = null;
         if (ctx != null)
         {
+            // A queued Frame callback or a registered Mouse handler is a delegate pointing into this
+            // context, so it PINS it and the Unload() below silently does nothing — the previous run's
+            // callbacks then keep firing against shapes a later run has replaced. This is the most
+            // reliable "an ALC is dying" choke point in the app, so the drop belongs here as well as
+            // on the run paths. It stays inside this branch deliberately: InvalidateResident is also
+            // called on a programmatic source edit and on a project switch, and clearing there when
+            // nothing is being torn down would kill a running animation for no reason.
+            DoodleSharp.Animation.Frame.Clear();
+            DoodleSharp.Animation.Mouse.Clear();
+
             // Unloading a collectible ALC while user code still holds a reference into it is a
             // classic source of delayed, hard-to-attribute failures — worth a record every time.
             Journal.Debug("EXEC.RESIDENT.UNLOAD", "Unloading resident user assembly context");
@@ -277,6 +288,18 @@ public class ModuleCompiler
 
         using var scope = Journal.Scope("EXEC.RESIDENT.RERUN", "Re-invoking Main() on the resident assembly",
             $"cwd={_residentWorkingDirectory}");
+
+        // Re-running Main() re-arms whatever it registers, so the previous arming has to be dropped
+        // first. A Global-Parameters slider drag lands here many times a second: without this, each
+        // tick queued *another* Frame loop on top of the last, and the motion visibly accelerated as
+        // the drag went on. The ALC is unchanged here (same IL), so this is about accumulation rather
+        // than pinning — but it is the same one-line fix either way.
+        //
+        // Mouse handlers are assign-only, so re-running Main() would leave exactly one of each even
+        // without this; clearing anyway keeps the two registries' lifecycles identical, which is the
+        // property that stops one of them drifting out of sync with a future run path.
+        DoodleSharp.Animation.Frame.Clear();
+        DoodleSharp.Animation.Mouse.Clear();
 
         CanvasRenderer.Instance.Clear();
         ConsoleOutput.Instance.Clear();

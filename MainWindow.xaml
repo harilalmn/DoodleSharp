@@ -1088,6 +1088,50 @@
                     <Grid>
                         <canvas:RenderCanvas x:Name="RenderCanvas" />
 
+                        <!--
+                            Canvas navigation overlay. Shown only in interactive mode — when user code
+                            has registered a Mouse handler, the canvas stops zooming on the wheel and
+                            on double-click, so there has to be another way to navigate.
+                        -->
+                        <Border
+                            x:Name="CanvasNavPanel"
+                            Margin="0,12,12,0"
+                            Padding="6,4"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Background="#CC1E1E1E"
+                            CornerRadius="6"
+                            Visibility="Collapsed">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock
+                                    x:Name="CanvasZoomText"
+                                    MinWidth="46"
+                                    Margin="4,0,8,0"
+                                    VerticalAlignment="Center"
+                                    Foreground="LightGray"
+                                    Text="100%"
+                                    ToolTip="Current zoom level" />
+                                <Button
+                                    x:Name="CanvasZoomOutBtn"
+                                    Click="CanvasZoomOut_Click"
+                                    Content="&#x2212;"
+                                    Style="{StaticResource MediaButtonStyle}"
+                                    ToolTip="Zoom out" />
+                                <Button
+                                    x:Name="CanvasZoomInBtn"
+                                    Click="CanvasZoomIn_Click"
+                                    Content="+"
+                                    Style="{StaticResource MediaButtonStyle}"
+                                    ToolTip="Zoom in" />
+                                <Button
+                                    x:Name="CanvasZoomExtentsBtn"
+                                    Click="CanvasZoomExtents_Click"
+                                    Content="&#x2922;"
+                                    Style="{StaticResource MediaButtonStyle}"
+                                    ToolTip="Zoom to fit all shapes" />
+                            </StackPanel>
+                        </Border>
+
                         <!--  Animation Controls Overlay  -->
                         <Border
                             x:Name="AnimationControlsPanel"
@@ -2878,6 +2922,7 @@
                     Text="X: 0.00  Y: 0.00" />
 
                 <TextBlock
+                    x:Name="CanvasHintText"
                     Grid.Column="2"
                     VerticalAlignment="Center"
                     Foreground="{StaticResource ForegroundBrush}"

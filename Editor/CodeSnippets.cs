@@ -413,6 +413,19 @@ $1rect.Place();$0"),
 
 Frame.Request($1Tick);$0"),
 
+        ["mouse"] = ("Mouse event handlers (onmousemove style)",
+@"// Registering any handler puts the canvas in interactive mode: selection and
+// wheel zoom step aside, and the zoom controls appear over the top-right.
+Mouse.OnMove(e =>
+{
+    $1cursor.Center = e.Position;
+});
+
+Mouse.OnDown(e =>
+{
+    $2new VCircle(e.Position, 10) { FillColor = ""Cyan"" };
+});$0"),
+
         ["vpoly"] = ("Create a polygon",
 @"var $1poly = new VPolygon(
     new VXYZ($20, $30),

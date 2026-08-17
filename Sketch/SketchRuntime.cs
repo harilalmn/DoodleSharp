@@ -147,6 +147,11 @@ public sealed class SketchRuntime
     {
         if (_active == null && _ctx == null) return;
 
+        // Queued frame callbacks and registered mouse handlers are delegates into _ctx, so they pin it
+        // and the Unload() below silently does nothing. Drop them before the unload, not after.
+        DoodleSharp.Animation.Frame.Clear();
+        DoodleSharp.Animation.Mouse.Clear();
+
         _active = null;
         // Leave DefaultRegistry pointing at the canvas so subsequent project runs auto-register.
         C2VGeometry.Shape.DefaultRegistry = CanvasRenderer.Instance;
@@ -197,6 +202,18 @@ public sealed class SketchRuntime
         _active.FrameCount = _frame;
         _active.ElapsedSeconds = _clock.Elapsed.TotalSeconds;
         _active.DeltaSeconds = dt;
+
+        // Sketch.MouseX/MouseY/MousePressed were declared and documented from the start but nothing
+        // ever wrote them: UpdateInputState had no callers anywhere in the repo, so all three sat at
+        // their defaults for every sketch ever run. The canvas now records the pointer into Mouse on
+        // every event whether or not any handler is registered, so the values are simply here to be
+        // read. Keyboard state still has no source and is passed through unchanged.
+        UpdateInputState(
+            DoodleSharp.Animation.Mouse.X,
+            DoodleSharp.Animation.Mouse.Y,
+            DoodleSharp.Animation.Mouse.IsDown,
+            _active.KeyPressed,
+            _active.LastKey);
     }
 
     private void FlushFrame()

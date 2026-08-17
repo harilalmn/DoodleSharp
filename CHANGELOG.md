@@ -9,6 +9,48 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+### Added
+- **Mouse events for your code** — `Mouse.OnMove`, `OnDown`, `OnUp`, `OnClick`, `OnDoubleClick`,
+  `OnDrag`, `OnWheel`, `OnEnter` and `OnLeave` hand the canvas's mouse input to a callback, in the
+  style of the browser's `onmousemove(e)`. The event carries the cursor position in world
+  coordinates, which button and modifier keys are down, the click count, the wheel amount, and the
+  shape under the cursor. Assigning a handler replaces it rather than adding another, so re-running
+  your code — or dragging a Global Parameter — never stacks duplicates.
+
+  ```csharp
+  Mouse.OnDown(e => new VCircle(e.Position, 10) { FillColor = "Cyan" });
+  Mouse.OnMove(e => VizConsole.Log($"over {e.Target?.Name ?? "empty space"}"));
+  ```
+
+  Registering a handler puts the canvas into **interactive mode**: it stops competing with you for
+  the mouse, so click-to-select, wheel zoom and double-click-zoom-to-fit step aside and your handlers
+  see every gesture. Zoom controls and a live zoom percentage appear over the top-right of the canvas
+  in their place, and middle-button drag still pans. Nothing is removed — a project that registers no
+  handlers behaves exactly as before, and the drawing tools and measuring tape keep priority while
+  they are armed.
+- **`Mouse.X`, `Mouse.Y` and `Mouse.IsDown`** report the pointer without registering anything, so
+  they can be read from a `Frame` callback or a sketch's `Draw()`.
+
+### Fixed
+- **A sketch's `MouseX`, `MouseY` and `MousePressed` now actually report the mouse.** All three were
+  documented from the start but nothing ever wrote them, so every sketch saw `0`, `0` and `false` for
+  as long as the feature has existed. (`KeyPressed` and `LastKey` are still not wired up.)
+- **A shape created by an animation callback now appears.** A `Frame` callback that *moved* an
+  existing shape worked, but one that *created* a shape drew nothing at all — the canvas kept
+  repainting the set of shapes captured when the run finished. Which of the two you happened to write
+  decided whether the feature looked broken.
+- **Stop now stops a `Frame` animation.** The Stop button only ever halted sketches and timelines, so
+  motion driven by a self-rescheduling callback carried on with no way to halt it short of running
+  again.
+- **Dragging a Global Parameter no longer multiplies running animations.** Each tick of the drag
+  re-ran your code without dropping the previous run's callbacks, so a drag left several animation
+  loops running at once and the motion visibly sped up as it went.
+- Removed the leftover **Show Toolbar** setting, which controlled a drawing toolbar that was replaced
+  by the Draw menu and had done nothing since.
+- **F1 Help now lists events.** Every public event was missing from its page and from Help search —
+  including `Frame.CallbackFailed` and `GlobalParameters.Changed`, which had written descriptions no
+  reader could reach.
+
 ## [2026.8.2] - 2026-08-17
 
 > `2026.8.1` was tagged but never published: `installer.iss` had been left unparseable by an earlier

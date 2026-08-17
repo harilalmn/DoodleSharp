@@ -15,6 +15,14 @@ using DashStyle = System.Windows.Media.DashStyle;
 using DashStyles = System.Windows.Media.DashStyles;
 using PenLineCap = System.Windows.Media.PenLineCap;
 // Direct usage of VPoint, VLine etc. No alias needed.
+// UserMouse is the user-code callback registry (DoodleSharp.Animation.Mouse). It needs an alias only
+// here, because this file also has `using System.Windows.Input;` and WPF has its own static Mouse.
+// User code never imports System.Windows.Input, so there it is simply `Mouse`.
+using UserMouse = DoodleSharp.Animation.Mouse;
+using MouseGate = DoodleSharp.Animation.MouseGate;
+using MouseInfo = DoodleSharp.Animation.MouseInfo;
+using MouseEventKind = DoodleSharp.Animation.MouseEventKind;
+using MouseButtonKind = DoodleSharp.Animation.MouseButtonKind;
 
 namespace DoodleSharp.Canvas;
 
@@ -255,6 +263,8 @@ public class RenderCanvas : FrameworkElement
         MouseDown += OnMouseDown;
         MouseUp += OnMouseUp;
         MouseMove += OnMouseMove;
+        MouseEnter += OnMouseEnter;
+        MouseLeave += OnMouseLeave;
         SizeChanged += OnSizeChanged;
         PreviewKeyDown += OnPreviewKeyDown;
     }
@@ -389,11 +399,146 @@ public class RenderCanvas : FrameworkElement
     private Point ScreenToWorld(double screenX, double screenY)
         => _viewport.ScreenToWorld(screenX, screenY);
 
+    /// <summary>
+    /// Zooms one step in or out about the centre of the viewport. This is what the floating canvas
+    /// controls call — in interactive mode the wheel belongs to user code, so there has to be a way to
+    /// zoom that does not consume a mouse gesture.
+    /// </summary>
+    public void ZoomStep(bool zoomIn)
+    {
+        _viewport.Zoom(zoomIn);
+        RedrawAll();
+    }
+
+    // ── User mouse callbacks ──────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// True while user code has a mouse handler registered. The canvas then stops competing for the
+    /// mouse: selection, wheel zoom and double-click zoom-to-fit are all suppressed.
+    /// </summary>
+    private static bool IsInteractive => UserMouse.HasHandlers;
+
+    /// <summary>Whether a drawing tool is armed and therefore owns the click.</summary>
+    private bool IsDrawingToolActive => _drawingTool != null && _drawingTool.Mode != DrawingMode.None;
+
+    /// <summary>Whether the measuring tape is armed and therefore owns the click.</summary>
+    private bool IsMeasuringActive => _measuringTool?.Mode == ToolMode.Measuring;
+
+    /// <summary>Whether this event should be dispatched to user code, and the canvas's own gesture skipped.</summary>
+    private bool AllowUserMouse
+        => MouseGate.Allow(IsInteractive, _isPanning, IsDrawingToolActive, IsMeasuringActive);
+
+    /// <summary>
+    /// Builds the payload handed to a user mouse callback. This is the only place WPF input types are
+    /// read — <see cref="MouseInfo"/> itself is deliberately free of them, so the whole registry stays
+    /// testable away from a window.
+    /// </summary>
+    private MouseInfo BuildMouseInfo(
+        MouseEventKind kind, MouseEventArgs e, Point screenPos, VXYZ position, int wheelDelta)
+    {
+        var raw = ScreenToWorld(screenPos.X, screenPos.Y);
+        var mods = Keyboard.Modifiers;
+
+        return new MouseInfo(
+            kind,
+            position: position,
+            rawPosition: new VXYZ(raw.X, raw.Y),
+            screenX: screenPos.X,
+            screenY: screenPos.Y,
+            button: MapButton(e),
+            leftDown: e.LeftButton == MouseButtonState.Pressed,
+            rightDown: e.RightButton == MouseButtonState.Pressed,
+            middleDown: e.MiddleButton == MouseButtonState.Pressed,
+            shift: (mods & ModifierKeys.Shift) != 0,
+            ctrl: (mods & ModifierKeys.Control) != 0,
+            alt: (mods & ModifierKeys.Alt) != 0,
+            clickCount: (e as MouseButtonEventArgs)?.ClickCount ?? 0,
+            wheelDelta: wheelDelta,
+            scale: _viewport.Scale,
+            // Deferred, so a handler that never asks "what is under the cursor?" never pays for the
+            // spatial query. SelectionTool.HitTest reuses an internal buffer, so this allocates nothing.
+            hitTest: p => SelectionTool.HitTest(p, _sceneIndex, _viewport.Scale));
+    }
+
+    /// <summary>Maps the button this event is about, or None for a move/wheel/enter/leave.</summary>
+    private static MouseButtonKind MapButton(MouseEventArgs e) => e switch
+    {
+        MouseButtonEventArgs b => b.ChangedButton switch
+        {
+            MouseButton.Left => MouseButtonKind.Left,
+            MouseButton.Right => MouseButtonKind.Right,
+            MouseButton.Middle => MouseButtonKind.Middle,
+            MouseButton.XButton1 => MouseButtonKind.XButton1,
+            MouseButton.XButton2 => MouseButtonKind.XButton2,
+            _ => MouseButtonKind.None
+        },
+        _ => MouseButtonKind.None
+    };
+
+    /// <summary>
+    /// Records the pointer position into <c>Mouse</c> for the polled API. Called on every mouse event
+    /// regardless of whether any handler is registered, so <c>Mouse.X</c>/<c>Y</c>/<c>IsDown</c> — and
+    /// the <c>Sketch.MouseX</c>/<c>MouseY</c>/<c>MousePressed</c> properties that read them — are
+    /// always current. Three field writes; cheap enough for a path this hot.
+    /// </summary>
+    private static void TrackPointer(MouseEventArgs e, Point worldPos)
+        => UserMouse.Track(worldPos.X, worldPos.Y,
+            e.LeftButton == MouseButtonState.Pressed
+            || e.RightButton == MouseButtonState.Pressed
+            || e.MiddleButton == MouseButtonState.Pressed);
+
     private void OnMouseWheel(object sender, MouseWheelEventArgs e)
     {
         var mouseScreenPos = e.GetPosition(this);
+
+        if (AllowUserMouse)
+        {
+            var world = ScreenToWorld(mouseScreenPos.X, mouseScreenPos.Y);
+            UserMouse.RaiseWheel(BuildMouseInfo(
+                MouseEventKind.Wheel, e, mouseScreenPos, new VXYZ(world.X, world.Y), e.Delta));
+
+            // The wheel belongs to user code in interactive mode; the floating canvas controls are how
+            // the user zooms instead.
+            e.Handled = true;
+            return;
+        }
+
         _viewport.ZoomAtPoint(mouseScreenPos.X, mouseScreenPos.Y, e.Delta > 0);
         RedrawAll();
+    }
+
+    private void OnMouseEnter(object sender, MouseEventArgs e)
+    {
+        var screenPos = e.GetPosition(this);
+        var worldPos = ScreenToWorld(screenPos.X, screenPos.Y);
+        TrackPointer(e, worldPos);
+
+        if (!AllowUserMouse) return;
+
+        UserMouse.RaiseEnter(BuildMouseInfo(
+            MouseEventKind.Enter, e, screenPos, new VXYZ(worldPos.X, worldPos.Y), 0));
+    }
+
+    private void OnMouseLeave(object sender, MouseEventArgs e)
+    {
+        var screenPos = e.GetPosition(this);
+        var worldPos = ScreenToWorld(screenPos.X, screenPos.Y);
+
+        if (AllowUserMouse)
+        {
+            // A drag that ends off-canvas without capture would otherwise never see its up, leaving a
+            // handler's "am I dragging?" flag stuck on for the rest of the session.
+            if (UserMouse.IsDown && !IsMouseCaptured)
+            {
+                UserMouse.RaiseUp(BuildMouseInfo(
+                    MouseEventKind.Up, e, screenPos, new VXYZ(worldPos.X, worldPos.Y), 0));
+            }
+
+            UserMouse.RaiseLeave(BuildMouseInfo(
+                MouseEventKind.Leave, e, screenPos, new VXYZ(worldPos.X, worldPos.Y), 0));
+        }
+
+        UserMouse.Track(worldPos.X, worldPos.Y, isDown: false);
     }
 
     private void OnMouseDown(object sender, MouseButtonEventArgs e)
@@ -403,8 +548,14 @@ public class RenderCanvas : FrameworkElement
         // and the keystroke is typed there instead of triggering the tool.
         if (!IsKeyboardFocusWithin) Focus();
 
+        var downScreenPos = e.GetPosition(this);
+        TrackPointer(e, ScreenToWorld(downScreenPos.X, downScreenPos.Y));
+
         if (e.MiddleButton == MouseButtonState.Pressed)
         {
+            // Middle-drag pan stays the canvas's own gesture even in interactive mode: it is the only
+            // way to pan, and handing it to a script would leave a drawing larger than the viewport
+            // unreachable.
             _isPanning = true;
             _lastMousePosition = e.GetPosition(this);
             CaptureMouse();
@@ -444,6 +595,30 @@ public class RenderCanvas : FrameworkElement
             {
                 _measuringTool.OnLeftClick(vPoint);
                 RedrawAll();
+                e.Handled = true;
+                return;
+            }
+
+            // Hand the press to user code, ahead of selection.
+            //
+            // The order here is the crux of the whole feature. Selection mode is ON BY DEFAULT and its
+            // branch below consumes every left click with e.Handled = true, so dispatching after it
+            // would mean a user click handler never fired in the default configuration. Dispatching
+            // before it — and returning — is what makes the click available, and is why interactive
+            // mode suppresses selection rather than trying to share the gesture with it.
+            //
+            // It sits *after* the drawing and measuring branches on purpose: those are modal states the
+            // user armed with a shortcut, they keep priority while armed, and user code cannot override
+            // them. Both already returned above, so reaching here means neither is active.
+            if (AllowUserMouse)
+            {
+                UserMouse.RaiseDown(BuildMouseInfo(
+                    MouseEventKind.Down, e, screenPos, vPoint, 0));
+
+                // Own the drag for as long as the button is held, so a handler keeps receiving moves
+                // even if the pointer leaves the canvas and always gets its matching up.
+                CaptureMouse();
+
                 e.Handled = true;
                 return;
             }
@@ -493,12 +668,49 @@ public class RenderCanvas : FrameworkElement
                 _drawingTool.OnRightClick();
                 RedrawAll();
                 e.Handled = true;
+                return;
+            }
+
+            // Right-click reaches user code only once the drawing tool has had its chance to cancel.
+            if (AllowUserMouse)
+            {
+                var screenPos = e.GetPosition(this);
+                var worldPos = ScreenToWorld(screenPos.X, screenPos.Y);
+                var vPoint = new VXYZ(worldPos.X, worldPos.Y);
+
+                if (SnapToGrid && !_isPanning)
+                    vPoint = SnapPointToGrid(vPoint.X, vPoint.Y);
+
+                UserMouse.RaiseDown(BuildMouseInfo(
+                    MouseEventKind.Down, e, screenPos, vPoint, 0));
+                e.Handled = true;
             }
         }
     }
 
     private void OnMouseUp(object sender, MouseButtonEventArgs e)
     {
+        var upScreenPos = e.GetPosition(this);
+        var upWorldPos = ScreenToWorld(upScreenPos.X, upScreenPos.Y);
+
+        // Dispatch before the branches below, so a user-owned drag gets its terminating up even though
+        // none of the canvas's own gestures are in progress. Mouse.RaiseUp also synthesises the click.
+        if (AllowUserMouse)
+        {
+            var vPoint = new VXYZ(upWorldPos.X, upWorldPos.Y);
+            if (SnapToGrid) vPoint = SnapPointToGrid(vPoint.X, vPoint.Y);
+
+            UserMouse.RaiseUp(BuildMouseInfo(MouseEventKind.Up, e, upScreenPos, vPoint, 0));
+
+            // Release the capture taken on down. Nothing below can apply: selection never started.
+            if (IsMouseCaptured && !_isPanning) ReleaseMouseCapture();
+
+            UserMouse.Track(upWorldPos.X, upWorldPos.Y, isDown: false);
+            return;
+        }
+
+        TrackPointer(e, upWorldPos);
+
         if (e.MiddleButton == MouseButtonState.Released && _isPanning)
         {
             _isPanning = false;
@@ -535,7 +747,24 @@ public class RenderCanvas : FrameworkElement
             worldPos = new Point(snapped.X, snapped.Y);
         }
 
+        // Kept ahead of everything below: this drives the coordinate readout in the status bar, which
+        // must keep working in every mode.
         MouseWorldPositionChanged?.Invoke(this, worldPos);
+
+        TrackPointer(e, worldPos);
+
+        // Hand the move to user code. This is a leading branch with an early return, which is safe
+        // because the gate already excludes every state the chain below reacts to — panning, an armed
+        // drawing tool, the measuring tape. Mouse.RaiseMove picks OnDrag over OnMove when a button is
+        // held. Note e.Handled is deliberately NOT set: MouseMove is a bubbling routed event and
+        // MainWindow reads IsMouseOver upstream, and there is no built-in move behaviour left to
+        // suppress once the gate has passed.
+        if (AllowUserMouse)
+        {
+            UserMouse.RaiseMove(BuildMouseInfo(
+                MouseEventKind.Move, e, screenPos, new VXYZ(worldPos.X, worldPos.Y), 0));
+            return;
+        }
 
         if (_isPanning)
         {
@@ -1075,7 +1304,9 @@ public class RenderCanvas : FrameworkElement
             DrawDrawingToolOverlay(dc);
         }
 
-        if (IsSelectionMode && _selectionTool != null)
+        // Interactive mode suppresses selection, so its chrome must go too — otherwise handles from a
+        // selection made before the run stay painted over a canvas that no longer responds to them.
+        if (IsSelectionMode && _selectionTool != null && !IsInteractive)
         {
             DrawSelectionOverlay(dc);
         }
