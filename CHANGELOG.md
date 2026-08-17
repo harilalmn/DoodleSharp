@@ -9,6 +9,8 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+## [2026.8.1] - 2026-08-17
+
 ### Added
 - **Direct3D 11 render backend.** Geometry is uploaded to the GPU once, in world coordinates, so
   panning and zooming cost essentially nothing — it is the only backend whose frame time stays flat
