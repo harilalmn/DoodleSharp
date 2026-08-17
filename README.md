@@ -23,6 +23,7 @@ DoodleSharp is a visual programming environment that lets you write C# code to c
 - **Global Parameters**: Declare named values once with `GlobalParameters.Set(...)`, read them anywhere, and tune them live from a sidebar of sliders and checkboxes — the canvas re-runs as you drag and the new value is written back into your code
 - **Animation System**: Create timeline-based animations with draw, move, rotate, flip, and fade effects
 - **Interactive Canvas**: Zoom with mouse wheel, pan with middle-click, toggle grid display
+- **Scales to large drawings**: three renderers — WPF, a built-in software rasterizer, and a Direct3D 11 backend — with per-frame automatic selection, plus a frame-timing readout on `F10`. See [Render Backends](#render-backends)
 - **Export Options**: Save visualizations as PNG images, animated GIFs, or MP4 videos
 - **Project Management**: Organize multiple code files into projects with tabbed editing, drag-and-drop file organization, and "Go to Location" to open files in Windows Explorer
 - **Auto Save**: Optionally write every modified file to disk on a timer, with a prompt to pick a location if the project has never been saved
@@ -93,13 +94,13 @@ With **Auto-update Canvas** enabled (default), the canvas updates automatically 
 | **VText** | Text at a position | `new VText(position, "text")` or `new VText(x, y, "text", height)` |
 | **VArrow** | Arrow with head | `new VArrow(start, end)`, `new VArrow(x1, y1, x2, y2)` or `new VArrow(start, direction, length)` |
 | **VDimension** | Dimension annotation with arrowheads | `new VDimension(p1, p2)` or `new VDimension(x1, y1, x2, y2)` |
-| **VRadialDimension** | Radial/diameter dimension | `new VRadialDimension(circle)` or `new VRadialDimension(arc)` |
+| **VRadialDimension** | Radial/diameter dimension | `new VRadialDimension(circle)`, `new VRadialDimension(arc)` or `new VRadialDimension(center, radius)` (no source shape needed) |
 | **VGroup** | Group of shapes | `new VGroup(shape1, shape2, ...)` or `new VGroup(shapeList)` |
 | **VGrid** | Grid of visible VPoints | `new VGrid(location, xcount, ycount, spacing)` |
 | **VCell** | Square cell with neighbours | Created by `VSpatialGrid` |
 | **VSpatialGrid** | Grid of cells with A* pathfinding | `new VSpatialGrid(location, xCount, yCount, cellSize)` |
 | **Region** | Curve-bounded region | `new Region(curves)`, `new Region(outerCurves, holes)`, or `new Region(closedCurve)` |
-| **VHatch** | Pattern fill within boundary | `new VHatch(polygon, BuiltInHatch.ANSI31, scale)` |
+| **VHatch** | Pattern fill within boundary | `new VHatch(polygon, BuiltInHatch.ANSI31, scale)` — the boundary can also be a `List<VXYZ>`, and the pattern a name string or a `HatchType` |
 
 > **VXYZ vs VPoint**: `VXYZ` is the coordinate/vector type used for all position parameters, properties, and return types (e.g., `new VXYZ(10, 20)`). It is immutable and never appears on the canvas, so it is safe for intermediate maths. `VPoint` is a *shape* that draws a dot — constructing one adds a marker to the canvas. Use `new VXYZ(x, y)` wherever you just need a coordinate.
 
@@ -142,6 +143,7 @@ Inherited from `Shape`, so they work on all of the types above.
 | `RotationAngle` | double | `0` | Degrees counter-clockwise, written by `RotateAnimation`. Applied as a render transform about `RotationPivot`, uniformly for every shape type. `VRectangle` is the exception: it **overrides** the property to rebuild its four corners, so its rotation is baked into the geometry |
 | `RotationPivot` | VXYZ? | `null` | Null means the shape's own centre |
 | `FlipProgress` / `FlipAxis` | double / VLine? | `0` / `null` | Used by `FlipAnimation` |
+| `Revision` | uint | `0` | Read-only change counter. It ticks when a property is **assigned**, which is how cached derived data (hatch lines, sampled region outlines) knows to recompute. It does **not** notice a mutation *through* a collection — editing `polygon.Points` in place leaves it unchanged; call `Invalidate()` yourself after such an edit |
 
 #### Static members on `Shape`
 
@@ -161,7 +163,14 @@ touch them to change behaviour deliberately.
 | `Shape.ResetIdCounter()` | void | Restarts `Id` at 1. Called automatically at the start of each run, which is why IDs are stable between runs |
 
 Ordering and lifetime methods on an individual shape: `Place()`, `Remove()`, `Show()` / `Hide()`,
-`BringAbove(other)` and `SendBehind(other)`.
+`BringAbove(other)` and `SendBehind(other)`. Plus `Invalidate()`, which bumps `Revision` — the one
+call you need after editing a vertex list in place:
+
+```csharp
+var poly = new VPolygon(new VXYZ(0, 0), new VXYZ(100, 0), new VXYZ(50, 80));
+poly.Points[2] = new VXYZ(50, 140);   // mutating the list, not assigning a property
+poly.Invalidate();                    // so anything caching derived geometry recomputes
+```
 
 #### `Place()` — put a shape on the canvas and keep it there
 
@@ -237,8 +246,8 @@ Beyond the constructors above and the `ICurve` members every curve shares.
 | **VPolyline** | `Points` (mutable), `PointCount` (`Points.Count`, null-safe), `AddPoint(point)` / `AddPoint(x, y)` |
 | **VBezier** | `P0`, `P1`, `P2`, `P3` (settable), `MidPoint`, `Segments` (tessellation, default 32), `Evaluate(t)` (Bernstein, **not** arc-length), `GetRenderPoints()` |
 | **VSpline** | `ControlPoints`, `SegmentsPerSpan` (default 16), `Tension` (default 0.5 — 0 is angular, 1 is loose), `Evaluate(t)`, `GetRenderPoints()` |
-| **VArrow** | `Start` / `End` (settable), `MidPoint`, `HeadLength` (default 15 world units), `HeadAngle` (default 30° half-angle), `DoubleEnded` (default false), `GetStartArrowhead()` / `GetEndArrowhead()` → the two wing tips as a `(VXYZ, VXYZ)` tuple. Not an `ICurve` |
-| **VRay** | `Origin`, `Direction`, `RenderExtent` (default 10000 — how far it is drawn and how its bounds are computed, since it is infinite), `GetPointAtDistance(d)`, `ContainsPoint(p)`, `ToFiniteLine()` → `VLine`, `ToXLine()` → `VXLine`. Statics: `AtAngle(origin, degrees)`, `HorizontalRight`, `HorizontalLeft`, `VerticalUp`, `VerticalDown` |
+| **VArrow** | `Start` / `End` (settable), `MidPoint`, `HeadLength` (default 15 world units — each wing's length from the tip), `HeadAngle` (default 30 — degrees off the shaft, so the head spans `2 × HeadAngle`, 60° by default), `DoubleEnded` (default false — a head at `Start` as well), `GetStartArrowhead()` / `GetEndArrowhead()` → the two wing tips as a `(VXYZ, VXYZ)` tuple, `GetArrowheadPoints(tip, from)` for an arbitrary tip, and the static `VArrow.ArrowheadWings(tip, from, headLength, headAngleDegrees)`. Not an `ICurve` |
+| **VRay** | `Origin`, `Direction`, `RenderExtent` (default 10000 — how far it is drawn and how its bounds are computed, since it is infinite), `GetPointAtDistance(d)`, `ContainsPoint(p)`, `ToFiniteLine()` → `VLine`, `ToXLine()` → `VXLine`. Statics: `AtAngle(origin, angleDegrees)`, `HorizontalRight(origin)`, `HorizontalLeft(origin)`, `VerticalUp(origin)`, `VerticalDown(origin)` — all methods taking the origin, not properties |
 | **VXLine** | `BasePoint`, `Direction`, `RenderExtent`, `GetPointAtParameter(t)` (unclamped — negative `t` goes backwards), `GetTwoPoints()` → `(VXYZ, VXYZ)` (handy for `VPolygon.Slice`), `ToFiniteLine()` → `VLine`. Statics: `Horizontal(y)`, `Vertical(x)` |
 
 > **The conversions return an undrawn shape.** `VRay.ToFiniteLine()`, `VRay.ToXLine()` and
@@ -250,14 +259,49 @@ Beyond the constructors above and the `ICurve` members every curve shares.
 | **VGroup** | `Shapes`, `Count`, indexer `group[i]`, `Add`, `AddRange`, `Remove(shape)`, `RemoveAt(i)`, `Clear()`, `ContainsShape`, `Flatten()`, `ForEach`, `Where`, `GetShapesOfType<T>()`, `GetCenter()`, `SetOpacity`, `ApplyStyle` / `ApplyColor` / `ApplyFillColor` / `ApplyLineWeight` |
 | **VGrid** | `Points`, `Count`, indexers `grid[i]` and `grid[col, row]`, `GetRow` / `GetColumn`, `GetCenter()`, `Location`, `XCount` / `YCount`, `XSpacing` / `YSpacing`, `Centered`, `ApplyStyle()` |
 | **VSpatialGrid** | `Cells`, `Count`, indexers `grid[i]` and `grid[col, row]`, `GetRow` / `GetColumn`, `GetCenter()`, `GetCellAt(point)`, `GetClosestCell(point)`, `FindPath(start, end)`, `Location`, `XCount` / `YCount`, `CellSize`, `ApplyStyle()` |
-| **VHatch** | `Boundary` (`List<VXYZ>`, settable), `Pattern`, `PatternScale`, `PatternAngle`, `GenerateLines()` → the clipped `(Start, End)` segments, static `FromDefinition(...)` |
-| **VDimension** | `Point1` / `Point2` (settable), `Distance`, `DisplayText`, `ExtensionLength`, `GetDimensionGeometry()` → a 7-tuple of `VXYZ` (the extension- and dimension-line endpoints as drawn), plus the style properties in [Dimensions](#dimensions-vdimension) |
+| **VHatch** | `Boundary` (`List<VXYZ>`, settable), `Pattern`, `PatternScale`, `PatternAngle`, `GenerateLines()` → a fresh `List<(VXYZ Start, VXYZ End)>` of clipped segments, `GetCachedLines()` → the same segments as an `IReadOnlyList` **shared with the renderer, so do not modify it** (it is memoised against `Revision` and only regenerated when the hatch changes), static `FromDefinition(...)` |
+| **VDimension** | `Point1` / `Point2` (settable), `Distance`, `DisplayText`, `GetDimensionGeometry()` → a 7-tuple of `VXYZ` (the extension- and dimension-line endpoints as drawn), the const `DimensionArrowAngleDegrees`, plus the style properties in [Dimensions](#dimensions-vdimension). `ExtensionLength` is `[Obsolete]` and inert |
 | **VRadialDimension** | `Center`, `Radius`, `LeaderAngle`, `ShowDiameter`, `Value`, `DisplayText`, `GetDimensionGeometry()` → a 3-tuple of `VXYZ` (the leader geometry) |
 | **VPoint** | `X`, `Y`, `AsVXYZ()`, implicit conversion to `VXYZ`, and the full `+ - * /` operator set — every one of which returns a plain `VXYZ`, so intermediates never draw |
 
 Two conversion helpers worth knowing: `PolygonWithHoles.FromPolygonList(polygons)` sorts a flat list
 into outers and holes by winding, and `Region.SampleLoop(loop, segmentsPerCurve)` flattens one
 `List<ICurve>` boundary loop into plain vertices — the same sampling the region boolean ops use.
+
+#### Arrowhead geometry
+
+One method defines the **geometry** of every arrowhead in the application:
+`VArrow.ArrowheadWings(tip, from, headLength, headAngleDegrees)`. Each wing runs `HeadLength` back
+from the tip at `HeadAngle` degrees off the shaft, closing into a triangle. Every renderer and
+exporter calls it, so `HeadLength`, `HeadAngle` and `DoubleEnded` mean the same thing wherever the
+arrow ends up — same angle, same wing length, both heads on a double-ended arrow — and
+`GetEndArrowhead()` / `GetStartArrowhead()` return the wing tips of the triangle you actually see:
+
+```csharp
+var arrow = new VArrow(new VXYZ(-100, 0), new VXYZ(100, 0)) { Color = "Orange" };
+arrow.HeadLength = 30;      // wings 30 units long, measured from the tip
+arrow.HeadAngle = 15;       // narrow dart: a 30-degree head (2 x HeadAngle)
+arrow.DoubleEnded = true;   // and the same head at Start
+
+var (wing1, wing2) = arrow.GetEndArrowhead();
+VizConsole.Log($"head spans {wing1.DistanceTo(wing2):F2} units across");
+
+// The same maths for geometry of your own, without constructing an arrow.
+var (w1, w2) = VArrow.ArrowheadWings(new VXYZ(0, 100), new VXYZ(0, 0), 20, 30);
+```
+
+A degenerate arrow — `Start` and `End` coincident — returns `(tip, tip)` rather than throwing.
+
+> **The head's geometry is shared; its *fill* is not.** How the triangle is painted still depends on
+> where the arrow is drawn: **solid**, filled in the stroke colour, on the Legacy renderer and in PDF
+> and SVG export — but **hollow**, only its outline stroked, on the `Managed` and `GPU` backends. DXF
+> writes it as three line entities, since it is a wireframe format. So switching backend can change a
+> filled arrowhead into an outlined one; the size, angle and position will not move. This is a known
+> gap, tracked in `docs/TODO.md`, and it applies to dimension and radial-dimension heads too.
+
+Dimension arrowheads come from the same method but at a **fixed** angle,
+`VDimension.DimensionArrowAngleDegrees` (20); their size is `ArrowSize`, and unlike `VArrow.HeadAngle`
+the angle is not configurable per dimension.
 
 ---
 
@@ -269,11 +313,11 @@ into outers and holes by winding, and `Region.SampleLoop(loop, segmentsPerCurve)
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `Chart.Bar(string[] labels, double[] values, ChartOptions? opts = null)` | VGroup | Categorical bars with numeric Y axis. Bars fill 70% of their slot and cycle through `Palette`. Y always includes zero unless you pin `YMin`/`YMax`. Throws `ArgumentException` if the two arrays differ in length |
-| `Chart.Line(double[] xs, double[] ys, ChartOptions? opts = null)` | VGroup | Polyline through the points plus a marker on each, in `Palette[0]`. Both axes numeric. Throws `ArgumentException` on mismatched lengths |
-| `Chart.Scatter(VXYZ[] points, ChartOptions? opts = null)` | VGroup | Scatter plot; each point's X/Y are **data values**, not canvas coordinates |
-| `Chart.Pie(double[] values, string[]? labels = null, ChartOptions? opts = null)` | VGroup | Pie chart from 12 o'clock, clockwise, sized by share of the total. Negative and zero values are skipped; a non-positive total draws nothing. Sectors are polygon-approximated (~4° per segment — there is no `VSector` shape). No axes are drawn |
-| `Chart.Area(double[] xs, double[] ys, ChartOptions? opts = null)` | VGroup | Filled area down to the baseline plus a stroked top edge. Needs at least two points. Throws `ArgumentException` on mismatched lengths |
+| `Chart.Bar(string[] labels, double[] values, ChartOptions? options = null)` | VGroup | Categorical bars with numeric Y axis. Bars fill 70% of their slot and cycle through `Palette`. Y always includes zero unless you pin `YMin`/`YMax`. Throws `ArgumentException` if the two arrays differ in length |
+| `Chart.Line(double[] xs, double[] ys, ChartOptions? options = null)` | VGroup | Polyline through the points plus a marker on each, in `Palette[0]`. Both axes numeric. Throws `ArgumentException` on mismatched lengths |
+| `Chart.Scatter(VXYZ[] points, ChartOptions? options = null)` | VGroup | Scatter plot; each point's X/Y are **data values**, not canvas coordinates |
+| `Chart.Pie(double[] values, string[]? labels = null, ChartOptions? options = null)` | VGroup | Pie chart from 12 o'clock, clockwise, sized by share of the total. Negative and zero values are skipped; a non-positive total draws nothing. Sectors are polygon-approximated (~4° per segment — there is no `VSector` shape). No axes are drawn |
+| `Chart.Area(double[] xs, double[] ys, ChartOptions? options = null)` | VGroup | Filled area down to the baseline plus a stroked top edge. Needs at least two points. Throws `ArgumentException` on mismatched lengths |
 
 The data you pass is in **data units**. The chart maps it into the plot rectangle described by
 `Origin`, `Width` and `Height`, which *are* world coordinates (Y up, origin at the canvas centre).
@@ -491,7 +535,7 @@ dim2.CustomText = "TYP.";
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `Offset` | double | 20 | Distance of dimension line from measured points |
-| `ArrowSize` | double | 8 | Size of arrowheads |
+| `ArrowSize` | double | 8 | Arrowhead size — each wing's length back from the tip. The *angle* is not per-dimension: it is the shared constant `VDimension.DimensionArrowAngleDegrees` (20), used by the canvas, both rasterizing backends and every exporter, so a dimension's heads are the same size and angle wherever they are drawn. Their **fill** still varies by backend — see [Arrowhead geometry](#arrowhead-geometry) |
 | `TextHeight` | double | 12 | Height of dimension text |
 | `DecimalPlaces` | int | 2 | Decimal places for distance display |
 | `ExtendBeyondDimLines` | double | 1.25 | How far extension lines extend past the dimension line |
@@ -506,6 +550,7 @@ dim2.CustomText = "TYP.";
 | `DimensionLineColor` | string? | null | Color for dimension line & arrowheads (null = use Color) |
 | `TextColor` | string? | null | Color for dimension text (null = use Color) |
 | `CustomText` | string? | null | Custom text (overrides calculated distance) |
+| `ExtensionLength` | double | 10 | **`[Obsolete]` — has no effect, and never did.** Nothing reads it. An extension line runs from `OffsetFromOrigin` away from the measured point to `Offset` + `ExtendBeyondDimLines` past it, so those three properties determine its length completely. It is kept only so existing code still compiles; the compiler warning is telling you the assignment does nothing |
 | `Distance` | double | — | Calculated distance between points (read-only) |
 | `DisplayText` | string | — | Final display text with prefix/suffix (read-only) |
 
@@ -588,7 +633,7 @@ dim2.LeaderAngle = -45;
 | `Radius` | double | — | Radius of the circle/arc |
 | `LeaderAngle` | double | 45 | Angle (degrees) of the leader line direction |
 | `ShowDiameter` | bool | false | Show diameter instead of radius |
-| `ArrowSize` | double | 8 | Size of the arrowhead |
+| `ArrowSize` | double | 8 | Arrowhead size — the wing length back from the tip; the angle is the shared `VDimension.DimensionArrowAngleDegrees` (20). Fill varies by render backend, as for every arrowhead |
 | `TextHeight` | double | 12 | Height of the dimension text |
 | `DecimalPlaces` | int | 2 | Decimal places for the value |
 | `Prefix` | string | "" | Text prepended to the dimension value |
@@ -1101,6 +1146,11 @@ List<List<ICurve>> holes = region.Holes;    // Inner hole loops
 
 bool inside = region.Contains(new VXYZ(50, 40));  // Point containment
 BoundingBox bounds = region.GetBounds();
+
+// The sampled boundary the renderer uses, memoised against Shape.Revision. The lists come
+// back SHARED — read them, do not modify them. Use ToPolygonHighRes/SampleLoop for a copy.
+region.GetCachedOutline(32, out List<VXYZ> outerPoints, out List<List<VXYZ>> holePoints);
+VizConsole.Log($"{outerPoints.Count} outer vertices, {holePoints.Count} holes");
 ```
 
 ### Converting Between Region and Polygon
@@ -1138,6 +1188,9 @@ var common   = RegionBooleanOps.Intersect(regions);      // List<Region>
 var firstCut = RegionBooleanOps.Difference(regions);     // List<Region>
 var combinedParams = RegionBooleanOps.Union(region1, region2, region3); // params form
 
+// Every collection fold — Union included — takes segmentsPerCurve; the params forms cannot.
+var fine = RegionBooleanOps.Union(regions, segmentsPerCurve: 128);       // Region?
+
 // The BooleanOps facade also accepts regions (forwards to RegionBooleanOps),
 // but ONLY as (a, b) or IEnumerable<Region> — there is no params Region[] there,
 // because it would make the argument-less BooleanOps.Union() ambiguous with
@@ -1148,11 +1201,13 @@ var alsoPair  = BooleanOps.Union(region1, region2);     // OK (two regions)
 var threeWay  = RegionBooleanOps.Union(region1, region2, region3);   // use this
 
 // Extension method syntax
-var union = regionA.Union(regionB);
-var diff = regionA.Difference(regionB);
+var extUnion = regionA.Union(regionB);
+var extDiff  = regionA.Difference(regionB);
 
-// With holes support
-var results = RegionBooleanOps.DifferenceWithHoles(regionA, regionB);
+// With holes support — three binary forms, each returning List<Region>
+var cutWithHoles       = RegionBooleanOps.DifferenceWithHoles(regionA, regionB);
+var mergedWithHoles    = RegionBooleanOps.UnionWithHoles(regionA, regionB);
+var commonWithHoles    = RegionBooleanOps.IntersectWithHoles(regionA, regionB);
 
 // Curved boundaries are approximated before clipping. The default is 32
 // segments per curve; raise it when a large arc looks faceted in the result.
@@ -1170,10 +1225,23 @@ double area = RegionBooleanOps.Area(regionA);
 > `Xor`, `ContainsPoint` and `GetArea` have no instance counterpart, so their extension forms are
 > fine.
 
-Every binary operation and the `IEnumerable<Region>` folds take the optional `segmentsPerCurve`
-argument (default 32); the `params Region[]` overloads use the default. Because clipping happens on
-the approximation, a result region's boundary is a chain of straight segments even where the input
-had a true arc — round-trip a region through a boolean and its `OuterLoop` will be polyline-like.
+Every binary `(a, b)` operation takes the optional `segmentsPerCurve` argument, and so does every
+`IEnumerable<Region>` fold — `Union`, `Intersect`, `Difference` and `Xor` alike, on **both**
+`RegionBooleanOps` and the `BooleanOps` forwarding overloads. The default is
+`RegionBooleanOps.DefaultSegmentsPerCurve`, a public const equal to 32, so you can name it rather
+than repeat the number. Only the `params Region[]` overloads lack the argument — an optional
+parameter cannot follow `params` — so to control precision across several regions, pass them as a
+list rather than as loose arguments:
+
+```csharp
+var all = new List<Region> { region1, region2, region3 };
+
+var coarse    = RegionBooleanOps.Union(region1, region2, region3);   // params form: always 32
+var fine      = RegionBooleanOps.Union(all, segmentsPerCurve: 128);  // a list takes the argument
+var viaFacade = BooleanOps.Union(all, RegionBooleanOps.DefaultSegmentsPerCurve);
+```
+Because clipping happens on the approximation, a result region's boundary is a chain of straight
+segments even where the input had a true arc — round-trip a region through a boolean and its `OuterLoop` will be polyline-like.
 Collection semantics: `Union` = merged area (null if it cannot be a single region), `Intersect` =
 area common to *all*, `Difference` = the first region minus every other, `Xor` = running symmetric
 difference. A single-element collection returns a clone; an empty one returns an empty list (or
@@ -1608,9 +1676,10 @@ function does not re-enter itself.
 
 | | |
 |---|---|
-| `Frame.Request(callback)` | queue for the next frame; returns a handle |
-| `Frame.Cancel(handle)` | remove a queued callback |
-| `Frame.HasPending` | whether a loop is running |
+| `Frame.Request(Action<double> callback)` | queue for the next frame; returns a `long` handle |
+| `Frame.Request(Action callback)` | the same, for a callback that does not need the timestamp |
+| `Frame.Cancel(long handle)` | remove a queued callback. An unknown handle is ignored |
+| `Frame.HasPending` | whether anything is queued — i.e. whether a loop is running |
 
 If a callback throws, the loop stops and the error goes to the console rather than repeating sixty
 times a second.
@@ -1663,7 +1732,7 @@ Every animation type inherits these:
 |---|---|
 | `Target` | The shape being animated. `null` for `ObjectPropertyAnimation<T>`, which targets an arbitrary object. |
 | `Duration` | Length in seconds, fixed at construction. |
-| `StartTime` | When it begins, in seconds. Assigned by the `Animator` when you add it — don't set it yourself. |
+| `StartTime` | When it begins, in seconds. Read-only: the `Animator` assigns it when you add the animation, so sequencing is controlled with `AddToAnimations` and `Pause`, never by writing this. |
 | `EasingFunction` | `Func<double, double>` mapping `t` to eased `t`. Defaults to `EasingFunctions.Linear`. Any function of your own works too. |
 | `Name` | Optional label shown on the timeline panel's track. Falls back to the type name when empty. |
 | `Apply(double t)` | Called by the timeline with normalized time. You never call this yourself. |
@@ -1922,7 +1991,8 @@ bounce.EasingFunction = t => 1 - Math.Abs(Math.Cos(t * Math.PI * 2)) * (1 - t);
 `DoodleSharp.Console.VizConsole` is the console for project code. It has exactly one method — there is no `Write()` or `WriteLine()`:
 
 ```csharp
-public static void Log(object? value, bool itemize = true)
+public static void Log(object? value, bool itemize = true,
+                       [CallerFilePath] string filePath = "", [CallerLineNumber] int lineNumber = 0)
 ```
 
 | Parameter | Meaning |
@@ -1958,7 +2028,10 @@ Output appears in the console panel below the canvas with file and line number t
 [StartViz:19] 3
 ```
 
-> **In Animator, `VizConsole` is a different class** — `Animator.Console.VizConsole`, with `Log(message)`, `Warn(message)` (yellow) and `Error(message)` (red). It takes no `itemize` argument and does not itemize collections, and its lines are tagged `[Sketch]` rather than with a file and line number.
+> **There is only one `VizConsole`.** `DoodleSharp.Console.VizConsole.Log` is the whole console API
+> available to project code — there is no `Warn` or `Error`, and no second console class in another
+> namespace. Lines the app itself writes (compiler errors, the unnamed-shape warning, sketch-mode
+> status) appear in the same panel but are tagged with their own source rather than your file name.
 
 ---
 
@@ -2008,7 +2081,7 @@ VizConsole.Log($"{GlobalParameters.Get("String Name")} is{status}broken...");
 
 | Member | Description |
 |--------|-------------|
-| `Set<T>(name, value, min = null, max = null, step = null, group = null, description = null)` | Declares a parameter and its default, and returns the `Parameter`. Idempotent — will not overwrite a value you dialled in from the panel unless the declared default itself changed. `min`/`max`/`step` drive the panel slider (numbers only); `group` adds a heading, `description` a tooltip. Omitted `min`/`max` are left alone, so a range you widened in the panel survives. An empty name throws `ArgumentException`; a null value throws `ArgumentNullException`. |
+| `Set<T>(name, value, min = null, max = null, step = null, group = null, description = null)` | Declares a parameter and its default, and returns the `Parameter`. (Two further parameters, `sourceFile` and `sourceLine`, are filled in by the compiler from the call site so panel edits can be written back into your code — never pass them.) Idempotent — will not overwrite a value you dialled in from the panel unless the declared default itself changed. `min`/`max`/`step` drive the panel slider (numbers only); `group` adds a heading, `description` a tooltip. Omitted `min`/`max` are left alone, so a range you widened in the panel survives. An empty name throws `ArgumentException`; a null value throws `ArgumentNullException`. |
 | `Get(name)` | Reads as a self-converting `ParamValue`. Never throws — the exception comes later, when you convert an undeclared value. |
 | `Get<T>(name)` | Reads as a specific type. Always unambiguous. Throws `InvalidOperationException` (listing the declared names) if undeclared, or if the parameter holds a different type. |
 | `Get<T>(name, fallback)` | Reads with a fallback for undeclared parameters. |
@@ -2068,7 +2141,7 @@ surgically, leaving `min:`/`max:`/`group:` and your undo history intact — and 
 - **Mouse Wheel**: Zoom in/out centered on cursor position
 - **Middle-Click Drag**: Pan the canvas view
 - **Grid Toggle**: Show/hide reference grid lines (View menu)
-- **Auto Zoom Extents**: Automatically fits all shapes after execution
+- **Auto Zoom Extents**: Fits all shapes after each run — enable *Zoom to fit on run* in Settings (off by default); double-clicking empty canvas does it on demand
 
 ### Coordinate System
 DoodleSharp uses a **mathematical coordinate system**:
@@ -2076,6 +2149,71 @@ DoodleSharp uses a **mathematical coordinate system**:
 - X-axis increases to the right (+X = right)
 - Y-axis increases upward (+Y = up, not down like screen coordinates)
 - Angles are measured in degrees, counter-clockwise from the positive X-axis
+
+### Render Backends
+
+There are three renderers behind the canvas, and by default the app picks between them for you.
+You only need this section if a large drawing feels slow, or if something about drawing order looks
+wrong to you.
+
+Choose one in **Settings > Application Settings > Rendering > Render Backend**. The change applies
+immediately — no restart — and is saved globally for all projects.
+
+| Setting | What draws the scene | When you would choose it |
+|---------|----------------------|--------------------------|
+| **Auto (recommended)** *(default)* | Picks per frame between Legacy and Managed — it switches to the rasterizer when the previous frame took too long, and back when few shapes are on screen | Leave it here. It is faster than either fixed choice, because a drawing's cost changes as you pan and zoom |
+| **Legacy (WPF vector)** | WPF throughout | You want one renderer for the whole session, or you need exact creation-order layering (see below) |
+| **Managed (software rasterizer)** | A CPU rasterizer draws the line work into a bitmap; text, dimensions and canvas chrome are drawn over it by WPF | A consistently dense drawing. It pays a fixed cost per frame (clearing and copying a full-window bitmap) in exchange for a much cheaper per-shape cost |
+| **GPU (Direct3D 11)** | Direct3D 11. Geometry is uploaded once in world coordinates, so panning and zooming rewrite one small transform instead of re-submitting the drawing | Very large drawings, high-resolution displays, or when navigation rather than the first frame is what feels heavy. Opt-in only — Auto never selects it |
+
+**Three things to know before you change it.** Managed and GPU draw in two layers, so annotation
+(text, dimensions) always composites **above** geometry, whatever order the shapes were created in;
+Legacy honours creation order throughout. They also **outline arrowheads rather than filling them**,
+on arrows and dimensions alike — the head keeps its size, angle and position, but a solid triangle
+under Legacy becomes a hollow one (see [Arrowhead geometry](#arrowhead-geometry)). And the GPU path
+**fails soft**: with no usable device —
+no GPU, an old driver, a remote session — it falls back to the software rasterizer for the rest of
+the session and records the reason in the [diagnostic journal](#diagnostic-journals), rather than
+showing an error or an empty canvas.
+
+The dropdown writes the `RenderBackend` key in `%APPDATA%\DoodleSharp\appsettings.json`, which is
+read at start-up, so it can also be set by hand:
+
+```json
+{
+  "RenderBackend": "Auto"
+}
+```
+
+The four accepted values are `Auto`, `Legacy`, `Managed` and `GPU`, matched case-insensitively; an
+unrecognised value behaves as `Auto`.
+
+### Frame-Timing Readout (F10)
+
+Press `F10` for a small overlay in the top-left of the canvas reporting how long frames are actually
+taking. It is a diagnostic rather than decoration, so it is **off by default and costs nothing while
+off** — the measurements are only collected once you turn it on. It refreshes a few times a second
+(a number changing at 60 Hz cannot be read) and reports:
+
+```
+p50   1.83 ms   p95   4.10 ms  (  244 fps)
+cull  0.11  raster  0.00   backend vector
+visible   1,204 / examined 1,290
+alloc    12.4 KB/frame   gen0 3
+```
+
+| Line | Meaning |
+|------|---------|
+| `p50` / `p95` | Median and 95th-percentile frame time over the recent history, with the frame rate the p95 implies. p95 is the one to watch — it is the stutter you feel |
+| `cull` / `raster` | Time spent deciding what is on screen, and time spent in the rasterizer (`0.00` when the frame went through the vector path) |
+| `backend` | Which renderer drew this frame — `vector` or `raster`. With `Auto` this flips as you pan and zoom, which is the setting working as intended |
+| `visible` / `examined` | Shapes actually drawn versus shapes the culling index had to look at. A large gap means the drawing is spread thin relative to the view |
+| `alloc` / `gen0` | Bytes allocated per frame and garbage collections in the window — a rising `gen0` during animation is what to report if playback stutters |
+
+You can leave it on while exporting. PNG, GIF and MP4 export blank the whole overlay layer for the
+duration of the capture, so the readout — along with selection handles, the rubber band, snap markers
+and the measuring overlay — stays out of the exported image or video. The vector exporters (SVG, PDF,
+DXF) write shapes rather than the screen, so they never saw it in the first place.
 
 ---
 
@@ -2399,6 +2537,56 @@ File > Export > SVG exports shapes to SVG (Scalable Vector Graphics) format:
 - XML-based, can be edited as text
 - Supports all shape types with full styling
 
+### Exporting from your own code
+
+The SVG and PDF exporters are usable directly from project code. Note the namespaces: **`SvgExporter`
+lives in `DoodleSharp.Canvas`**, not `DoodleSharp.Export`.
+
+```csharp
+using DoodleSharp.Canvas;   // SvgExporter, CanvasRenderer
+
+new VCircle(0, 0, 50) { Name = "disc", FillColor = "#4000FFFF" };
+new VRectangle(-80, -60, 160, 120) { Name = "frame" };
+
+// Everything currently on the canvas. GetShapes() hands back IDrawable, which is what
+// the exporters take, so no conversion is needed.
+var shapes = CanvasRenderer.Instance.GetShapes();
+
+string svg = SvgExporter.Export(shapes);                       // width 800, height 600, padding 20
+string big = SvgExporter.Export(shapes, 1600, 1200, padding: 40);
+SvgExporter.SaveToFile(@"C:\temp\drawing.svg", shapes);        // same defaults, no padding argument
+
+VizConsole.Log($"{svg.Length} characters of SVG for {shapes.Count} shapes");
+```
+
+`width` and `height` become the SVG element's size; the `viewBox` is computed from the shapes' own
+bounds plus `padding`, and a `scale(1, -1)` group flips the Y axis so the output matches the canvas's
+Y-up convention. `SaveToFile` forwards to `Export` and therefore always uses the default padding.
+
+| Exporter | Namespace | Signature |
+|----------|-----------|-----------|
+| `SvgExporter.Export` | `DoodleSharp.Canvas` | `static string Export(IEnumerable<IDrawable> shapes, double width = 800, double height = 600, double padding = 20)` |
+| `SvgExporter.SaveToFile` | `DoodleSharp.Canvas` | `static void SaveToFile(string filePath, IEnumerable<IDrawable> shapes, double width = 800, double height = 600)` |
+| `PdfExporter.Export` | `DoodleSharp.Export` | `void Export(IReadOnlyList<IDrawable> shapes, string filePath)` — page auto-sized to the content |
+| `PdfExporter.Export` | `DoodleSharp.Export` | `void Export(IReadOnlyList<IDrawable> shapes, string filePath, double pageWidthMm, double pageHeightMm, double scaleMmPerUnit, double marginMm)` — `0` for either page dimension auto-sizes it; `scaleMmPerUnit` is how many millimetres one drawing unit becomes on paper |
+
+```csharp
+using DoodleSharp.Export;   // PdfExporter
+
+// GetShapes() already returns IReadOnlyList<IDrawable>, which is what PdfExporter wants.
+new PdfExporter().Export(CanvasRenderer.Instance.GetShapes(), @"C:\temp\plan.pdf",
+                         pageWidthMm: 297, pageHeightMm: 210,   // A4 landscape
+                         scaleMmPerUnit: 0.5, marginMm: 10);
+```
+
+`PdfExporter` has no `Margin` or `PageSize` properties — the page is described entirely by the
+six-argument `Export` overload. `GifEncoder` (`DoodleSharp.Export`) is a `Stream`-based frame writer
+rather than a one-call exporter: `new GifEncoder(stream, width, height, frameDelayMs: 100,
+repeat: true)`, then `AddFrame(BitmapSource)` per frame, and `Dispose()` to finalise the file. Frame
+delay and looping are **constructor arguments**, not properties, and there is no `Save()` — disposing
+is what completes the GIF. Producing `BitmapSource` frames means rendering the canvas yourself, so
+File > Export GIF Animation is the practical route.
+
 ---
 
 ## Boolean Operations
@@ -2460,13 +2648,15 @@ foreach (var p in difference) { p.Name = "diff"; p.Color = "Tomato"; }
 | `BooleanOps.Area(poly)` | `double` | **Signed** — positive counter-clockwise, negative clockwise |
 | `BooleanOps.PointInPolygon(poly, point)` | `bool` | True inside or on the boundary |
 
-Extension-method forms exist for all of the above **except `Intersect`**: `polygon.Union(other)`,
+Extension-method forms are usable for all of the above **except `Intersect`**: `polygon.Union(other)`,
 `.Difference(other)`, `.Xor(other)`, `.OffsetPolygon(d)`, `.OffsetPolygonSafe(d)`,
 `.MaxSafeInwardOffset()`, `.MakeSimple()`, `.HasSelfIntersections()`, `.Contains(point)` and
 `.GetArea()` (unsigned, unlike `BooleanOps.Area`). The extension offsets take no join/end type —
-use the static call for those. `polygon.Intersect(other)` is shadowed by the instance
-`ICurve.Intersect` and returns an `IntersectionResult` instead, so call
-`BooleanOps.Intersect(a, b)` for the boolean.
+use the static call for those. A boolean `Intersect` extension is *declared* on
+`VPolygonBooleanExtensions`, but you can never reach it through `polygon.Intersect(other)`: the
+instance `ICurve.Intersect` wins and returns an `IntersectionResult` instead. Call
+`BooleanOps.Intersect(a, b)` for the boolean — or, if you want the extension itself,
+`VPolygonBooleanExtensions.Intersect(a, b)`.
 
 ### Why a Union returned null
 
@@ -2535,6 +2725,10 @@ two-argument and `IEnumerable<Region>` overloads:
 ```csharp
 var merged = BooleanOps.Union(regionA, regionB);                 // Region?
 var all    = BooleanOps.Union(new List<Region> { r1, r2, r3 });  // Region?
+
+// Both shapes take segmentsPerCurve, exactly as RegionBooleanOps does — the facade is a
+// forward, not a reduced version of the API.
+var fine   = BooleanOps.Union(regionA, regionB, segmentsPerCurve: 128);
 ```
 
 There is deliberately **no `params Region[]` overload on `BooleanOps`** — it would make the
@@ -2637,8 +2831,8 @@ var simplified = BooleanOps.Simplify(poly1, tolerance: 0.5);
 ## Array/Pattern Operations
 
 Create arrays and patterns of shapes with built-in array operations. Every method clones the source
-shape and returns a `List<Shape>`; each is available as a static `ArrayOps.X(shape, ...)` call and
-as an extension method on the shape.
+shape and returns a `List<Shape>`; each exists both as a static method on `ArrayOps` taking the shape
+as its first argument, and as an extension method on the shape itself.
 
 **Always finish the chain with `.DrawAll()`.** The clones carry no `Name` — they were not written as
 `var x = new VCircle(...)` — so the post-run sweep that hides unnamed shapes would remove every copy.
@@ -2650,7 +2844,7 @@ as an extension method on the shape.
 | `LinearArrayX(count, spacing)` / `LinearArrayY(count, spacing)` | `count` | Yes |
 | `RectangularArray(rows, cols, rowSpacing, colSpacing)` | `rows × cols` | Yes |
 | `CircularArray(center, count, totalAngleDegrees = 360, rotateItems = true)` | `count` | Yes |
-| `PathArray(curve, count, alignToPath = true)` | `count` clones | **No** |
+| `PathArray(path, count, alignToPath = true)` | `count` clones | **No** |
 | `SpiralArray(center, count, startRadius, endRadius, totalRevolutions = 1, rotateItems = true)` | `count` clones | **No** |
 | `Mirror(mirrorLine)` | 2 | Yes, plus the mirrored copy |
 
@@ -2928,6 +3122,7 @@ All cursors are visually indicated with white caret lines, and selections are hi
 | `F4` | Toggle Properties panel |
 | `F6` | Toggle Global Parameters panel |
 | `F9` | Toggle Snap to Grid |
+| `F10` | Toggle the frame-timing readout |
 | `Ctrl+Shift+M` | Toggle Minimap |
 | `Esc` | Cancel current tool/operation |
 
@@ -3104,7 +3299,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using C2VGeometry;          // Shapes: VPoint, VLine, VCircle, etc. and the VXYZ coordinate type
-using DoodleSharp.Animation;   // Timeline, DrawAnimation, MoveAnimation, etc.
+using DoodleSharp.Animation;   // Animator, Frame, DrawAnimation, MoveAnimation, etc.
 using DoodleSharp.Console;     // VizConsole.Log()
 ```
 
@@ -3820,8 +4015,11 @@ dotnet run
 ## Dependencies
 
 - **AvalonEdit** (6.3.0.90) - Code editor with syntax highlighting
-- **Microsoft.CodeAnalysis.CSharp** (4.8.0) - Roslyn compilation for C# code execution
-- **NuGet.Protocol** - Package management integration
+- **Microsoft.CodeAnalysis.CSharp.Scripting** (4.8.0) - Roslyn compilation for C# code execution
+- **NuGet.Protocol / NuGet.Packaging** (6.13.2) - Package management integration
+- **Clipper2** (2.0.0) - Polygon boolean operations and offsets (referenced by `C2VGeometry`)
+- **PDFsharp** (6.1.0) - Vector PDF export
+- **Vortice.Direct3D11 / Direct3D9 / D3DCompiler** (3.8.3) - The Direct3D render backend. Managed-only assemblies; the app runs without a GPU by falling back to the CPU renderers
 
 ---
 

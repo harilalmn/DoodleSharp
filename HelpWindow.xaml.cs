@@ -48,8 +48,10 @@ namespace DoodleSharp
                     DeclaringType = type
                 });
 
-                // Add properties
-                var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+                // Add properties. DocGenerator.MemberFlags includes Static, so the search index
+                // covers the static classes and factories the pages now list (searching for
+                // "FromCenterDiameter" or "VColor.Crimson" previously found nothing).
+                var props = type.GetProperties(DocGenerator.MemberFlags);
                 foreach (var prop in props)
                 {
                     _searchIndex.Add(new SearchableItem
@@ -62,8 +64,21 @@ namespace DoodleSharp
                     });
                 }
 
+                // Add enum values and constants
+                foreach (var field in type.GetFields(DocGenerator.MemberFlags).Where(f => !f.IsSpecialName))
+                {
+                    _searchIndex.Add(new SearchableItem
+                    {
+                        Name = field.Name,
+                        FullName = $"{cleanName}.{field.Name}",
+                        ItemType = type.IsEnum ? "Value" : "Field",
+                        DeclaringType = type,
+                        Signature = field.FieldType.Name
+                    });
+                }
+
                 // Add methods
-                var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+                var methods = type.GetMethods(DocGenerator.MemberFlags)
                     .Where(m => !m.IsSpecialName && m.DeclaringType != typeof(object));
                 foreach (var method in methods)
                 {

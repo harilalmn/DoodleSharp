@@ -10,6 +10,16 @@ namespace DoodleSharp.Documentation
 {
     public class DocGenerator
     {
+        /// <summary>
+        /// The members a documentation page lists. Static is included deliberately: the whole
+        /// public surface of a static class (VColor, BooleanOps, Chart, GlobalParameters, Frame,
+        /// GeometryHelper, ...) and every static factory on the shapes lives behind it, and
+        /// leaving it out rendered those pages with no members even though descriptions existed.
+        /// Shared with HelpWindow's search index so the two cannot list different members.
+        /// </summary>
+        public const BindingFlags MemberFlags =
+            BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
+
         private Assembly[] _assemblies;
         private string[] _namespacePrefixes;
         private Dictionary<string, string> _summaries;
@@ -85,7 +95,7 @@ namespace DoodleSharp.Documentation
                 { "VGrid", "Represents a rectangular grid of VPoint markers. Constructors: VGrid(location, xcount, ycount, xSpacing = 1.0, ySpacing = null, centered = true) — ySpacing is double? and null means \"same as xSpacing\", so VGrid(loc, 5, 5, 10) is a square grid with spacing 10 on both axes; VGrid(location, xcount, ycount, spacing, centered) for uniform spacing with an explicit centered (it deliberately has no default, which is what keeps the four-argument call unambiguous); VGrid(location, xcount, ycount, centered) for spacing 1.0. If centered=true, grid is centered at location; if false, location is bottom-left corner. Access points via Points property, indexers [index] or [col, row], or GetRow()/GetColumn() methods. Supports all Shape transformations (Move, Rotate, Scale, Flip) and ApplyStyle() to set colors on all points." },
                 { "VCell", "Represents a square cell with a VPolygon boundary. Extends VPolygon. Properties: UniqueId (int), Neighbours (List<VCell>), Center (VXYZ), CellSize (double), Column (int), Row (int), Blocked (bool). Used as a building block for VSpatialGrid. Neighbours are set by the parent grid (4-connectivity: left, right, below, above)." },
                 { "VSpatialGrid", "Represents a grid of square VCell instances with neighbour connectivity and A* pathfinding. Constructor: VSpatialGrid(location, xCount, yCount, cellSize). Location is the center of the bottom-left cell. Each cell knows its adjacent neighbours (4-connectivity). Access cells via Cells property, indexers [index] or [col, row], or GetRow()/GetColumn(). Use FindPath(start, end) for A* shortest path, GetClosestCell(point) for O(log n) nearest-cell lookup via KD-tree." },
-                { "VArrow", "Represents an arrow: a straight shaft from Start to End with a V-shaped head. Constructors: (VXYZ start, VXYZ end), (x1, y1, x2, y2), (VXYZ startPoint, VXYZ direction, double length). Properties: Start, End (settable VXYZ — there are no StartPoint/EndPoint aliases), MidPoint, HeadLength (default 15 world units), HeadAngle (default 30 degrees — half-angle of each wing off the shaft), DoubleEnded (default false; when true a head is drawn at Start as well). GetEndArrowhead() and GetStartArrowhead() return the two wing tip coordinates. VArrow is a plain Shape, not an ICurve." },
+                { "VArrow", "Represents an arrow: a straight shaft from Start to End with a V-shaped head. Constructors: (VXYZ start, VXYZ end), (x1, y1, x2, y2), (VXYZ startPoint, VXYZ direction, double length). Properties: Start, End (settable VXYZ — there are no StartPoint/EndPoint aliases), MidPoint, HeadLength (default 15 world units — the length of each wing), HeadAngle (default 30 degrees — half-angle of each wing off the shaft, so a 60-degree head), DoubleEnded (default false; when true a head is drawn at Start as well). GetEndArrowhead() and GetStartArrowhead() return the two wing tip coordinates; GetArrowheadPoints(tip, from) computes them for an arbitrary tip and shaft direction, and the static VArrow.ArrowheadWings(tip, from, headLength, headAngleDegrees) does the same for a caller supplying its own size — the dimension shapes use it, at their ArrowSize and VDimension.DimensionArrowAngleDegrees. That one method is where every arrowhead in the application comes from, so the head's shape and size are identical on the vector, raster and GPU backends and in every export — only its fill still differs (solid under the vector renderer, outlined under raster and GPU; see HeadAngle). VArrow is a plain Shape, not an ICurve." },
                 { "RayCaster", "Accelerated 2D ray-casting against an explicit collection of shapes. Constructor `new RayCaster(IEnumerable<Shape> shapes, int leafSize = 8)` — you pass the shapes to index; there is no canvas-snapshot constructor (the geometry library has no canvas). To cast against everything currently drawn, pass `CanvasRenderer.Instance.GetShapes().OfType<Shape>()` (add `using DoodleSharp.Canvas;` and `using System.Linq;`). It builds an axis-aligned BVH with Surface Area Heuristic splitting, so each subsequent ray query runs in O(log N) average time and scales to millions of shapes. Only shapes with IsVisible == true are indexed; VPoint markers are always excluded (zero area, not a useful ray target), as are shapes with null or non-finite bounds (VRay, VXLine). The collection is snapshotted at construction — shapes added or removed afterwards are not reflected, but Refit() refreshes cached AABBs in O(N) when indexed shapes move. Query methods: FindIntersection(location, direction, exclusionList = null) returns RayHit? for the closest hit, with an optional List<Shape> of shapes to skip (useful for casting off a known source shape or finding the next hit past a set of shapes); FindIntersection(location, direction, maxDistance, exclusionList = null) also caps the search distance and prunes BVH sub-trees beyond the cap; HasIntersection(location, direction, maxDistance) returns true on the first hit (faster shadow-ray query); FindIntersections(queries, parallel = true) batches over IReadOnlyList<RayQuery>. Queries run on the XY plane (Z ignored); direction need not be normalised. Inline ray-vs-shape math handles VLine, VCircle, VArc, VEllipse, VPolygon (and VRectangle), VPolyline with zero allocation; other shape types fall back to AABB hit. Queries are thread-safe after construction." },
                 { "RayHit", "Readonly record struct returned by RayCaster.FindIntersection. Fields: Shape (the hit shape), Point (VXYZ world-space hit location), Distance (Euclidean distance from ray origin to the hit point)." },
                 { "RayQuery", "Readonly record struct used by RayCaster.FindIntersections to describe a single ray. Fields: Origin (VXYZ), Direction (VXYZ, need not be normalised)." },
@@ -119,7 +129,7 @@ namespace DoodleSharp.Documentation
                 { "ShapeDefaults", "Static class holding the global style defaults applied to every shape as it is constructed. Each property is nullable and null means \"leave the shape's own default alone\": GlobalColor, GlobalFillColor, GlobalLineWeight, GlobalLineType, GlobalLineTypeScale. One exception to know about: VPoint assigns Color and FillColor to \"White\" outright, so GlobalColor and GlobalFillColor do NOT reach a VPoint; every other shape honours them. Dimension defaults: DimOffset, DimArrowSize, DimTextHeight, DimDecimalPlaces, DimExtendBeyondDimLines, DimOffsetFromOrigin, DimPrefix, DimSuffix, DimTextBgOpaque, DimExtensionLineColor, DimDimensionLineColor, DimTextColor, DimSuppressDimensionLine. Reset() sets them all back to null. Setting a default affects only shapes created afterwards. These values are also populated from Project Settings." },
                 { "LineType", "Enum defining the stroke style (line pattern) for shape outlines. Options: Continuous (solid, default), Dashed, Dotted, DashDot, DashDotDot, Center, Phantom, Hidden." },
                 { "VColor", "Static class of colour STRINGS — every member returns the string that Color and FillColor expect, not a colour object, so shape.Color = VColor.Tomato is the same as shape.Color = \"Tomato\". It exposes 82 named colours as read-only properties: Red, Green, Blue, Yellow, Orange, Purple, Pink, Cyan, Magenta, White, Black, Gray, Brown, Coral, Crimson, DarkBlue, DarkGreen, DarkRed, DarkOrange, DarkViolet, DeepPink, DeepSkyBlue, DodgerBlue, ForestGreen, Fuchsia, Gold, GreenYellow, HotPink, IndianRed, Indigo, Khaki, Lavender, LawnGreen, LightBlue, LightCoral, LightGreen, LightPink, LightSalmon, LightSeaGreen, LightSkyBlue, LightYellow, Lime, LimeGreen, Maroon, MediumBlue, MediumOrchid, MediumPurple, MediumSeaGreen, MediumSlateBlue, MediumSpringGreen, MediumTurquoise, MediumVioletRed, MidnightBlue, Navy, Olive, OliveDrab, OrangeRed, Orchid, PaleGreen, PaleTurquoise, PaleVioletRed, Peru, Plum, RoyalBlue, Salmon, SandyBrown, SeaGreen, Sienna, Silver, SkyBlue, SlateBlue, SlateGray, SpringGreen, SteelBlue, Tan, Teal, Thistle, Tomato, Turquoise, Violet, Wheat, YellowGreen. Construction: FromRgb(r, g, b) and FromArgb(a, r, g, b) return hex strings, WithOpacity(r, g, b, opacity) takes opacity as 0.0-1.0 and returns #AARRGGBB, FromEnum(ColorName) converts the enum. Randomisation: GetRandomColor(returnPastelColor = true), GetRandomPastelColor(), GetRandomVibrantColor(), and the palettes behind them, GetPastelColors() and GetVibrantColors(), both string[] — handy as a ChartOptions.Palette. Any WPF colour name or #RRGGBB / #AARRGGBB string works too; VColor exists so the names are discoverable and typo-proof." },
-                { "ColorName", "Enum of the same 82 colour names VColor exposes as properties, for when you want a colour as a value you can switch on or store rather than a string: Red, Green, Blue, Yellow, Orange, Purple, Pink, Cyan, Magenta, White, Black, Gray, Brown and the 69 extended names (Coral through YellowGreen). Convert with VColor.FromEnum(ColorName.Crimson), which returns the string that Color and FillColor take." },
+                { "ColorName", "Enum of 82 colour names, for when you want a colour as a value you can store, compare or switch on rather than as a string. Shape.Color and Shape.FillColor take STRINGS, not this enum, so convert on the way in: shape.Color = VColor.FromEnum(ColorName.Crimson). Every member's name is exactly the string it converts to, and exactly the WPF/CSS colour of the same name — so ColorName.Crimson, VColor.Crimson and the literal \"Crimson\" are three spellings of one colour, and the table below needs no per-value commentary. Rough grouping: the twelve basics (Red, Green, Blue, Yellow, Orange, Purple, Pink, Cyan, Magenta, White, Black, Gray) followed by 70 extended names in alphabetical order, Brown through YellowGreen — Dark*/Light*/Medium*/Pale* variants of the basics, plus the descriptive names (Coral, Crimson, Gold, Khaki, Salmon, Teal, Tomato, Wheat and so on). One duplicate to be aware of: Magenta and Fuchsia are two names for the same colour (#FF00FF), and both are in the list. Note this enum is NOT the full palette available to you — Color and FillColor accept any WPF colour name and any #RRGGBB or #AARRGGBB string, so the enum is a discoverability aid rather than a limit. For a colour you did not have a name for, use VColor.FromRgb, VColor.WithOpacity, or one of the random-colour helpers." },
 
                 // Animation
                 { "DoodleSharp.Animation", "Contains classes for animating shapes over time. Two models: Frame for per-frame callbacks that reschedule themselves (the requestAnimationFrame pattern), and Animator for a finite timeline that can be scrubbed and exported to GIF or video." },
@@ -142,7 +152,7 @@ namespace DoodleSharp.Documentation
                 { "BooleanOps", "Static class providing polygon boolean operations using the robust Clipper2 library. Supports Union (combine polygons — returns a single VPolygon, or null when it cannot form one; a null result EXPLAINS ITSELF in the console via GeometryDiagnostics, naming the case: no polygons passed, an empty result, or N disjoint regions because the inputs never touched), UnionAll (the answer when a single polygon is not required — takes any number of polygons and returns List<VPolygon> of every resulting piece, never null), Intersect (overlapping area), Difference (subtract), Xor (symmetric difference), OffsetPolygon (grow/shrink), OffsetPolygonSafe (safe inward offset), MaxSafeInwardOffset, MakeSimple (resolve self-intersections), HasSelfIntersections, Simplify (Douglas-Peucker algorithm), Area calculation, and PointInPolygon (ray casting). Also provides WithHoles variants (DifferenceWithHoles, IntersectWithHoles, UnionWithHoles) that return PolygonWithHoles objects. It additionally forwards Region work to RegionBooleanOps, but only through the two-argument and IEnumerable<Region> overloads — there is deliberately NO params Region[] form here, because it would make the argument-less BooleanOps.Union() ambiguous with params VPolygon[]. Call RegionBooleanOps.Union(a, b, c) when you want the params form for regions." },
                 { "PolygonWithHoles", "Represents a polygon with an outer boundary and optional inner holes. Created via BooleanOps WithHoles methods or directly. Constructor: new PolygonWithHoles(outer) or new PolygonWithHoles(outer, holes). Properties: Outer (VPolygon), Holes (List<VPolygon>), Area (outer minus holes). Methods: AddHole(hole), Contains(point), Clone()." },
                 { "Region", "Represents an enclosed 2D region bounded by curves (lines, arcs, splines, beziers). Unlike VPolygon which only supports straight edges, Region preserves original curve geometry in its boundary loops. A Region has an OuterLoop (ordered list of ICurve forming a closed boundary) and optional Holes. Constructors: new Region(curves), new Region(outerCurves, holes), new Region(closedCurve) — build directly from a single closed curve (circle, ellipse, closed polygon/polyline/spline/bezier); the source curve is consumed (removed from the canvas) so its outline isn't drawn twice. Static factories: Region.FromPolygon(polygon), Region.FromPolygonWithHoles(pwh). Properties: OuterLoop, Holes, Area (outer minus holes), SignedArea, Perimeter. Methods: AddHole(curves), Contains(point) (inside the outer loop and outside every hole), DistanceTo(point) (to the nearest boundary — outer loop or hole edge — handling both VLine edges and curved segments), ToPolygon(), ToPolygonHighRes(segments), ToPolygonWithHoles(segments), Clone(), Move(), Rotate(), Flip(), Scale(), GetBounds(). Curves are automatically ordered to form a continuous closed loop; self-intersection validation is enforced." },
-                { "RegionBooleanOps", "Static class providing boolean operations on Regions. Operations approximate region boundaries to high-resolution polygons, clip them with the Clipper2 library, then wrap the results back as Regions. Methods: Union(a, b), Intersect(a, b), Difference(a, b), Xor(a, b). All four also accept a whole collection — Union/Intersect/Difference/Xor(IEnumerable<Region>) and (params Region[]) — folding across every region: Union = merged area, Intersect = area common to all, Difference = first minus the rest, Xor = running symmetric difference. WithHoles variants: UnionWithHoles, IntersectWithHoles, DifferenceWithHoles. Analysis: PointInRegion(region, point), Area(region). The BooleanOps class also exposes region overloads that forward here." },
+                { "RegionBooleanOps", "Static class providing boolean operations on Regions. Operations approximate region boundaries to high-resolution polygons, clip them with the Clipper2 library, then wrap the results back as Regions. Methods: Union(a, b), Intersect(a, b), Difference(a, b), Xor(a, b). All four also accept a whole collection — Union/Intersect/Difference/Xor(IEnumerable<Region>, int segmentsPerCurve = 32) and (params Region[]) — folding across every region: Union = merged area, Intersect = area common to all, Difference = first minus the rest, Xor = running symmetric difference. Every method takes segmentsPerCurve (default 32) to control how finely curved boundaries are sampled before clipping, EXCEPT the params Region[] forms, where C# will not allow an optional parameter after params — pass a List when you need to raise the precision. WithHoles variants: UnionWithHoles, IntersectWithHoles, DifferenceWithHoles. Analysis: PointInRegion(region, point), Area(region). The BooleanOps class also exposes region overloads that forward here." },
                 { "VPolygonBooleanExtensions", "Extension methods that put BooleanOps on the polygon itself: polygon.Union(other) (VPolygon? — null when the two stay disjoint), polygon.Difference(other), polygon.Xor(other) (each List<VPolygon>), polygon.OffsetPolygon(distance), polygon.OffsetPolygonSafe(distance), polygon.MaxSafeInwardOffset(), polygon.MakeSimple(), polygon.HasSelfIntersections(), polygon.Contains(point) and polygon.GetArea() (unsigned). ONE OF THEM IS UNREACHABLE: the Intersect extension is shadowed, because VPolygon already declares IntersectionResult Intersect(ICurve) and an instance method always beats an extension method — so polygon.Intersect(other) returns the points where the two OUTLINES cross, not the overlapping area. Call BooleanOps.Intersect(a, b) for the boolean; the other three are fine in dotted form. The extension overloads take no JoinType/EndType — call BooleanOps.OffsetPolygon for those. Results are unnamed shapes, so name them or call Place() to keep them visible." },
                 { "RegionBooleanExtensions", "Extension methods for Region boolean operations, giving instance-method syntax: region.Union(other), region.Difference(other), region.Xor(other), region.ContainsPoint(point), region.GetArea(). ONE OF THEM IS UNREACHABLE: the Intersect extension is shadowed by the inherited Shape.Intersect(Shape), because an instance method always beats an extension method — and Region does not override it, so region.Intersect(other) compiles and ALWAYS RETURNS NULL. Always call RegionBooleanOps.Intersect(a, b) instead. The other five have no instance counterpart and work as written." },
                 { "JoinType", "Enum for polygon offset join style. Values: Miter (sharp corners, default), Round (rounded corners), Square (squared-off corners). Used with BooleanOps.OffsetPolygon." },
@@ -152,7 +162,7 @@ namespace DoodleSharp.Documentation
                 { "VHatch", "Fills a closed polygon boundary with a repeating line pattern. Supports 72 built-in AutoCAD-standard patterns (via BuiltInHatch enum or name string). Note that VHatch is NOT in the auto-naming rewriter's type list, so `var h = new VHatch(...)` still ends up unnamed and is hidden after Main() returns — set Name in the initializer or call Place(); and custom patterns defined using the .pat format. Constructors: new VHatch(polygon, BuiltInHatch.ANSI31, scale, angle), new VHatch(polygon, \"BRICK\", scale, angle), new VHatch(polygon, hatchType, scale, angle), new VHatch(boundaryPoints, pattern, scale, angle). Static factory: VHatch.FromDefinition(polygon, patString, scale, angle). Properties: Boundary (List<VXYZ>), Pattern (HatchType), PatternScale (double), PatternAngle (double), Color, LineWeight, Opacity. Methods: GenerateLines() returns clipped line segments, Clone(), Move(), Rotate(), Flip(), Scale(), GetBounds(), Contains(point) (an exact test against the boundary, not the bounding box), DistanceTo(point) (to the boundary treated as a closed path)." },
                 { "HatchType", "Defines a hatch pattern composed of one or more line families following the AutoCAD .pat format. Properties: Name, Description, Lines (List<HatchPatternLine>) — all settable. Constructors: new HatchType() for an empty pattern, new HatchType(name, description, lines). Static methods: Parse(string patDefinition) parses from .pat format string, GetBuiltIn(string name) or GetBuiltIn(BuiltInHatch enum) retrieves a built-in pattern (forwarding to BuiltInHatches.Get, so it too hands back a fresh copy). Instance method: Clone() returns a deep copy, cloning every line family, so you can adapt a pattern without touching the one you copied it from." },
                 { "HatchPatternLine", "A single line definition within a hatch pattern. Properties: Angle (degrees), OriginX, OriginY, DeltaX (shift along line between rows), DeltaY (spacing between parallel lines), Dashes (double[] - positive=dash, negative=gap, 0=dot, empty=continuous). All are settable. Constructors: new HatchPatternLine() and new HatchPatternLine(angle, originX, originY, deltaX, deltaY, params double[] dashes). Clone() returns a deep copy, including a copy of the Dashes array." },
-                { "BuiltInHatch", "Enum of 72 built-in hatch patterns from the AutoCAD pattern library. Members use an underscore where the pattern name has a hyphen (BuiltInHatch.AR_BRSTD is the \"AR-BRSTD\" pattern). Values include: SOLID, ANGLE, ANSI31-ANSI38, AR_B816, AR_B816C, AR_B88, AR_BRELM, AR_BRSTD, AR_CONC, AR_HBONE, AR_PARQ1, AR_RROOF, AR_RSHKE, AR_SAND, BOX, BRASS, BRICK, BRSTONE, CLAY, CORK, CROSS, DASH, DOLMIT, DOTS, EARTH, ESCHER, FLEX, GOST_GLASS, GOST_WOOD, GOST_GROUND, GRASS, GRATE, GRAVEL, HEX, HONEY, HOUND, INSUL, LINE, MUDST, NET, NET3, PLAST, PLASTI, SACNCR, SQUARE, STARS, STEEL, SWAMP, TRANS, TRIANG, ZIGZAG, and ACAD_ISO02W100 through ACAD_ISO15W100." },
+                { "BuiltInHatch", "Enum of the 72 built-in hatch patterns, taken from the standard AutoCAD pattern library — pass one to a VHatch constructor: new VHatch(boundary, BuiltInHatch.ANSI31, scale: 1, angle: 0). The names are the AutoCAD names, so a drawing hatched here reads the same to anyone who knows that library; where a pattern name contains a hyphen the enum member uses an underscore (BuiltInHatch.AR_BRSTD is the \"AR-BRSTD\" pattern), and the string form accepts either spelling. The names are opaque on purpose — every value in the table below carries the pattern's official description. The families, so you know roughly where to look: SOLID is a filled area (approximated by very close 45° lines, not a true flood fill). LINE, ANGLE, NET, NET3, CROSS, DASH, DOTS, SQUARE, BOX, HEX, HONEY, TRIANG, STARS, ZIGZAG, GRATE, HOUND, ESCHER are plain geometric patterns with no material meaning. ANSI31-ANSI38 are the ANSI section-hatch materials an engineer expects — iron/brick/stone, steel, bronze, plastic, fire brick, marble, lead/insulation, aluminium. BRASS, BRICK, BRSTONE, CLAY, CORK, DOLMIT, EARTH, FLEX, GRASS, GRAVEL, INSUL, MUDST, PLAST, PLASTI, SACNCR, STEEL, SWAMP, TRANS are named materials and terrain. AR_* are the architectural patterns, drawn at building scale in inches rather than at unit scale, so they need a much larger PatternScale (or a much bigger boundary) than the rest before they look like anything. GOST_* are the Russian GOST standard's glass, wood and ground. ACAD_ISO02W100 through ACAD_ISO15W100 are the ISO dashed/dotted line families, useful as directional line fills rather than as textures. If none fit, build your own with HatchType.Parse or VHatch.FromDefinition using .pat syntax." },
                 { "BuiltInHatches", "Static registry of the 72 built-in hatch patterns. Methods: Get(string name) or Get(BuiltInHatch enum) retrieves a pattern (case-insensitive; an unknown name throws ArgumentException), GetAllNames() returns every available pattern name. BOTH Get overloads return a FRESH COPY on every call, so the pattern you get back is yours to modify — adjusting its angle, spacing or dashes cannot affect a later lookup of the same name. The cache holds the parsed template behind the copy, so repeated lookups stay cheap." },
                 { "HatchGenerator", "Static class that generates hatch line segments from a HatchType pattern clipped to a polygon boundary. Generate(List<VXYZ> boundary, HatchType pattern, double scale, double patternAngle) returns List<(VXYZ Start, VXYZ End)> — pure geometry, nothing is created or registered on the canvas, which makes it the way to hatch something without a VHatch shape. scale multiplies the pattern spacing, dash lengths and origin; patternAngle (degrees) is added to every line family's own angle. Returns an empty list when the boundary has fewer than 3 points or the pattern has no line families, and skips any family that would need more than 10,000 parallel lines. A dot (0 in Dashes) comes back as a zero-length segment. This is what VHatch.GenerateLines() calls." },
 
@@ -170,11 +180,11 @@ namespace DoodleSharp.Documentation
 
                 // Export
                 { "DoodleSharp.Export", "Contains classes for exporting shapes and animations to various file formats." },
-                { "DxfExporter", "Exports shapes to AutoCAD DXF format (R12 ASCII). Supports all shape types including lines, circles, arcs, ellipses, polygons, polylines, text, and arrows." },
-                { "PdfExporter", "Exports shapes to vector PDF format using PdfSharp library. Preserves colors, stroke styles, and produces high-quality vector output suitable for printing." },
-                { "SvgExporter", "Exports shapes to SVG (Scalable Vector Graphics) format. Web-compatible vector format that opens in browsers and vector editors. Supports all shape types with full color and styling." },
-                { "VideoExporter", "Exports animations to MP4 video using Windows Media Foundation H.264 encoder. Renders vector graphics at target resolution using high DPI for sharp output. Supports resolution presets (Canvas Size, 720p, 1080p, 4K, Custom), configurable frame rate (15-60 FPS), and bitrate (1-20 Mbps). No external dependencies required." },
-                { "GifEncoder", "Exports animations to animated GIF format. Supports configurable frame rate and duration. Good for short animations and web sharing." },
+                { "DxfExporter", "Exports shapes to AutoCAD DXF (R12 ASCII). Construct one with new DxfExporter(), then Export(shapes, filePath) to write a file or ExportToString(shapes) to get the text. Shapes with a native DXF equivalent keep it — a VCircle becomes a CIRCLE entity, not sixty-four chords — and everything else (dimensions, hatches, splines, groups) is decomposed into polylines rather than being silently dropped. Coordinates are passed straight through: one drawing unit is one DXF unit, Y up." },
+                { "PdfExporter", "Exports shapes to vector PDF (via PdfSharp), preserving colours, line weights and dash patterns — real vector output, suitable for printing rather than a screenshot. Construct one with new PdfExporter() and call Export: the short overload Export(shapes, filePath) auto-sizes the page to the drawing, and Export(shapes, filePath, pageWidthMm, pageHeightMm, scaleMmPerUnit, marginMm) gives you the sheet — page size in millimetres (0 for either dimension auto-sizes to content), the plot scale as millimetres of paper per drawing unit, and the margin. Everything is an argument; there are no PageSize or Margin properties to set." },
+                { "SvgExporter", "STATIC class (namespace DoodleSharp.Canvas) that turns shapes into SVG — a web-compatible vector format that opens in any browser or vector editor. Two methods, and both take everything as arguments; there is nothing to construct and no Width/Height properties: Export(shapes, width = 800, height = 600, padding = 20) returns the SVG document as a string, and SaveToFile(filePath, shapes, width = 800, height = 600) writes it to disk (path first). The drawing is fitted to the given viewport with the requested padding, and world Y-up is flipped to SVG Y-down for you." },
+                { "VideoExporter", "Exports an animation to MP4 using the Windows Media Foundation H.264 encoder — no external tools to install. Construct it with the output path and frame size (new VideoExporter(path, width, height, fps = 30, bitrateMbps = 5)), call AddFrame(RenderTargetBitmap) once per frame in order, then Dispose() to finalise the file. Implements IDisposable, so a using statement is the safe form. In practice you reach this through File > Export > Video, which offers resolution presets (Canvas Size, 720p, 1080p, 4K, Custom), 15-60 FPS and 1-20 Mbps." },
+                { "GifEncoder", "Writes an animated GIF, one frame at a time, to any Stream. Construct it as new GifEncoder(stream, width, height, frameDelayMs = 100, repeat = true) — frame delay and looping are CONSTRUCTOR ARGUMENTS, not properties — then call AddFrame(BitmapSource) per frame and Dispose() to write the trailer. There is no Save(): the file only becomes a valid GIF when Dispose runs, so wrap it in a using statement. Every frame must match the width and height given to the constructor. Good for short loops and web sharing; use VideoExporter when you want quality or length." },
 
                 // Canvas and Snap System
                 { "DoodleSharp.Canvas", "Contains classes for the interactive canvas, drawing tools, and snap detection system." },
@@ -187,6 +197,19 @@ namespace DoodleSharp.Documentation
                 // Console
                 { "DoodleSharp.Console", "Console output for project code. VizConsole.Log(...) writes to the console panel below the canvas." },
                 { "VizConsole", "Static class providing console output. Log(value, itemize = true) is the only method - there is no Write() or WriteLine(). It prints value.ToString() (an empty line for null) to the console panel, prefixed with the calling file name and line number, both captured automatically. When itemize is true (the default) and value is a collection - any IEnumerable other than a string - each item is printed on its own line and an empty collection prints \"(empty)\"; pass false to print the collection's own ToString() instead." },
+                { "ConsoleOutput", "The singleton behind the console panel — the collector VizConsole.Log writes into, reached as ConsoleOutput.Instance. You almost never need it: VizConsole.Log is the API for scripting, and it captures the calling file and line for you, which this does not. Use it directly only to read the console back (GetEntries, GetFormattedOutput — handy for asserting on your own output, or copying a run's log somewhere), to Clear it, or to add an entry that carries a clickable source location (AddEntry with filePath and lineNumber). Thread-safe: every method locks, so logging from a Task is safe. Updates to the panel are throttled, so a tight loop of Log calls does not repaint per line; Flush() forces the panel to catch up immediately, and the host calls it when your code finishes." },
+                { "ConsoleEntry", "One line in the console panel: the message, where it came from, and whether it is an error. Plain data with settable properties — you get these back from ConsoleOutput.GetEntries() rather than constructing them. Properties: Message, ModuleName (the source file name), LineNumber, Column, FilePath (the full path, when known), IsError (rendered in the error colour), IsNewLine, and IsClickable, which is computed rather than set — true when there is both a FilePath and a LineNumber > 0, which is what makes a console line jump to the code when you click it." },
+
+                // Rendering (library plumbing)
+                { "C2VGeometry.Rendering", "Renderer and exporter plumbing: the one place a shape is turned into drawable primitives, and the sink interface it emits into. This namespace exists so the canvas renderer, the drawing-tool preview, zoom-to-extents and the SVG/PDF/DXF exporters all share a single shape-to-primitives translation instead of each keeping its own type switch — which is how exporters used to drift and silently drop shape types. NOTHING HERE IS NEEDED TO DRAW. A sketch never touches it; use it only if you are writing your own consumer of the geometry — your own exporter, your own renderer, or a measurement pass that wants to see exactly what the renderer sees." },
+                { "IPrimitiveSink", "Where ShapeTessellator sends the primitives it produces — implement it to consume the geometry library's output in your own format. Members: Hints (a TessellationHints controlling flattening fineness), BeginShape(shape, pen) called before each shape's primitives (return false to decline the shape entirely), EndShape(), EmitPolyline(points, closed) for a stroked run of points, EmitFilledLoops(loops, rule) where the first loop is the outer boundary and the rest are holes, EmitPoint(point) for a zero-area mark, EmitText(text) for text left unflattened, and TryEmitNative(shape, pen) — a default interface method returning false — which is offered before flattening when Hints.PreferNative is set, so a sink that can express a circle AS a circle claims it and suppresses tessellation. Renderer plumbing, not scripting API: to draw, just construct shapes." },
+                { "BoundsPrimitiveSink", "An IPrimitiveSink that measures instead of drawing: feed shapes through ShapeTessellator into one of these and it accumulates the bounding box of everything it is given. This is what zoom-to-extents uses, and the reason it uses it is that measuring through the tessellator sees exactly what the renderer draws — a private type switch would leave an unrecognised shape out of the extents and let it sit off screen after a zoom-to-fit. Members: MinX/MinY/MaxX/MaxY, HasBounds (false until something has been added), Reset() to reuse the instance, and IncludeBounds(shape) to fold in a shape the tessellator declined using the shape's own GetBounds(). For a single shape prefer shape.GetBounds()." },
+                { "PolylineFallbackSink", "An IPrimitiveSink that reduces any shape to plain polylines and filled loops, for a consumer with no native form for it. Set the callbacks you care about — OnPolyline(points, closed, pen), OnFilled(loops, pen), OnPoint(point, pen), OnText(text) — and any you leave null are simply dropped. Unhandled is a list for recording shapes the pass could not reduce, so that an incomplete export can be reported rather than silently truncated — note the sink does NOT fill it in for you: its BeginShape accepts everything, so it is the caller that appends whenever ShapeTessellator.Tessellate returns false. Reset() clears it between runs. This is the floor under each exporter's own native mapping, not a replacement for it: flattening a circle to sixty-four chords is right for a rasterizer and wrong for a DXF." },
+                { "ShapeTessellator", "The one place a shape is turned into drawable primitives — every V* type, decomposed into polylines, filled loops, points and text, and pushed into an IPrimitiveSink. Construct one and call Tessellate(shape, sink); the static SegmentsForRadius(radiusPixels) is the curve-flattening rule it uses, exposed so a caller can match it. Two things to get right. Tessellate RETURNS BOOL and the value is not optional: false means the sink declined the shape (BeginShape returned false) and the caller must do something else with it — ignoring the result is how dimensions and construction lines vanish from an export. And the instance holds scratch buffers and is deliberately NOT thread-safe, because reusing those buffers is the entire point; give each thread its own." },
+                { "TessellationHints", "How finely curves should be flattened, carried on an IPrimitiveSink. Scale is world units per device pixel — segment counts are chosen from a shape's size in PIXELS, not world units, because a circle of radius 1 needs a different number of segments depending entirely on how far you have zoomed in. PreferNative is set by a sink that can express a circle as a circle (DXF, SVG, PDF): when true the tessellator offers each shape to TryEmitNative first and only flattens what the sink declines. Defaults: Scale = 1.0, PreferNative = false." },
+                { "PenSpec", "Everything a renderer needs to know about how one shape is painted, lifted out of the shape so a sink does not have to reach back into it. A readonly struct with six fields — Color, FillColor, LineWeight, LineType, LineTypeScale, Opacity — mirroring the shape's styling members. Build one with PenSpec.From(shape) rather than the constructor. HasFill is the useful part: it reports whether there is a genuine fill, treating an empty string, \"Transparent\" and \"None\" (case-insensitively) all as no fill, which is the check a sink should make before filling anything." },
+                { "FillRule", "How a filled outline decides what is inside it, for IPrimitiveSink.EmitFilledLoops. EvenOdd (the default, 0) counts crossings, so a loop inside a loop punches a hole regardless of its direction — the right choice for outer-plus-holes geometry, which is how the library emits filled areas. NonZero (1) counts crossing direction, so an inner loop only becomes a hole if it winds the opposite way to the outer one. Distinct from PolygonClipper's internal fill rule, which boolean operations pick for themselves; this one only affects how a sink paints what it is given." },
+                { "GlyphOutlineProvider", "The application's implementation of IGlyphOutlineProvider — the WPF font code that turns a VText's characters into vector contours, wired into VText.GlyphOutlineProvider at startup because C2VGeometry itself is WPF-free and cannot rasterise fonts. Nothing to call: work with VText.ToCharShape(i), LiftChar(i), the indexer text[i], or LiftChars(start, count), all of which route through whichever provider is installed and return null when none is." },
             };
         }
 
@@ -212,8 +235,15 @@ namespace DoodleSharp.Documentation
                 }
             }
 
+            // Enums and structs must be listed. `IsClass || IsAbstract` covers classes and
+            // interfaces (an interface is abstract in metadata) but silently excluded every enum
+            // and every value type — so ColorName's 83 colours, BuiltInHatch's 73 patterns,
+            // LineType, VTextAnchor, ParamValue, RayHit and RayQuery had no reachable page at all,
+            // even after the member tables were taught to render enum values.
             return types
-                .Where(t => t.IsPublic && (t.IsClass || t.IsAbstract) && t.Namespace != null &&
+                .Where(t => t.IsPublic && !t.IsGenericParameter &&
+                    (t.IsClass || t.IsAbstract || t.IsEnum || t.IsValueType) &&
+                    t.Namespace != null &&
                     _namespacePrefixes.Any(p => t.Namespace == p || t.Namespace.StartsWith(p + ".") || t.Namespace.StartsWith(p)))
                 .OrderBy(t => t.Namespace)
                 .ThenBy(t => t.Name)
@@ -231,7 +261,7 @@ namespace DoodleSharp.Documentation
             var displayName = GetDisplayTypeName(type);
             var cleanName = GetCleanTypeName(type);
 
-            var title = new Paragraph(new Run(displayName + " Class"))
+            var title = new Paragraph(new Run(displayName + " " + GetTypeKindNoun(type)))
             {
                 FontSize = 24,
                 FontWeight = FontWeights.Bold,
@@ -278,16 +308,39 @@ namespace DoodleSharp.Documentation
                 doc.Blocks.Add(GenerateMemberTable(dtors, cleanName));
             }
 
-            // Properties
-            var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+            // Enum values. An enum declares no properties or methods of its own, so without
+            // this an enum page listed nothing at all.
+            if (type.IsEnum)
+            {
+                AddSectionHeader(doc, "Values");
+                doc.Blocks.Add(GenerateMemberTable(
+                    type.GetFields(BindingFlags.Public | BindingFlags.Static), cleanName));
+                return doc;
+            }
+
+            // Properties. Static must be included: without it every static class (VColor,
+            // BooleanOps, Chart, GlobalParameters, ...) rendered an empty page, and the
+            // static factories on the shapes (VCircle.FromCenterDiameter, VArc.From*,
+            // VXYZ.BasisX, ...) were invisible.
+            var props = type.GetProperties(MemberFlags);
             if (props.Length > 0)
             {
                 AddSectionHeader(doc, "Properties");
                 doc.Blocks.Add(GenerateMemberTable(props, cleanName));
             }
 
+            // Constants and static fields (GeometryTolerance.Epsilon and friends).
+            var fields = type.GetFields(MemberFlags)
+                .Where(f => !f.IsSpecialName)
+                .ToArray();
+            if (fields.Length > 0)
+            {
+                AddSectionHeader(doc, "Fields");
+                doc.Blocks.Add(GenerateMemberTable(fields, cleanName));
+            }
+
             // Methods
-            var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            var methods = type.GetMethods(MemberFlags)
                 .Where(m => !m.IsSpecialName && m.DeclaringType != typeof(object)) // Exclude getter/setter internal methods and Object methods
                 .ToArray();
 
@@ -335,16 +388,45 @@ namespace DoodleSharp.Documentation
             return p;
         }
 
+        /// <summary>
+        /// "Class", "Enum", "Struct" or "Interface" — the page title used to say "Class" for
+        /// everything, which read as a mistake on an enum page like ColorName.
+        /// </summary>
+        private static string GetTypeKindNoun(Type type)
+        {
+            if (type.IsEnum) return "Enum";
+            if (type.IsInterface) return "Interface";
+            if (type.IsValueType) return "Struct";
+            return "Class";
+        }
+
+        private static string GetTypeKindKeyword(Type type)
+        {
+            if (type.IsEnum) return "enum";
+            if (type.IsInterface) return "interface";
+            if (type.IsValueType) return "struct";
+            // A C# static class is abstract + sealed in metadata; saying so is worth a word,
+            // because it is what tells the reader there is nothing to `new`.
+            if (type.IsAbstract && type.IsSealed) return "static class";
+            if (type.IsAbstract) return "abstract class";
+            return "class";
+        }
+
         private Paragraph GenerateSyntax(Type type)
         {
-            var syntax = $"public class {GetDisplayTypeName(type)}";
-            if (type.BaseType != null && type.BaseType != typeof(object))
-                syntax += $" : {GetDisplayTypeName(type.BaseType)}";
+            var syntax = $"public {GetTypeKindKeyword(type)} {GetDisplayTypeName(type)}";
 
-            var interfaces = type.GetInterfaces();
+            // Enums list Enum as their base and structs list ValueType; neither is information.
+            var baseType = type.IsEnum || type.IsValueType ? null : type.BaseType;
+            if (baseType != null && baseType != typeof(object))
+                syntax += $" : {GetDisplayTypeName(baseType)}";
+
+            // An enum's only interfaces are the BCL's IComparable/IFormattable/IConvertible, which
+            // is noise on a page about colour names.
+            var interfaces = type.IsEnum ? Array.Empty<Type>() : type.GetInterfaces();
             if (interfaces.Length > 0)
             {
-                syntax += (type.BaseType != null && type.BaseType != typeof(object) ? ", " : " : ");
+                syntax += (baseType != null && baseType != typeof(object) ? ", " : " : ");
                 syntax += string.Join(", ", interfaces.Select(i => GetDisplayTypeName(i)));
             }
 
@@ -414,6 +496,19 @@ namespace DoodleSharp.Documentation
                     var paramStr = string.Join(", ", ci.GetParameters().Select(p => $"{GetFriendlyTypeName(p.ParameterType)} {p.Name}"));
                     sig = string.IsNullOrEmpty(paramStr) ? "()" : $"({paramStr})";
                 }
+                else if (member is FieldInfo fi)
+                {
+                    // Enum values carry their own constant; a plain const shows its value too,
+                    // which is the useful thing to know about GeometryTolerance.Epsilon.
+                    sig = fi.FieldType.IsEnum && fi.DeclaringType == fi.FieldType
+                        ? Convert.ToInt64(fi.GetRawConstantValue()).ToString()
+                        : GetFriendlyTypeName(fi.FieldType)
+                          + (fi.IsLiteral ? $" = {fi.GetRawConstantValue()}" : "");
+                }
+
+                // Flag staticness — it changes how the member is called, so it must be visible.
+                if (IsStaticMember(member))
+                    sig = string.IsNullOrEmpty(sig) ? "static" : "static " + sig;
 
                 var sigPara = new Paragraph(new Run(sig));
                 sigPara.FontFamily = new FontFamily("Consolas");
@@ -424,16 +519,7 @@ namespace DoodleSharp.Documentation
                 row.Cells.Add(sigCell);
 
                 // Description column
-                var description = GetMemberDescription(className, member.Name);
-                if (string.IsNullOrEmpty(description))
-                {
-                    // Try base class descriptions for inherited members
-                    description = GetMemberDescription("Shape", member.Name);
-                }
-                if (string.IsNullOrEmpty(description))
-                {
-                    description = GetMemberDescription("ICurve", member.Name);
-                }
+                var description = GetInheritedMemberDescription(className, member);
                 var descPara = new Paragraph(new Run(description));
                 descPara.FontSize = 11;
                 descPara.Foreground = string.IsNullOrEmpty(description) ? Brushes.Gray : Brushes.Black;
@@ -905,8 +991,9 @@ topRight.Anchor = VTextAnchor.TopRight;
                 { "VArrow", @"// Create an arrow from two points (Start and End are settable VXYZ)
 var arrow = new VArrow(new VXYZ(0, 0), new VXYZ(100, 0));
 arrow.Color = ""Orange"";
-arrow.HeadLength = 15;   // world units, default 15
-arrow.HeadAngle = 30;    // degrees off the shaft, default 30
+arrow.HeadLength = 20;   // length of each wing, world units (default 15)
+arrow.HeadAngle = 20;    // half-angle off the shaft in degrees (default 30),
+                         // so 20 gives a narrower dart than the default
 
 // Or from four coordinates
 var arrow1b = new VArrow(0, -30, 100, -30);
@@ -3309,12 +3396,14 @@ double area = regionA.GetArea();                        // outer minus holes
                 // VArrow Properties
                 { "VArrow.Start", "Gets or sets the starting point of the arrow." },
                 { "VArrow.End", "Gets or sets the ending point (tip) of the arrow." },
-                { "VArrow.HeadLength", "Length of each arrowhead wing in world units. Default 15. It does not scale with the shaft, so a short arrow with the default head looks head-heavy — reduce it for small arrows." },
-                { "VArrow.HeadAngle", "Half-angle in degrees between each arrowhead wing and the shaft. Default 30, giving a 60-degree head. Larger values give a broader, flatter head." },
-                { "VArrow.DoubleEnded", "When true, an identical head is drawn at Start as well as at End. Default false." },
+                { "VArrow.HeadLength", "Length of each arrowhead wing in world units, measured from the tip. Default 15. It does not scale with the shaft, so a short arrow with the default head looks head-heavy — reduce it for small arrows. With HeadAngle it determines the head's proportions: width 2 × HeadLength × sin(HeadAngle), depth HeadLength × cos(HeadAngle)." },
+                { "VArrow.HeadAngle", "Half-angle in degrees between each arrowhead wing and the shaft, so the head spans twice this at the tip. Default 30, giving a 60-degree head; smaller values give a narrow dart, larger values a broad flat head. Combined with HeadLength (the length of each wing) it fully determines the head: the head is 2 × HeadLength × sin(HeadAngle) wide and HeadLength × cos(HeadAngle) deep. The head is a closed triangle, and every renderer and exporter reads its GEOMETRY from the same place (VArrow.GetArrowheadPoints), so the head is the same shape and size on the vector, raster and GPU backends and in SVG, PDF and DXF output. ITS FILL IS NOT YET CONSISTENT, though: the vector renderer fills the triangle with the stroke colour, while the raster and GPU backends stroke its outline — so a head that is solid under Legacy comes out hollow under Managed or GPU. DXF, being a wireframe format, writes the triangle as three LINE entities. Known open item; the geometry is right in all of them. ONE THING TO EXPECT IN AN EXISTING DRAWING: heads are now noticeably broader than they used to appear on the canvas, because that path was previously pinned to an effective 9.5-degree half-angle and ignored this property entirely. That is the correction, not a regression — reduce HeadAngle if you preferred the narrower dart." },
+                { "VArrow.DoubleEnded", "When true, an identical head is drawn at Start as well as at End, so the arrow reads as bidirectional. Default false. Honoured by every renderer and by SVG, PDF and DXF export alike — the exporters used to drop the start head silently. Both heads are identical in size and angle; see HeadAngle for the one respect in which the head's APPEARANCE still differs between backends (filled versus outlined)." },
                 { "VArrow.MidPoint", "The midpoint of the shaft, read-only. This is control point 0, the whole-shape move handle." },
                 { "VArrow.GetStartArrowhead", "The two wing tip coordinates of the head at Start, as a (VXYZ, VXYZ) tuple. Returned whether or not DoubleEnded is set, so check the flag first if you are reproducing what is drawn." },
-                { "VArrow.GetEndArrowhead", "The two wing tip coordinates of the head at End, as a (VXYZ, VXYZ) tuple — the geometry the renderer draws." },
+                { "VArrow.GetEndArrowhead", "The two wing tip coordinates of the head at End, as a (VXYZ, VXYZ) tuple — exactly the geometry every renderer and exporter draws, honouring both HeadLength and HeadAngle." },
+                { "VArrow.GetArrowheadPoints", "GetArrowheadPoints(VXYZ tip, VXYZ from) — the two wing tips of a head pointing at tip and opening back towards from, using this arrow's HeadLength and HeadAngle. This is THE definition of an arrowhead's geometry in the library; every renderer and exporter calls it, which is what keeps an arrow the same shape and size on the vector, raster and GPU backends and in every export format (how the resulting triangle is PAINTED still varies — see HeadAngle). Useful directly when you want to draw your own head somewhere along a path rather than at the arrow's own ends. Returns (tip, tip) when tip and from coincide." },
+                { "VArrow.ArrowheadWings", "Static. ArrowheadWings(VXYZ tip, VXYZ from, double headLength, double headAngleDegrees) — the same wing-tip calculation for a caller that supplies its own size and angle instead of taking them from a VArrow. Each wing is headLength long and headAngleDegrees off the shaft. This is what the dimension shapes use, at their own ArrowSize and VDimension.DimensionArrowAngleDegrees; use it to draw a consistent arrowhead on anything — a leader, a flow line, a hand-built annotation. Returns (tip, tip) for a degenerate or non-finite direction, so check for that before drawing." },
 
                 // VArrow Methods
                 { "VArrow.Draw", "Renders the arrow to the canvas." },
@@ -3329,13 +3418,14 @@ double area = regionA.GetArea();                        // outer minus holes
                 // VDimension Properties
                 { "VDimension.Point1", "Gets or sets the first measurement point." },
                 { "VDimension.Point2", "Gets or sets the second measurement point." },
-                { "VDimension.Offset", "Gets or sets the offset distance for the dimension line from the measured points." },
-                { "VDimension.ExtensionLength", "Length of the extension lines that run from the measured points out to the dimension line. Default 10." },
-                { "VDimension.ArrowSize", "Gets or sets the size of the arrowheads at both ends of the dimension line." },
+                { "VDimension.Offset", "How far the dimension line sits from the measured points, in world units. Default 20 (or ShapeDefaults.DimOffset). Positive and negative offsets put the dimension line on opposite sides. Together with OffsetFromOrigin and ExtendBeyondDimLines it also fixes the extension lines: each one spans from OffsetFromOrigin away from its measured point out to Offset + ExtendBeyondDimLines. (ExtensionLength does NOT participate — it is deprecated and inert.)" },
+                { "VDimension.ExtensionLength", "DEPRECATED, and marked [Obsolete] — SETTING IT DOES NOTHING, and never did. Nothing reads it: not the renderer, not GetDimensionGeometry, not any exporter. An extension line's length is already fully determined by three other properties: it runs from OffsetFromOrigin away from the measured point out to Offset + ExtendBeyondDimLines past it, leaving nothing for this one to control. Set those instead. It is kept rather than deleted so existing code still compiles; the compiler warning is the signal that the assignment has no effect." },
+                { "VDimension.ArrowSize", "Length of each arrowhead wing at both ends of the dimension line, in world units. Default 8 (or ShapeDefaults.DimArrowSize). The head's ANGLE is not adjustable per dimension: it is fixed at VDimension.DimensionArrowAngleDegrees (20°) so every dimension in a drawing matches." },
+                { "VDimension.DimensionArrowAngleDegrees", "Constant, 20. The half-angle in degrees of a dimension arrowhead off its dimension line — shared by the canvas renderer, the tessellator (and so the raster and GPU backends) and every exporter, so a dimension's heads are the same SHAPE AND SIZE wherever it is drawn. (Their fill still differs by backend, the same open item noted on VArrow.HeadAngle: filled under the vector renderer, outlined under raster and GPU.) Read it when drawing your own annotation and you want it to match: VArrow.ArrowheadWings(tip, from, dim.ArrowSize, VDimension.DimensionArrowAngleDegrees). It is a compile-time constant, so there is nothing to set — dimension heads are not individually configurable; vary ArrowSize instead. Distinct from VArrow.HeadAngle, which IS per-arrow." },
                 { "VDimension.TextHeight", "Gets or sets the height of the dimension text." },
                 { "VDimension.DecimalPlaces", "Gets or sets the number of decimal places for distance display." },
-                { "VDimension.ExtendBeyondDimLines", "Gets or sets how far extension lines extend beyond the dimension line." },
-                { "VDimension.OffsetFromOrigin", "Gets or sets the gap between the origin point and the start of the extension line." },
+                { "VDimension.ExtendBeyondDimLines", "How far each extension line runs PAST the dimension line, in world units. Default 1.25 (or ShapeDefaults.DimExtendBeyondDimLines) — the small overshoot that makes a dimension read as drafted rather than as a bare bracket. Zero stops the extension lines flush with the dimension line." },
+                { "VDimension.OffsetFromOrigin", "The gap left between the measured point and where its extension line STARTS, in world units. Default 0.625 (or ShapeDefaults.DimOffsetFromOrigin). The drafting convention: a small gap so the extension line does not touch the geometry it is measuring. Zero makes it start exactly at the point. With Offset and ExtendBeyondDimLines this fully determines the extension line's length — ExtensionLength is deprecated and does nothing." },
                 { "VDimension.SuppressExtLine1", "If true, the first extension line (at Point1) is not drawn." },
                 { "VDimension.SuppressExtLine2", "If true, the second extension line (at Point2) is not drawn." },
                 { "VDimension.Prefix", "Gets or sets the text prefix prepended to the dimension value (e.g. \"L=\")." },
@@ -3365,7 +3455,7 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "VRadialDimension.Radius", "Gets or sets the radius of the circle/arc being dimensioned." },
                 { "VRadialDimension.LeaderAngle", "Gets or sets the angle (in degrees) at which the leader line points to the circumference." },
                 { "VRadialDimension.ShowDiameter", "If true, shows diameter (line through center, both arrowheads) instead of radius." },
-                { "VRadialDimension.ArrowSize", "Gets or sets the size of the arrowhead." },
+                { "VRadialDimension.ArrowSize", "Length of the leader arrowhead's wings, in world units. Default 8 (or ShapeDefaults.DimArrowSize). As with VDimension the head angle is fixed at VDimension.DimensionArrowAngleDegrees (20°), so radial and linear dimensions match; only the size varies. With ShowDiameter set, both ends get a head." },
                 { "VRadialDimension.TextHeight", "Gets or sets the height of the dimension text." },
                 { "VRadialDimension.DecimalPlaces", "Gets or sets the number of decimal places for the displayed value." },
                 { "VRadialDimension.Prefix", "Gets or sets the text prefix prepended to the dimension value." },
@@ -3483,8 +3573,8 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "ICurve.PointAtSegmentLength", "Returns the point at the specified distance along the curve from the start." },
                 { "ICurve.PointAtParameter", "Returns a point on the curve at the given normalized parameter (0 to 1), where 0 is the start and 1 is the end." },
                 { "ICurve.ParameterAtPoint", "Returns the normalized parameter (0 to 1) for the closest point on the curve to the given point." },
-                { "ICurve.Offset", "Creates a new curve offset by the specified distance (positive = left, negative = right)." },
-                { "ICurve.SplitAtPoint", "Splits the curve at the specified point, returning two curve segments." },
+                { "ICurve.Offset", "Creates a new curve parallel to this one at the specified distance; the sign chooses the side. THE RESULT IS A REAL SHAPE AND AUTO-REGISTERS, so it appears on the canvas immediately — call Remove() on it if you only wanted the geometry. There is also an Offset(List<double> distances) overload returning one curve per distance, for a family of parallels in a single call. Accuracy varies by shape and is documented per type: exact for VLine, VRay, VXLine, VCircle and VArc, and an approximation for VEllipse, VPolygon, VPolyline, VBezier and VSpline, whose true offset curves are not the same kind of curve. For a robust polygon offset with proper mitring, use BooleanOps.OffsetPolygon instead." },
+                { "ICurve.SplitAtPoint", "Splits the curve at the specified point, returning the two pieces as a tuple of ICurve. The point does not have to lie on the curve — it is projected onto the nearest position first. Two things to expect. THE ORIGINAL IS NOT CONSUMED: it stays on the canvas exactly as it was, so you normally want original.Remove() after splitting, or you will be looking at the whole curve with the two halves drawn on top of it. And THE TWO PIECES ARE REAL SHAPES, so they auto-register and appear immediately; call Remove() on either if you only wanted the geometry. The piece TYPE is not always the type you split: splitting a VCircle gives two VArcs, and splitting a VPolygon or VRay gives open curves, because a trimmed closed or infinite curve is a different kind of thing. Use SetBounds when you want to trim a curve in place instead." },
                 { "ICurve.SetBounds", "Trims the curve in place so that the parameter sub-range [startParameter, endParameter] becomes the new [0, 1]. Parameters are clamped to [0,1] and swapped if reversed. Implemented for VLine/VArc/VEllipse/VPolyline/VBezier/VSpline. Throws NotSupportedException on VCircle/VPolygon/VRay/VXLine because their trimmed result is a different shape type — use SplitAtPoint there." },
                 { "ICurve.NormalAtPoint", "Returns the normal vector (perpendicular) to the curve at the specified point." },
                 { "ICurve.PointsAtChordLengthFromPoint", "Returns the points on this curve that are exactly chordLength away from the given point in a straight line — the intersections of a circle of that radius with the curve. The reference point does not have to lie on the curve; it is projected onto it first. The list is empty when the circle never reaches the curve, and typically holds one point on each side when it does. Use it to step along a curve by true chord distance (setting out a fence line, spacing bolts on an arc); use Measure(segmentLength) instead when you want arc-length spacing." },
@@ -3576,13 +3666,13 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "ValueAnimation.Target", "Gets the shape whose property is being animated (T must be a Shape)." },
                 { "ValueAnimation.Duration", "Gets how long the value animation takes (in seconds)." },
                 { "ValueAnimation.EasingFunction", "Gets or sets the easing function for smooth value interpolation." },
-                { "ValueAnimation.Apply", "Applies the value animation, interpolating the property between start and end values (or through the sequence of values, each leg taking an equal share of the duration)." },
+                { "ValueAnimation.Apply", "Called by the timeline with the normalised time t (0 at this animation's start, 1 at its end) — YOU DO NOT CALL IT. It clamps t to [0, 1] (a negative t means \"not started yet\"), runs it through EasingFunction, then walks the value sequence: the eased time is scaled across the count-1 segments and the property is set by linear interpolation within whichever segment it lands in. So the two-value constructor is a straight A-to-B ramp, and the List<double> constructor gives evenly-spaced keyframes with the easing applied across the whole run rather than per leg. The property is set by reflection each frame, so it must be a writable double. Because Apply is a pure function of t the timeline is seekable — the Timeline panel's scrub bar and the GIF and MP4 exporters render time T directly instead of playing up to it." },
 
                 // ObjectPropertyAnimation
                 { "ObjectPropertyAnimation.Target", "Always null — this animation drives a property on an arbitrary object rather than a shape, so nothing is auto-drawn for it. The object's property setter is what moves the geometry." },
                 { "ObjectPropertyAnimation.Duration", "Gets how long the object property animation takes (in seconds)." },
                 { "ObjectPropertyAnimation.EasingFunction", "Gets or sets the easing function for smooth value interpolation." },
-                { "ObjectPropertyAnimation.Apply", "Applies the object property animation, interpolating the property between start and end values." },
+                { "ObjectPropertyAnimation.Apply", "Called by the timeline with the normalised time t — not by you. It clamps t to [0, 1], eases it, and writes startValue + (endValue - startValue) × easedT onto the target object's double property by reflection. Unlike every other animation, Animation.Target is null here: the point of this one is that it drives an ARBITRARY object rather than a Shape, so the timeline has no shape to place on the canvas or redraw. Nothing visible happens unless something else reads the property you are driving — typically your own code, recomputing geometry from it." },
 
                 // VizConsole
                 { "VizConsole.Log", "Prints a value to the console panel below the canvas. Signature: Log(object? value, bool itemize = true) — the file path and line number parameters are filled in by the compiler, so you never pass them. Null prints an empty line; anything else prints its ToString(). With itemize true (the default) a collection (any IEnumerable except string) is printed one item per line, and an empty collection prints \"(empty)\"; with itemize false the collection's own ToString() is printed. Output is prefixed [ModuleName:LineNumber], where ModuleName is the calling file without its extension." },
@@ -3597,19 +3687,19 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "EasingFunctions.EaseInOutCubic", "Returns cubic ease-in-out (smoother start and end)." },
 
                 // ArrayOps
-                { "ArrayOps.LinearArray", "Creates copies of a shape along a direction vector." },
-                { "ArrayOps.RectangularArray", "Creates a grid pattern of shape copies (rows × columns)." },
-                { "ArrayOps.CircularArray", "Creates copies arranged in a circle around a center point." },
-                { "ArrayOps.PathArray", "Creates copies distributed along a curve path." },
-                { "ArrayOps.SpiralArray", "Creates copies arranged in a spiral pattern." },
-                { "ArrayOps.Mirror", "Creates a mirrored copy of a shape across an axis line." },
+                { "ArrayOps.LinearArray", "LinearArray(Shape shape, VXYZ direction, int count, double spacing) — count shapes IN TOTAL along direction, the original first and count-1 clones after it. direction is normalised internally, so spacing is a true world-unit distance whatever length you pass; VXYZ.BasisX gives a row along +X. A count of 1 returns just the original, and zero or less returns an empty list. End the chain with .DrawAll() — the clones have no Name, so the post-run sweep would otherwise hide them." },
+                { "ArrayOps.RectangularArray", "RectangularArray(Shape shape, int rows, int cols, double rowSpacing, double colSpacing) — a rows × cols grid growing in +X (columns) and +Y (rows) from the original, which occupies the first cell. Returns rows × cols shapes in total. Zero or fewer rows or cols returns an empty list. Call .DrawAll() on the result." },
+                { "ArrayOps.CircularArray", "CircularArray(Shape shape, VXYZ center, int count, double totalAngleDegrees = 360, bool rotateItems = true) — count shapes IN TOTAL around center, the original included. The angular step depends on whether the sweep closes: a full 360 divides by count (so the last copy does not land on the first), and a partial sweep divides by count-1 (so the last copy sits exactly at totalAngleDegrees). rotateItems: false translates each copy without turning it, which is what you want for text or symbols that must stay upright. Call .DrawAll() on the result." },
+                { "ArrayOps.PathArray", "PathArray(Shape shape, ICurve path, int count, bool alignToPath = true) — count clones spread by EQUAL ARC LENGTH along any ICurve (line, arc, spline, polyline...). NOTE the original is NOT in the returned list, unlike LinearArray and CircularArray: you get exactly count clones. alignToPath rotates each clone to the curve's tangent there; pass false to keep them all in the source shape's orientation. Call .DrawAll() on the result." },
+                { "ArrayOps.SpiralArray", "SpiralArray(Shape shape, VXYZ center, int count, double startRadius, double endRadius, double totalRevolutions = 1, bool rotateItems = true) — count clones winding from startRadius out to endRadius over totalRevolutions turns, radius and angle both interpolated linearly. As with PathArray the ORIGINAL IS NOT INCLUDED. endRadius smaller than startRadius spirals inward; a fractional totalRevolutions gives a partial turn. Call .DrawAll() on the result." },
+                { "ArrayOps.Mirror", "Mirror(Shape shape, VLine mirrorLine) — returns a two-element list, [original, mirrored copy], reflected across the INFINITE line through mirrorLine's Start and End (not just the segment). The original is included, so this one list is the complete symmetric pair. Call .DrawAll() on it." },
 
                 // BooleanOps
-                { "BooleanOps.Union", "Combines two or more polygons into one. Returns a single VPolygon if successful, or null when it cannot form one — and then it reports why through GeometryDiagnostics (the console, tagged 'Geometry'): no polygons passed, an empty result, or N disjoint regions because the inputs never overlapped or touched. When you want every piece instead of a null, call BooleanOps.UnionAll, which returns List<VPolygon> and never returns null; or BooleanOps.UnionWithHoles(a, b) when the merged outline can enclose voids you care about." },
+                { "BooleanOps.Union", "Combines two or more polygons into one. Returns a single VPolygon if successful, or null when it cannot form one — and then it reports why through GeometryDiagnostics (the console, tagged 'Geometry'): no polygons passed, an empty result, or N disjoint regions because the inputs never overlapped or touched. When you want every piece instead of a null, call BooleanOps.UnionAll, which returns List<VPolygon> and never returns null; or BooleanOps.UnionWithHoles(a, b) when the merged outline can enclose voids you care about. There are also Region overloads — Union(Region a, Region b, int segmentsPerCurve = 32) and Union(IEnumerable<Region> regions, int segmentsPerCurve = 32) — which forward to RegionBooleanOps and now carry the sampling precision through; there is deliberately no params Region[] form here, because it would make the argument-less BooleanOps.Union() ambiguous with params VPolygon[]." },
                 { "BooleanOps.UnionAll", "Unions any number of polygons and returns EVERY resulting piece as a List<VPolygon> — never null, which is the difference from Union. Overlapping inputs merge into one piece; inputs that touch nothing come back as separate pieces; an empty input gives an empty list and a single input gives a copy of it. Overloads take params VPolygon[] or IEnumerable<VPolygon>. This is what the console diagnostic points you at when Union returns null. HOLES ARE NOT REPRESENTED in the result: if the merged outline can enclose a void that matters to you, use UnionWithHoles(a, b), which returns List<PolygonWithHoles> — though that form takes exactly two polygons. Results are unnamed method results, so Place() or name anything you want to keep." },
-                { "BooleanOps.Intersect", "Returns the overlapping area of two polygons (logical AND)." },
-                { "BooleanOps.Difference", "Subtracts one polygon from another." },
-                { "BooleanOps.Xor", "Returns the symmetric difference of two polygons (non-overlapping areas)." },
+                { "BooleanOps.Intersect", "The overlapping area of two polygons (logical AND). Region overloads forward to RegionBooleanOps and take the sampling precision: Intersect(Region a, Region b, int segmentsPerCurve = 32) and Intersect(IEnumerable<Region>, int segmentsPerCurve = 32) — the params Region[] form cannot take it, so pass a list when you need to raise it." },
+                { "BooleanOps.Difference", "Subtracts one polygon from another (a minus b). Region overloads forward to RegionBooleanOps and take the sampling precision: Difference(Region a, Region b, int segmentsPerCurve = 32) and Difference(IEnumerable<Region>, int segmentsPerCurve = 32), where the collection form is the first region minus every other. The params Region[] form cannot take the precision argument." },
+                { "BooleanOps.Xor", "The symmetric difference of two polygons — the parts belonging to one but not both. Region overloads forward to RegionBooleanOps and take the sampling precision: Xor(Region a, Region b, int segmentsPerCurve = 32) and Xor(IEnumerable<Region>, int segmentsPerCurve = 32), the latter folding a running symmetric difference. The params Region[] form cannot take the precision argument." },
                 { "BooleanOps.OffsetPolygon", "Grows or shrinks a polygon by the specified distance." },
                 { "BooleanOps.Area", "Calculates the area of a polygon." },
                 { "BooleanOps.PointInPolygon", "Tests if a point is inside a polygon." },
@@ -3882,25 +3972,19 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "VTransform.OfVector", "Applies only the basis to a direction, ignoring Origin — the right method for normals, velocities and other free vectors." },
 
                 // DxfExporter
-                { "DxfExporter.Export", "Exports shapes to a DXF file (AutoCAD format)." },
-                { "DxfExporter.ExportToString", "Exports shapes to a DXF string." },
+                { "DxfExporter.Export", "Export(IReadOnlyList<IDrawable> shapes, string filePath) — writes the shapes to a DXF file (R12 ASCII). Pass CanvasRenderer.Instance.GetShapes() for the whole drawing, or any list you have built yourself. Coordinates go out unchanged: one drawing unit is one DXF unit, Y still points up. Circles, arcs and ellipses stay true curves rather than being flattened, so the file is usable in a CAD package; shape types with no DXF equivalent are decomposed into polylines instead of being dropped." },
+                { "DxfExporter.ExportToString", "ExportToString(IReadOnlyList<IDrawable> shapes) — the same DXF content returned as a string instead of written to disk, for inspecting it, embedding it, or sending it somewhere other than a file." },
 
                 // PdfExporter
-                { "PdfExporter.Export", "Exports shapes to a PDF file." },
-                { "PdfExporter.PageSize", "Gets or sets the page size (A4, Letter, etc.)." },
-                { "PdfExporter.Margin", "Gets or sets the page margins." },
+                { "PdfExporter.Export", "Two overloads. Export(shapes, filePath) auto-sizes the page to the drawing's bounds and picks a sensible scale. Export(shapes, filePath, pageWidthMm, pageHeightMm, scaleMmPerUnit, marginMm) gives you the sheet: page size in millimetres (pass 0 for either dimension to auto-size to content), scaleMmPerUnit is how many millimetres on paper one drawing unit becomes, and marginMm is the border. Output is real vector PDF — colours, line weights and dash patterns are preserved. An empty shape list writes nothing. There are no PageSize or Margin properties; everything is an argument to this call." },
 
-                // SvgExporter
-                { "SvgExporter.Export", "Exports shapes to an SVG file." },
-                { "SvgExporter.ExportToString", "Exports shapes to an SVG string." },
-                { "SvgExporter.Width", "Gets or sets the SVG canvas width." },
-                { "SvgExporter.Height", "Gets or sets the SVG canvas height." },
+                // SvgExporter (static class, namespace DoodleSharp.Canvas)
+                { "SvgExporter.Export", "Export(IEnumerable<IDrawable> shapes, double width = 800, double height = 600, double padding = 20) — returns the complete SVG document as a string. width and height are the SVG viewport in pixels; the drawing is fitted into it with padding pixels of clear space on every side. The Y flip from world coordinates (Y up) to SVG coordinates (Y down) is handled for you. Static — there is nothing to construct, and no Width/Height properties to set." },
+                { "SvgExporter.SaveToFile", "SaveToFile(string filePath, IEnumerable<IDrawable> shapes, double width = 800, double height = 600) — the same document as Export, written straight to filePath (padding fixed at its default). Note the argument order: the path comes first. Example: SvgExporter.SaveToFile(@\"C:\\\\temp\\\\drawing.svg\", CanvasRenderer.Instance.GetShapes(), 1200, 900);" },
 
                 // GifEncoder
-                { "GifEncoder.AddFrame", "Adds a frame to the GIF animation." },
-                { "GifEncoder.Save", "Saves the GIF to a file." },
-                { "GifEncoder.FrameDelay", "Gets or sets the delay between frames in milliseconds." },
-                { "GifEncoder.Repeat", "Gets or sets whether the GIF loops infinitely." },
+                { "GifEncoder.AddFrame", "AddFrame(BitmapSource frame) — appends one frame to the animation. Every frame must be the width and height passed to the constructor. Frames are written to the stream as they arrive, so a long animation does not accumulate in memory." },
+                { "GifEncoder.Dispose", "Writes the GIF trailer and releases the stream. The file is NOT a valid GIF until this runs, so construct the encoder in a using statement — there is no Save() method; Dispose is what finalises the file. Frame delay and looping are constructor arguments (frameDelayMs, repeat), not properties." },
 
                 // VideoExporter
                 { "VideoExporter.AddFrame", "Adds a frame (RenderTargetBitmap) to the video. Frames are encoded in sequence at the configured frame rate." },
@@ -4018,9 +4102,9 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "VColor.FromEnum", "Converts a ColorName enum value to its string representation." },
                 { "VColor.FromRgb", "Creates a hex color string from RGB values (0-255). Example: FromRgb(255, 128, 0) returns \"#FF8000\"." },
                 { "VColor.FromArgb", "Creates a hex color string from ARGB values (0-255). Example: FromArgb(128, 255, 0, 0) returns \"#80FF0000\"." },
-                { "VColor.WithOpacity", "Creates a semi-transparent color from RGB values and opacity (0.0-1.0)." },
-                { "VColor.GetVibrantColors", "Returns an array of all vibrant color names." },
-                { "VColor.GetPastelColors", "Returns an array of all pastel color names." },
+                { "VColor.WithOpacity", "WithOpacity(int r, int g, int b, double opacity) — an #AARRGGBB string from RGB 0-255 plus an opacity of 0.0 (invisible) to 1.0 (opaque); values outside that range are clamped rather than rejected. WithOpacity(255, 0, 0, 0.5) is \"#7FFF0000\". Use it for a translucent FillColor over other geometry. Distinct from Shape.Opacity, which scales the whole shape including its stroke; this one only affects the colour you assign it to." },
+                { "VColor.GetVibrantColors", "The 25 saturated colour NAMES that GetRandomVibrantColor draws from — Red through Chartreuse — as a string[]. A fresh copy each call, so you can shuffle or trim it without affecting later calls. The obvious use is a chart palette: new ChartOptions { Palette = VColor.GetVibrantColors() }. Note it includes Aqua and Chartreuse, which are valid colour strings but are NOT in the ColorName enum or VColor's properties — a reminder that the palette is wider than the enum." },
+                { "VColor.GetPastelColors", "The 25 soft colour NAMES that GetRandomPastelColor draws from — LightBlue, PaleGreen, Thistle, MistyRose, Cornsilk and so on — as a string[]. A fresh copy each call. Better suited to FillColor than to strokes, since several are close to white on a light background. Like the vibrant list it contains names outside the ColorName enum (MistyRose, PeachPuff, LemonChiffon, Honeydew, AliceBlue, LavenderBlush, Cornsilk, Beige, AntiqueWhite, PapayaWhip, BlanchedAlmond)." },
 
                 // VArc Factory Methods
                 { "VArc.FromStartCenterEnd", "Creates an arc from start point, center, and end point (determines angles from geometry)." },
@@ -4097,10 +4181,11 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "Region.ToString", "Returns a string representation: \"Region(Outer: N curves, Holes: M, Total: T curves)\"." },
 
                 // RegionBooleanOps Methods
-                { "RegionBooleanOps.Union", "Computes the union of two or more regions. Returns a single Region if successful, or null if disjoint. Overloads: Union(a, b), Union(params Region[]), Union(IEnumerable<Region>)." },
-                { "RegionBooleanOps.Intersect", "Computes the intersection of two regions. Returns a List<Region> of overlapping areas." },
-                { "RegionBooleanOps.Difference", "Computes the difference of two regions (a - b). Returns a List<Region>." },
-                { "RegionBooleanOps.Xor", "Computes the symmetric difference (XOR) of two regions. Returns a List<Region>." },
+                { "RegionBooleanOps.Union", "Merges regions into one. Returns a single Region, or NULL when they do not all connect — a union of genuinely disjoint regions has no single-region answer. Overloads: Union(a, b, segmentsPerCurve = 32), Union(params Region[]), and Union(IEnumerable<Region> regions, int segmentsPerCurve = 32), which folds across the whole collection. segmentsPerCurve is the sampling density used to approximate curved boundaries before clipping — raise it for large or tightly-curved regions, lower it for speed. NOTE the params overload CANNOT take it (C# forbids an optional parameter after params), so pass a List when you want to control precision: RegionBooleanOps.Union(new List<Region> { a, b, c }, 128)." },
+                { "RegionBooleanOps.Intersect", "The overlapping area of regions, as a List<Region> — a list rather than a single region because an intersection can legitimately be several disjoint pieces. Overloads: Intersect(a, b, segmentsPerCurve = 32), Intersect(IEnumerable<Region>, segmentsPerCurve = 32) folding to the area common to ALL of them, and Intersect(params Region[]), which cannot take the precision argument. Returns an empty list when nothing overlaps." },
+                { "RegionBooleanOps.Difference", "The first region minus the others, as a List<Region> — again a list, because subtracting can split a region into pieces. Overloads: Difference(a, b, segmentsPerCurve = 32), Difference(IEnumerable<Region>, segmentsPerCurve = 32) which subtracts every subsequent region from the first, and Difference(params Region[]) without the precision argument. An empty list means the subtraction removed everything." },
+                { "RegionBooleanOps.Xor", "The symmetric difference — everything belonging to one region but not both — as a List<Region>. Overloads: Xor(a, b, segmentsPerCurve = 32), Xor(IEnumerable<Region>, segmentsPerCurve = 32) folding a running symmetric difference across the collection, and Xor(params Region[]) without the precision argument." },
+                { "RegionBooleanOps.DefaultSegmentsPerCurve", "Constant, 32 — the default sampling density every region boolean uses when flattening a curved boundary before clipping. Public so it is nameable rather than a magic number: RegionBooleanOps.Union(regions, RegionBooleanOps.DefaultSegmentsPerCurve * 4) reads better than passing 128. Raise it when a region has large or tightly-curved edges and the result looks faceted; lower it when you are folding many regions and want speed. It is not a limit — any positive value works." },
                 { "RegionBooleanOps.UnionWithHoles", "Computes the union of two regions, returning List<Region> with hole information preserved." },
                 { "RegionBooleanOps.IntersectWithHoles", "Computes the intersection of two regions, returning List<Region> with hole information preserved." },
                 { "RegionBooleanOps.DifferenceWithHoles", "Computes the difference of two regions, returning List<Region> with hole information preserved." },
@@ -4166,14 +4251,486 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "CurveGeometry.DistanceToPath", "Returns the shortest distance from a point to a polyline through the given vertices, taking the nearest of every segment. Pass closed: true to add the edge from the last vertex back to the first. A null or empty vertex list returns double.PositiveInfinity; a single vertex returns the distance to that point." },
                 { "CurveGeometry.DistanceToCurve", "Returns the shortest distance from a point to any ICurve by sampling it into a polyline (samples defaults to 96, and is floored at 2) and measuring against that. This is what VBezier and VSpline use, since they have no practical closed form; raise samples when you need more accuracy than a fraction of a pixel." },
                 { "CurveGeometry.IsOnStroke", "Decides whether a measured distance counts as lying ON a stroke of the given size. The tolerance is max(GeometryTolerance.Epsilon, |curveExtent| × 1e-6) — relative, so that a hundred-unit line and a hundred-thousand-unit line behave the same way and the answer does not depend on the units your drawing happens to use. This is the test behind Contains on every open curve." },
+
+                // BuiltInHatch values. Each carries the pattern's own description from the AutoCAD
+                // .pat library, plus the geometry, because the names alone say nothing.
+                { "BuiltInHatch.SOLID", "Solid fill — a single family of 45° lines spaced 0.125 apart. Close enough to read as filled at normal scale, but it IS lines, not a flood fill: zoom in far enough, or raise PatternScale, and you will see them. For a genuinely filled area set the shape's FillColor instead." },
+                { "BuiltInHatch.ANGLE", "Angle steel. Horizontal and vertical dashed families 0.275 apart, forming the L-profile look of angle iron in section." },
+                { "BuiltInHatch.ANSI31", "ANSI iron, brick, stone masonry — the standard 45° single-hatch every engineer reads as \"cut material\". Plain parallel lines at 45°, 0.125 apart. The default choice when you just want a section hatched." },
+                { "BuiltInHatch.ANSI32", "ANSI steel. Pairs of close 45° lines, the pairs 0.375 apart — the double-line convention for steel." },
+                { "BuiltInHatch.ANSI33", "ANSI bronze, brass, copper. A solid 45° line alternating with a dashed 45° line, 0.25 apart." },
+                { "BuiltInHatch.ANSI34", "ANSI plastic, rubber. Four widely-spaced 45° families 0.75 apart — the sparsest of the ANSI set, so it reads as a light material." },
+                { "BuiltInHatch.ANSI35", "ANSI fire brick, refractory material. A solid 45° line alternating with a long-dash-dot 45° line." },
+                { "BuiltInHatch.ANSI36", "ANSI marble, slate, glass. A single 45° dash-dot family, offset row to row so the dashes stagger." },
+                { "BuiltInHatch.ANSI37", "ANSI lead, zinc, magnesium, and sound/heat/electrical insulation. Full 45°/135° crosshatch, 0.125 apart — the densest of the ANSI set." },
+                { "BuiltInHatch.ANSI38", "ANSI aluminium. Solid 45° lines crossed by a widely-spaced dashed 135° family." },
+                { "BuiltInHatch.AR_B816", "Architectural: 8×16 block elevation, stretcher bond. Draws concrete blocks as seen in elevation. Sized in inches at building scale, so it needs a large boundary or a large PatternScale before it looks like blockwork rather than a solid smear." },
+                { "BuiltInHatch.AR_B816C", "Architectural: 8×16 block elevation, stretcher bond, with mortar joints — AR_B816 with the joint thickness drawn as a double line. Building-scale (inches)." },
+                { "BuiltInHatch.AR_B88", "Architectural: 8×8 block elevation, stretcher bond — square blocks rather than the 8×16 of AR_B816. Building-scale (inches)." },
+                { "BuiltInHatch.AR_BRELM", "Architectural: standard brick elevation, English bond, with mortar joints — alternating courses of stretchers and headers, the eight-family pattern of the set. Building-scale (inches)." },
+                { "BuiltInHatch.AR_BRSTD", "Architectural: standard brick elevation, stretcher bond — the ordinary running-bond brick wall. Building-scale (inches); the most useful of the AR_* family for elevations." },
+                { "BuiltInHatch.AR_CONC", "Architectural: random dot and stone pattern — concrete in section. Thirteen line families at irregular angles and long broken dash sequences produce a convincingly random aggregate. The most expensive built-in pattern to generate; keep PatternScale sane on a big boundary." },
+                { "BuiltInHatch.AR_HBONE", "Architectural: standard brick herringbone at 45° — interlocking diagonal brickwork, for paving and floors. Building-scale (inches)." },
+                { "BuiltInHatch.AR_PARQ1", "Architectural: 2×12 parquet flooring in a 12×12 tile — alternating blocks of parallel boards. Building-scale (inches)." },
+                { "BuiltInHatch.AR_RROOF", "Architectural: roof shingle texture — irregular broken horizontal lines, for a shingled roof in elevation. Building-scale (inches)." },
+                { "BuiltInHatch.AR_RSHKE", "Architectural: roof wood shake texture — coarser and more irregular than AR_RROOF, for split shakes. Building-scale (inches)." },
+                { "BuiltInHatch.AR_SAND", "Architectural: random dot pattern — sand, or a fine-grained fill. The same idea as AR_CONC at a much smaller grain, and much cheaper to generate." },
+                { "BuiltInHatch.BOX", "Box steel. Nested square outlines drawn from eight families — the hollow-section profile seen end-on." },
+                { "BuiltInHatch.BRASS", "Brass material. A solid horizontal line alternating with a dashed one, 0.25 apart. Horizontal rather than the 45° of the ANSI set, so it stands out against neighbouring sections." },
+                { "BuiltInHatch.BRICK", "Brick or masonry-type surface — horizontal courses with staggered vertical joints. The generic brick pattern at unit scale; use AR_BRSTD when you want real brick dimensions." },
+                { "BuiltInHatch.BRSTONE", "Brick and stone — brick courses with a banded stone element, the two materials together." },
+                { "BuiltInHatch.CLAY", "Clay material. Three tightly-grouped horizontal lines then a dashed one, repeating every 0.1875." },
+                { "BuiltInHatch.CORK", "Cork material. Horizontal lines overlaid with short 135° dashes in groups of three." },
+                { "BuiltInHatch.CROSS", "A series of crosses — small plus signs on a 0.25 grid. A marker pattern rather than a material." },
+                { "BuiltInHatch.DASH", "Dashed lines — a single horizontal dashed family, dash and gap both 0.125. The simplest broken fill." },
+                { "BuiltInHatch.DOLMIT", "Geological rock layering (dolomite). Horizontal beds crossed by a sparse 45° dashed family." },
+                { "BuiltInHatch.DOTS", "A series of dots — a dot grid, 0.03125 × 0.0625. Fine stipple; the dots come out as zero-length segments, so line weight is what makes them visible." },
+                { "BuiltInHatch.EARTH", "Earth or ground (subterranean) — short dashes on a broken 0.25 grid, three horizontal families and three vertical, the standard for cut earth below grade." },
+                { "BuiltInHatch.ESCHER", "Escher pattern — an interlocking tessellation built from twenty-one families at 60°/180°/300°. Decorative; by far the most complex of the non-architectural patterns." },
+                { "BuiltInHatch.FLEX", "Flexible material — horizontal dashes with a 45° zig, suggesting something that bends." },
+                { "BuiltInHatch.GOST_GLASS", "GOST (Russian standard) glass. Groups of short 45° strokes at 6-unit spacing — larger than the ANSI patterns, so it suits drawings in millimetres." },
+                { "BuiltInHatch.GOST_WOOD", "GOST (Russian standard) wood. Vertical broken lines at 6-unit spacing, reading as end grain." },
+                { "BuiltInHatch.GOST_GROUND", "GOST (Russian standard) ground. Three closely-spaced 45° families at 10-unit pitch." },
+                { "BuiltInHatch.GRASS", "Grass area — short strokes at 45°, 90° and 135° forming scattered tufts. A landscape pattern, not a section hatch." },
+                { "BuiltInHatch.GRATE", "Grated area — very close horizontal lines (0.03125) crossed by sparser verticals (0.125). Reads as a metal grating or grille." },
+                { "BuiltInHatch.GRAVEL", "Gravel pattern — forty-plus families at scattered angles, giving irregular angular stones. Expensive to generate; the coarse cousin of AR_SAND." },
+                { "BuiltInHatch.HEX", "Hexagons — a hexagonal tiling from three families at 0°, 60° and 120°. Geometric, no material meaning." },
+                { "BuiltInHatch.HONEY", "Honeycomb pattern — hexagons packed more tightly than HEX, with the cells offset." },
+                { "BuiltInHatch.HOUND", "Houndstooth check — the woven textile pattern, from two crossed dashed families." },
+                { "BuiltInHatch.INSUL", "Insulation material — a solid horizontal line with two dashed lines between, the batt-insulation convention." },
+                { "BuiltInHatch.LINE", "Parallel horizontal lines, 0.125 apart. The plainest pattern there is; set PatternAngle to turn it to any direction you like, which makes it the general-purpose \"lines at an angle\" fill." },
+                { "BuiltInHatch.MUDST", "Mud and sand — a single horizontal family with a long broken dash sequence." },
+                { "BuiltInHatch.NET", "Horizontal/vertical grid — square mesh at 0.125. The standard crosshatch grid; use SQUARE for the same idea drawn as separate small squares." },
+                { "BuiltInHatch.NET3", "Network pattern 0-60-120 — a triangular mesh from three families 60° apart, the isometric counterpart of NET." },
+                { "BuiltInHatch.PLAST", "Plastic material — three close horizontal lines repeating every 0.25." },
+                { "BuiltInHatch.PLASTI", "Plastic material, a denser variant of PLAST with a fourth line in each group. The two are separate library entries and look very similar; pick whichever reads better at your scale." },
+                { "BuiltInHatch.SACNCR", "Concrete — fine 45° solid lines at 0.09375 with a family of dots between them. Much cheaper than AR_CONC and the right choice at unit scale rather than building scale." },
+                { "BuiltInHatch.SQUARE", "Small aligned squares — a 0.125 grid of separate square outlines rather than continuous lines. Visually similar to NET but with gaps at the corners." },
+                { "BuiltInHatch.STARS", "Star of David — overlapping triangles from three families 60° apart. Decorative." },
+                { "BuiltInHatch.STEEL", "Steel material. Two 45° families 0.0625 apart, repeating every 0.125 — closer than ANSI31 and coarser than ANSI32." },
+                { "BuiltInHatch.SWAMP", "Swampy area — horizontal water lines with vertical tufts, the map convention for marsh. A landscape pattern." },
+                { "BuiltInHatch.TRANS", "Heat transfer material — a solid horizontal line alternating with a dashed one at 0.25. Very close to BRASS, differing only in the dash-to-gap ratio (equal here, a longer dash in BRASS)." },
+                { "BuiltInHatch.TRIANG", "Equilateral triangles — a triangular tiling from three families at 0°, 60° and 120°, spaced 0.1875." },
+                { "BuiltInHatch.ZIGZAG", "Staircase effect — horizontal and vertical dashes offset so they step, producing a zigzag. Geometric." },
+                { "BuiltInHatch.ACAD_ISO02W100", "ISO dashed line, as a hatch — one horizontal family of long dashes (12 on, 3 off) at 5-unit row spacing. The ISO family is line-work rather than texture: use it when you want a fill of directional broken lines, and set PatternAngle to aim them." },
+                { "BuiltInHatch.ACAD_ISO03W100", "ISO dashed space line — 12 on, 18 off, so much airier than ACAD_ISO02W100." },
+                { "BuiltInHatch.ACAD_ISO04W100", "ISO long dashed dotted line — a 24-unit dash followed by a dot." },
+                { "BuiltInHatch.ACAD_ISO05W100", "ISO long dashed double-dotted line — a 24-unit dash followed by two dots." },
+                { "BuiltInHatch.ACAD_ISO06W100", "ISO long dashed triplicate-dotted line — a 24-unit dash followed by three dots, built from two overlaid families." },
+                { "BuiltInHatch.ACAD_ISO07W100", "ISO dotted line — dots only, 0.5 on and 3 off. The lightest of the ISO family." },
+                { "BuiltInHatch.ACAD_ISO08W100", "ISO long dashed short dashed line — a 24-unit dash alternating with a 6-unit one." },
+                { "BuiltInHatch.ACAD_ISO09W100", "ISO long dashed double-short-dashed line — a 24-unit dash followed by two 6-unit dashes." },
+                { "BuiltInHatch.ACAD_ISO10W100", "ISO dashed dotted line — a 12-unit dash followed by a dot. The classic centre-line rhythm." },
+                { "BuiltInHatch.ACAD_ISO11W100", "ISO double-dashed dotted line — two 12-unit dashes followed by a dot." },
+                { "BuiltInHatch.ACAD_ISO12W100", "ISO dashed double-dotted line — a 12-unit dash followed by two dots." },
+                { "BuiltInHatch.ACAD_ISO13W100", "ISO double-dashed double-dotted line — two 12-unit dashes followed by two dots, from two overlaid families." },
+                { "BuiltInHatch.ACAD_ISO14W100", "ISO dashed triplicate-dotted line — a 12-unit dash followed by three dots, from two overlaid families." },
+                { "BuiltInHatch.ACAD_ISO15W100", "ISO double-dashed triplicate-dotted line — two 12-unit dashes followed by three dots. The busiest of the ISO family." },
+
+                // ColorName values. The name IS the string that Color and FillColor take,
+                // so the useful thing to add is the exact colour each one resolves to.
+                { "ColorName.Red", "#FF0000 — vivid red." },
+                { "ColorName.Green", "#008000 — dark vivid green." },
+                { "ColorName.Blue", "#0000FF — vivid blue." },
+                { "ColorName.Yellow", "#FFFF00 — vivid yellow." },
+                { "ColorName.Orange", "#FFA500 — vivid orange." },
+                { "ColorName.Purple", "#800080 — dark vivid magenta." },
+                { "ColorName.Pink", "#FFC0CB — very light vivid red." },
+                { "ColorName.Cyan", "#00FFFF — vivid cyan." },
+                { "ColorName.Magenta", "#FF00FF — vivid magenta." },
+                { "ColorName.White", "#FFFFFF — near-white neutral." },
+                { "ColorName.Black", "#000000 — near-black neutral." },
+                { "ColorName.Gray", "#808080 — mid grey." },
+                { "ColorName.Brown", "#A52A2A — dark red." },
+                { "ColorName.Coral", "#FF7F50 — light vivid orange." },
+                { "ColorName.Crimson", "#DC143C — red." },
+                { "ColorName.DarkBlue", "#00008B — dark vivid blue." },
+                { "ColorName.DarkGreen", "#006400 — very dark vivid green." },
+                { "ColorName.DarkRed", "#8B0000 — dark vivid red." },
+                { "ColorName.DarkOrange", "#FF8C00 — vivid orange." },
+                { "ColorName.DarkViolet", "#9400D3 — dark vivid violet." },
+                { "ColorName.DeepPink", "#FF1493 — vivid pink-red." },
+                { "ColorName.DeepSkyBlue", "#00BFFF — vivid azure." },
+                { "ColorName.DodgerBlue", "#1E90FF — vivid azure." },
+                { "ColorName.ForestGreen", "#228B22 — dark green." },
+                { "ColorName.Fuchsia", "#FF00FF — vivid magenta." },
+                { "ColorName.Gold", "#FFD700 — vivid yellow." },
+                { "ColorName.GreenYellow", "#ADFF2F — vivid yellow-green." },
+                { "ColorName.HotPink", "#FF69B4 — light vivid pink-red." },
+                { "ColorName.IndianRed", "#CD5C5C — red." },
+                { "ColorName.Indigo", "#4B0082 — dark vivid violet." },
+                { "ColorName.Khaki", "#F0E68C — light yellow." },
+                { "ColorName.Lavender", "#E6E6FA — very light blue." },
+                { "ColorName.LawnGreen", "#7CFC00 — vivid yellow-green." },
+                { "ColorName.LightBlue", "#ADD8E6 — light cyan." },
+                { "ColorName.LightCoral", "#F08080 — light red." },
+                { "ColorName.LightGreen", "#90EE90 — light green." },
+                { "ColorName.LightPink", "#FFB6C1 — very light vivid red." },
+                { "ColorName.LightSalmon", "#FFA07A — light vivid orange." },
+                { "ColorName.LightSeaGreen", "#20B2AA — dark cyan." },
+                { "ColorName.LightSkyBlue", "#87CEFA — light vivid azure." },
+                { "ColorName.LightYellow", "#FFFFE0 — very light vivid yellow." },
+                { "ColorName.Lime", "#00FF00 — vivid green." },
+                { "ColorName.LimeGreen", "#32CD32 — green." },
+                { "ColorName.Maroon", "#800000 — dark vivid red." },
+                { "ColorName.MediumBlue", "#0000CD — dark vivid blue." },
+                { "ColorName.MediumOrchid", "#BA55D3 — magenta." },
+                { "ColorName.MediumPurple", "#9370DB — light violet." },
+                { "ColorName.MediumSeaGreen", "#3CB371 — green." },
+                { "ColorName.MediumSlateBlue", "#7B68EE — light blue." },
+                { "ColorName.MediumSpringGreen", "#00FA9A — vivid green-cyan." },
+                { "ColorName.MediumTurquoise", "#48D1CC — cyan." },
+                { "ColorName.MediumVioletRed", "#C71585 — pink-red." },
+                { "ColorName.MidnightBlue", "#191970 — dark blue." },
+                { "ColorName.Navy", "#000080 — dark vivid blue." },
+                { "ColorName.Olive", "#808000 — dark vivid yellow." },
+                { "ColorName.OliveDrab", "#6B8E23 — dark yellow-green." },
+                { "ColorName.OrangeRed", "#FF4500 — vivid orange." },
+                { "ColorName.Orchid", "#DA70D6 — light magenta." },
+                { "ColorName.PaleGreen", "#98FB98 — light vivid green." },
+                { "ColorName.PaleTurquoise", "#AFEEEE — very light cyan." },
+                { "ColorName.PaleVioletRed", "#DB7093 — light pink-red." },
+                { "ColorName.Peru", "#CD853F — orange." },
+                { "ColorName.Plum", "#DDA0DD — light magenta." },
+                { "ColorName.RoyalBlue", "#4169E1 — blue." },
+                { "ColorName.Salmon", "#FA8072 — light vivid red." },
+                { "ColorName.SandyBrown", "#F4A460 — light orange." },
+                { "ColorName.SeaGreen", "#2E8B57 — dark green." },
+                { "ColorName.Sienna", "#A0522D — dark orange." },
+                { "ColorName.Silver", "#C0C0C0 — light grey." },
+                { "ColorName.SkyBlue", "#87CEEB — light azure." },
+                { "ColorName.SlateBlue", "#6A5ACD — blue." },
+                { "ColorName.SlateGray", "#708090 — muted azure." },
+                { "ColorName.SpringGreen", "#00FF7F — vivid green." },
+                { "ColorName.SteelBlue", "#4682B4 — azure." },
+                { "ColorName.Tan", "#D2B48C — light orange." },
+                { "ColorName.Teal", "#008080 — dark vivid cyan." },
+                { "ColorName.Thistle", "#D8BFD8 — light muted magenta." },
+                { "ColorName.Tomato", "#FF6347 — light vivid red." },
+                { "ColorName.Turquoise", "#40E0D0 — green-cyan." },
+                { "ColorName.Violet", "#EE82EE — light magenta." },
+                { "ColorName.Wheat", "#F5DEB3 — very light orange." },
+                { "ColorName.YellowGreen", "#9ACD32 — yellow-green." },
+
+                // ControlPointType values
+                { "ControlPointType.Move", "The handle that translates the WHOLE shape. Every shape's GetControlPoints() puts this one first, at index 0, positioned at the shape's centre or centroid — so MoveControlPoint(0, target) moves the shape so that its centre lands on target. Not to be confused with Shape.Move, which takes a displacement rather than a destination." },
+                { "ControlPointType.Vertex", "A corner or endpoint you can drag independently: a line's Start or End, a polygon or polyline vertex, a rectangle corner, an arc's start and end, a dimension's measured points." },
+                { "ControlPointType.Radius", "A handle that resizes rather than moves — a circle's or ellipse's radius, or an arc's. Dragging it changes a size property; the shape stays centred where it was." },
+                { "ControlPointType.Rotation", "A handle that rotates the shape about its own centre. Declared for completeness; none of the built-in shapes currently emit one, so you will only see it if you produce your own control points." },
+                { "ControlPointType.CurveControl", "An off-curve control handle that bends the curve without lying on it — a bézier's P1 and P2, or a spline's control points. Renderers usually draw these differently from Vertex handles because they are not points the curve passes through (a spline's control points are an exception: Catmull-Rom does pass through them)." },
+
+                // ParamKind values
+                { "ParamKind.Number", "The parameter holds a number. Every numeric type collapses to this one kind and is stored as double, so an int parameter and a double parameter are indistinguishable afterwards — read it back with .Num or Get<int>(name) if you need an integer. This is the only kind that gets a slider in the Global Parameters panel, from its Min/Max/Step." },
+                { "ParamKind.Boolean", "The parameter holds true or false. Shown as a checkbox in the panel." },
+                { "ParamKind.Text", "The parameter holds a string. Shown as a text box." },
+                { "ParamKind.Date", "The parameter holds a DateTime. Shown as a date picker. Note that date parameters are deliberately never written back into your source, because the declaring expression is usually something like DateTime.Now and rewriting it would be wrong." },
+
+                // FillRule values
+                { "FillRule.EvenOdd", "Count crossings: a point is inside when a ray from it crosses the outline an odd number of times. A loop inside another loop therefore punches a hole whatever direction it winds in, which is why this is the rule the geometry library emits filled areas with — outer boundary first, holes after, no winding bookkeeping required. The zero value, so it is what you get by default." },
+                { "FillRule.NonZero", "Count crossing direction: a point is inside when the signed crossings do not cancel. An inner loop only becomes a hole if it winds opposite to the outer one, so hole direction matters. Choose it when you are feeding in loops whose winding you control deliberately." },
+
+                // VFont values
+                { "VFont.Arial", "Arial — clean sans-serif, and the default for VText. The safest choice: present on every Windows machine and legible at small sizes." },
+                { "VFont.TimesNewRoman", "Times New Roman — classic serif. Good for body text in a titled drawing; less good for small annotation, where the serifs blur." },
+                { "VFont.CourierNew", "Courier New — monospace. Every character the same width, so use it for tables and aligned columns of numbers." },
+                { "VFont.Verdana", "Verdana — wide sans-serif designed for screen legibility. The most readable choice at small text heights, at the cost of taking more room." },
+                { "VFont.Georgia", "Georgia — serif with large, open letterforms; holds up much better than Times New Roman at small sizes." },
+                { "VFont.Tahoma", "Tahoma — compact sans-serif. Verdana's narrower relative: similar clarity, less width." },
+                { "VFont.TrebuchetMS", "Trebuchet MS — humanist sans-serif with more character than Arial, for titles and labels." },
+                { "VFont.Consolas", "Consolas — modern monospace, and much better looking than Courier New. The right monospace for code or aligned data." },
+                { "VFont.Calibri", "Calibri — the Office default. Rounded sans-serif that reads as informal." },
+                { "VFont.Cambria", "Cambria — serif designed for body text, with sturdy strokes that survive being drawn small." },
+                { "VFont.SegoeUI", "Segoe UI — the Windows system font, and what the DoodleSharp interface itself uses. Pick it when annotation should look native to the application." },
+                { "VFont.ComicSansMS", "Comic Sans MS — casual script. Use deliberately." },
+                { "VFont.Impact", "Impact — very heavy condensed display face. Titles and callouts only; unreadable as body text." },
+                { "VFont.LucidaConsole", "Lucida Console — monospace, heavier than Consolas. An alternative when Consolas is not available." },
+
+                // VFontWeight values
+                { "VFontWeight.Normal", "Normal weight (400) — the default for VText." },
+                { "VFontWeight.Bold", "Bold weight (700). Set text.FontWeight = VFontWeight.Bold. There is no intermediate weight in this enum; for anything finer, a colour or size change usually reads better than a weight change would." },
+
+                // Shape caching seam
+                { "Shape.Revision", "A counter that increases every time the shape's geometry is reassigned. It is the cache-invalidation seam: derived data that is expensive to recompute (a hatch's generated segments, a region's sampled outline) is memoised against this value and regenerated only when it changes. You would read it to build your own cache over a shape the same way: store the Revision alongside your result and recompute when they differ. The honest limitation is that it tracks ASSIGNMENT, not mutation — editing a VPolygon's Points list in place changes the geometry without bumping it, which is what Invalidate() is for. Type uint, and it wraps, harmlessly: it is only ever compared for equality against a previously stored copy." },
+                { "Shape.Invalidate", "Marks the shape's derived data stale, bumping Revision so every cache built over it is rebuilt on next use. Call it after mutating a shape's geometry THROUGH A COLLECTION rather than through a property — polygon.Points[3] = ..., or hatch.Boundary.Add(...) — because an in-place list edit bypasses the property setters that would normally bump the revision, and without this the hatch or region will keep drawing its previous shape. Assigning the whole collection (polygon.Points = newList) does not need it. Cheap: one increment, no allocation." },
+
+                // VHatch overrides and caching
+                { "VHatch.GetCachedLines", "The generated hatch segments, computed once and reused until the hatch changes — the read-only counterpart of GenerateLines(). Returns IReadOnlyList<(VXYZ Start, VXYZ End)> and THE LIST IS SHARED: do not modify it, and do not hold it past a change to the hatch. That trade exists because hatch generation is the most expensive thing a drawing can ask the renderer to do; regenerating a few hundred hatches every frame cost 11.5 ms and 146 MB of allocation per frame before this existed. Use it when you only want to read the segments; use GenerateLines() when you want a list of your own. The cache turns over when Boundary, Pattern, PatternScale or PatternAngle is assigned — editing the boundary list in place bypasses that, so call Invalidate() if you do." },
+                { "VHatch.Clone", "Returns an independent copy: the boundary points are cloned, the pattern and its scale and angle are carried over, and the styling is copied. Like every Clone, the copy has no Name, so mark it with Place() or set a Name or the post-run sweep will hide it." },
+                { "VHatch.Move", "Translates every boundary point by the displacement vector. The pattern is anchored to the pattern origin rather than to the boundary, so moving a hatch slides the boundary across the pattern and the lines inside it land in different places — visible if you move a hatch a fraction of its spacing." },
+                { "VHatch.Rotate", "Rotates the boundary about the pivot AND adds the same angle to PatternAngle, so the hatching turns with the shape instead of staying fixed in world space. Angle in degrees, counter-clockwise." },
+                { "VHatch.Scale", "Scales the boundary about the centre AND multiplies PatternScale by |factor|, so the pattern grows with the shape rather than getting denser. Use the absolute value deliberately: a negative factor mirrors the boundary without inverting the pattern spacing." },
+                { "VHatch.Flip", "Mirrors every boundary point across the given line. PatternAngle is NOT mirrored, so the hatch lines keep their original direction while the boundary reverses — if you want the hatching mirrored too, negate PatternAngle yourself." },
+                { "VHatch.GetBounds", "The bounding box of the boundary points. An empty boundary returns a degenerate box at the origin. This measures the boundary, not the generated lines, which is the same thing since the lines are clipped to it." },
+                { "VHatch.GetControlPoints", "A single Move handle at the centre of the boundary's bounding box. Editing individual boundary vertices interactively is not supported; rebuild the hatch from a new boundary instead." },
+
+                // Region caching
+                { "Region.GetCachedOutline", "Gives you the region's boundary as plain vertices — out List<VXYZ> outer and out List<List<VXYZ>> holes — sampling each curved edge into segmentsPerCurve pieces, and memoising the result against Shape.Revision and the segment count. THE RETURNED LISTS ARE SHARED and must not be modified; copy them if you need to. This exists because sampling a region is not cheap — every non-line edge goes through ICurve.Divide, and a bézier or spline internally walks itself a few hundred times to get arc-length parameterisation — so doing it per frame per region was one of the most expensive things a drawing could contain. Prefer it over Region.SampleLoop when you are reading the same region repeatedly; use SampleLoop when you want a list you own, or want to sample one loop only." },
+
+                // Frame (requestAnimationFrame-style loop)
+                { "Frame.Pump", "Runs every queued callback once and returns true if any ran. THE HOST CALLS THIS, once per frame — you do not. It is documented because its two guarantees shape how you write a callback. First, it swaps queues before running anything, so a callback that calls Frame.Request during the pump is scheduled for the NEXT frame rather than re-entered on this one; that is what makes the self-rescheduling idiom terminate instead of hanging the UI thread. Second, a callback that throws stops the whole loop: the queue is cleared, CallbackFailed is raised, and nothing further runs — because user code runs in-process and an exception reaching WPF's dispatcher sixty times a second would take the application down. The elapsedSeconds it passes each callback is measured from when the loop started, and its clock is independent of timeline playback, so a per-frame callback has no notion of being paused." },
+                { "Frame.CallbackFailed", "Raised with the exception when a per-frame callback throws. The queue has already been cleared by the time it fires, so the loop has stopped. DoodleSharp subscribes to this and reports the exception in the console panel — which is why a broken Frame.Request callback shows up as one console message rather than as a crash. Subscribe yourself if you want to recover: nothing stops you re-arming with Frame.Request from the handler, though you will usually want to fix the callback instead." },
+
+
+                // RayHit / RayQuery
+                { "RayHit.Deconstruct", "Lets a hit be destructured in one line, because RayHit is a record struct: if (caster.FindIntersection(origin, dir) is RayHit h) { var (shape, point, distance) = h; ... }. Equivalent to reading Shape, Point and Distance separately. Note FindIntersection returns RayHit? — pattern-match or check HasValue before destructuring." },
+                { "RayQuery.Deconstruct", "Lets a query be destructured as var (origin, direction) = query, because RayQuery is a record struct. Mostly useful when reading back the list you passed to RayCaster.FindIntersections, whose results come back in the same order as the queries." },
+
+                // IDrawable
+                { "IDrawable.Place", "Puts the drawable on the canvas and keeps it there. Declared as a DEFAULT interface implementation, forwarding to Draw(), specifically so that the recommended name works through an IDrawable reference — CanvasRenderer.GetShapes() hands back IDrawable, and without this \"prefer Place()\" would fail to compile in exactly the place the documentation sends you. Shape implements it outright, so every real shape reaches the same method. Exactly equivalent to Draw()." },
+
+                // ConsoleOutput
+                { "ConsoleOutput.Instance", "The one ConsoleOutput for the process — a lazily-created singleton, so there is no constructor to call and no way to get a second one. Prefer VizConsole.Log for ordinary output; reach for this when you need to read the console back, clear it, or write an entry with a clickable source location." },
+                { "ConsoleOutput.WriteLine", "WriteLine(string moduleName, int lineNumber, string message) — adds a normal output line prefixed with [moduleName:lineNumber]. You have to supply the module and line yourself, which is precisely what VizConsole.Log captures automatically via CallerFilePath/CallerLineNumber, so Log is almost always the better call." },
+                { "ConsoleOutput.WriteError", "WriteError(string moduleName, int lineNumber, string message) — the same as WriteLine but flagged as an error, so the panel renders it in the error colour. Use it for your own validation failures; runtime exceptions are already reported by the host." },
+                { "ConsoleOutput.WriteCompilationError", "WriteCompilationError(string filePath, int lineNumber, int column, string message) — an error carrying a full source location, which is what makes the console line clickable and able to jump the editor to that exact position. Used by the compiler; useful to you if you are building your own analysis pass over the project." },
+                { "ConsoleOutput.AddEntry", "AddEntry(string message, string? filePath = null, int lineNumber = 0, int column = 0, bool isError = false) — the general-purpose form. With a filePath and a lineNumber greater than zero the entry becomes clickable and navigates the editor; with neither it is a plain line. ModuleName is derived from the file name for you. This is what the Find References output uses." },
+                { "ConsoleOutput.Clear", "Removes every entry and refreshes the panel immediately (no throttling on this one). This is what the console's Clear button does. It does not affect what your code has already written elsewhere — there is only one buffer." },
+                { "ConsoleOutput.Flush", "Forces any throttled update to reach the panel now. Console writes are batched so that a tight loop of Log calls does not repaint per line; the consequence is that the last few lines can lag by a fraction of a second. The host calls this when your code finishes, so you only need it if you are reading the panel state mid-run." },
+                { "ConsoleOutput.GetEntries", "Returns a snapshot of every ConsoleEntry currently in the console, as an IReadOnlyList. It is a copy taken under the lock, so it is safe to enumerate while other threads keep writing. Use it to assert on your own output, or to save a run's log." },
+                { "ConsoleOutput.GetFormattedOutput", "Returns the whole console as one string, each entry rendered as \"[module:line] message\" and followed by a newline where the entry is a line rather than a fragment. The straightforward way to copy a run's output into a file or a clipboard." },
+                { "ConsoleOutput.OutputChanged", "Raised when the console contents change, so a view can refresh. Fires immediately for Clear and on the throttle interval for writes, NOT once per Log — so do not use it to count messages. The sender is the ConsoleOutput instance and the args carry nothing; re-read GetEntries in the handler." },
+
+                // ConsoleEntry
+                { "ConsoleEntry.Message", "The text of the line. Defaults to an empty string rather than null, so it is always safe to read." },
+                { "ConsoleEntry.ModuleName", "The source file name the entry came from — a bare file name, not a full path — used as the [module:line] prefix in the panel. Empty when the entry has no origin." },
+                { "ConsoleEntry.LineNumber", "The 1-based source line the entry came from. Zero means \"no line\", which is also what stops the entry being clickable." },
+                { "ConsoleEntry.Column", "The 1-based column within the line, for entries precise enough to have one (compiler diagnostics). Zero when unknown; the editor still navigates on LineNumber alone." },
+                { "ConsoleEntry.FilePath", "The full path of the source file, or null. This is what the editor needs to open the right file — ModuleName is only for display. Nullable on purpose: most entries do not have one." },
+                { "ConsoleEntry.IsError", "True when the entry should be rendered as an error. Set by WriteError and by WriteCompilationError; also settable through AddEntry's isError argument." },
+                { "ConsoleEntry.IsNewLine", "Whether the entry terminates its line. True for everything the current API produces; the flag exists so a future write-without-newline can append to the previous entry, and GetFormattedOutput honours it when joining entries into a string." },
+                { "ConsoleEntry.IsClickable", "Computed, not settable: true when there is a non-empty FilePath AND a LineNumber greater than zero. That is the exact condition under which clicking the console line navigates the editor to the source, so it is the property to check rather than testing FilePath yourself." },
+
+                // C2VGeometry.Rendering — sink protocol. Plumbing: nothing here is needed to draw.
+                { "IPrimitiveSink.Hints", "The TessellationHints this sink wants honoured — how finely to flatten curves (Scale, world units per device pixel) and whether to offer native forms first (PreferNative). The tessellator reads it before every shape, so changing Scale between frames is how a zoom changes flattening fineness." },
+                { "IPrimitiveSink.BeginShape", "BeginShape(Shape shape, in PenSpec pen) — called before a shape's primitives, with everything needed to style them. RETURN FALSE TO DECLINE THE SHAPE: the tessellator skips it entirely and Tessellate returns false, which is how a sink says \"I cannot handle this type, use another renderer\". Returning true commits you to receiving the Emit* calls until EndShape." },
+                { "IPrimitiveSink.EndShape", "Called after the last primitive of a shape, and only if BeginShape returned true. Balance any state you pushed in BeginShape here." },
+                { "IPrimitiveSink.EmitPolyline", "EmitPolyline(IReadOnlyList<VXYZ> points, bool closed) — a stroked run of connected points in WORLD coordinates. closed means join the last point back to the first; it does not mean fill. THE LIST IS THE TESSELLATOR'S SCRATCH BUFFER and is reused for the next shape, so copy it if you need to keep it past the call." },
+                { "IPrimitiveSink.EmitFilledLoops", "EmitFilledLoops(IReadOnlyList<IReadOnlyList<VXYZ>> loops, FillRule rule) — a filled area in world coordinates. The FIRST loop is the outer boundary and every other loop is a hole. As with EmitPolyline, the lists are scratch buffers: copy before keeping." },
+                { "IPrimitiveSink.EmitPoint", "EmitPoint(VXYZ point) — a zero-area mark, from a VPoint or from a degenerate shape. How big it draws is the sink's decision; the geometry carries no size." },
+                { "IPrimitiveSink.EmitText", "EmitText(VText text) — text handed over UNFLATTENED, because a sink with a real text stack should use it: glyph outlines lose hinting and cost far more. The VText carries its own Location, Height, Font, FontWeight, Anchor and Angle. If you genuinely need outlines, VText.ToCharShape / LiftChar go through VText.GlyphOutlineProvider. Note the object may be a per-call temporary (dimension labels are), so do not assume it will still be valid later." },
+                { "IPrimitiveSink.TryEmitNative", "TryEmitNative(Shape shape, in PenSpec pen) — offered before flattening, but ONLY when Hints.PreferNative is set. Return true to claim the shape and suppress tessellation entirely; return false and it gets flattened as normal. This is the hook that lets one tessellator serve both a rasterizer, which wants everything as segments, and a DXF writer, which wants a circle to stay a CIRCLE entity. A default interface method returning false, so an existing sink needs no change." },
+
+                { "BoundsPrimitiveSink.MinX", "Left edge of the accumulated bounding box, in world coordinates. Meaningless until HasBounds is true." },
+                { "BoundsPrimitiveSink.MinY", "Bottom edge of the accumulated bounding box, in world coordinates (Y is up). Meaningless until HasBounds is true." },
+                { "BoundsPrimitiveSink.MaxX", "Right edge of the accumulated bounding box, in world coordinates. Meaningless until HasBounds is true." },
+                { "BoundsPrimitiveSink.MaxY", "Top edge of the accumulated bounding box, in world coordinates (Y is up). Meaningless until HasBounds is true." },
+                { "BoundsPrimitiveSink.HasBounds", "False until something has actually been measured — the accumulators start at MaxValue/MinValue, so reading Min/Max before anything arrives gives nonsense. Always check this first." },
+                { "BoundsPrimitiveSink.Reset", "Clears the accumulated box so the instance can measure a fresh set. The instance is meant to be reused; allocating one per measurement is the thing this class exists to avoid." },
+                { "BoundsPrimitiveSink.IncludeBounds", "IncludeBounds(Shape shape) — folds a shape the tessellator DECLINED into the extents, using the shape's own GetBounds(). The pattern is: if (tessellator.Tessellate(shape, sink) == false) sink.IncludeBounds(shape). Without it a shape type the tessellator does not handle is simply left out of the extents and can sit off screen after a zoom-to-fit." },
+                { "BoundsPrimitiveSink.Hints", "The tessellation hints used while measuring. Flattening fineness barely affects a bounding box, so the defaults are almost always right here." },
+                { "BoundsPrimitiveSink.BeginShape", "Accepts every shape (always returns true) and records its animation offsets so the measured box reflects where the shape is actually drawn, not where its untranslated geometry sits." },
+                { "BoundsPrimitiveSink.EndShape", "No-op — nothing is buffered per shape." },
+                { "BoundsPrimitiveSink.EmitPolyline", "Folds every point of the run into the box." },
+                { "BoundsPrimitiveSink.EmitFilledLoops", "Folds every point of every loop into the box. Holes are included, which is harmless: a hole is inside the outer boundary by definition." },
+                { "BoundsPrimitiveSink.EmitPoint", "Folds the single point into the box. A point contributes no area, so a drawing of nothing but VPoints still gets a box that spans them." },
+                { "BoundsPrimitiveSink.EmitText", "Folds the text's box into the extents, from its Location, Height, Anchor and measured width — an approximation, since the exact ink extent depends on the font, but consistently a little generous rather than short." },
+
+                { "PolylineFallbackSink.OnPolyline", "Action<IReadOnlyList<VXYZ>, bool, PenSpec> called for each stroked run: the points in world coordinates, whether the run closes, and the pen. Null by default, and a null callback means those primitives are silently dropped — set the ones you care about. The point list is a reused scratch buffer; copy it if you keep it." },
+                { "PolylineFallbackSink.OnFilled", "Action<IReadOnlyList<IReadOnlyList<VXYZ>>, PenSpec> called for each filled area, first loop outer and the rest holes. Null by default. Note it does not pass the FillRule; this sink is for consumers that treat outer-plus-holes literally." },
+                { "PolylineFallbackSink.OnPoint", "Action<VXYZ, PenSpec> called for each zero-area mark. Null by default." },
+                { "PolylineFallbackSink.OnText", "Action<VText> called for text, which has no polyline form here — it is handed over intact for you to render with a real text stack. Null by default, so text is dropped unless you set it, which is a common way to accidentally produce an export with no labels." },
+                { "PolylineFallbackSink.Unhandled", "The shapes even the tessellator could not reduce, accumulated across the run. AN EMPTY LIST MEANS THE PASS WAS COMPLETE — checking it is what turns a silently incomplete export into a reportable one, which is exactly the bug this sink was written to close. Call Reset() before reusing the instance." },
+                { "PolylineFallbackSink.Reset", "Clears the Unhandled list so the instance can be reused for another pass. It does not clear the callbacks." },
+                { "PolylineFallbackSink.Hints", "The tessellation hints. Leave PreferNative false here — the whole point of this sink is that it wants everything flattened." },
+                { "PolylineFallbackSink.BeginShape", "Accepts every shape (always returns true) and captures its PenSpec for the callbacks that follow." },
+                { "PolylineFallbackSink.EndShape", "No-op — nothing is buffered per shape." },
+                { "PolylineFallbackSink.EmitPolyline", "Forwards to OnPolyline, if set." },
+                { "PolylineFallbackSink.EmitFilledLoops", "Forwards to OnFilled, if set. The FillRule is not passed on." },
+                { "PolylineFallbackSink.EmitPoint", "Forwards to OnPoint, if set." },
+                { "PolylineFallbackSink.EmitText", "Forwards to OnText, if set." },
+
+                { "ShapeTessellator.Tessellate", "Tessellate(Shape shape, IPrimitiveSink sink) — decomposes the shape into primitives and pushes them into the sink. THE RETURN VALUE IS NOT OPTIONAL: false means the sink declined the shape (its BeginShape returned false) and you must do something else with it — draw it yourself, record it as unhandled, or fold its bounds in. Ignoring the result is precisely how dimensions, arrows and construction lines vanish from an export. Groups recurse into their children. Not thread-safe: the instance holds reusable buffers, so give each thread its own." },
+                { "ShapeTessellator.SegmentsForRadius", "Static. SegmentsForRadius(double radiusPixels) — how many straight segments a circular arc of that on-screen radius should be flattened into. Radius is in PIXELS, not world units, which is the whole point: a circle of radius 1 needs a different segment count depending on how far you have zoomed in. Exposed so a caller can match the renderer's fineness exactly rather than guessing at it." },
+
+                { "TessellationHints.Scale", "World units per device pixel — multiply a world size by this to get its size on screen, which is what curve segment counts are chosen from. Default 1.0. Setting it too low wastes segments on a shape that is a few pixels across; too high and a large circle visibly becomes a polygon." },
+                { "TessellationHints.PreferNative", "Set it when your sink can express a shape directly — a DXF CIRCLE entity, an SVG <circle>, a PDF arc — and the tessellator will offer each shape to IPrimitiveSink.TryEmitNative before flattening it, only flattening what you decline. Default false, which is right for a rasterizer: it wants everything as segments." },
+
+                { "PenSpec.From", "Static. PenSpec.From(Shape shape) — snapshots the shape's five styling members plus Opacity into a PenSpec. The way to build one; the six-argument constructor exists for synthesising a pen that does not come from a shape." },
+                { "PenSpec.HasFill", "Whether there is a GENUINE fill, rather than a value that merely looks like one. False for a null or empty FillColor and for the literal strings \"Transparent\" and \"None\" (case-insensitively). Check this before filling anything — testing FillColor for null yourself is how a \"Transparent\" fill ends up painted as an actual colour." },
+                { "PenSpec.Color", "The stroke colour, as the same colour-name or hex string the shape carried. Readonly field, not a property." },
+                { "PenSpec.FillColor", "The fill colour string as the shape carried it — which may be \"Transparent\" or \"None\", so test HasFill rather than this. Readonly field." },
+                { "PenSpec.LineWeight", "The shape's stroke width. Whether that is device pixels or world units depends on the host's line-weight mode, so a sink should decide once rather than per shape. Readonly field." },
+                { "PenSpec.LineType", "The shape's LineType (Continuous, Dashed, Dotted, ...). The sink expands it into an actual dash array; the geometry library does not. Readonly field." },
+                { "PenSpec.LineTypeScale", "Multiplier on the dash pattern's lengths. Readonly field." },
+                { "PenSpec.Opacity", "The shape's opacity, 0 (invisible) to 1 (opaque). Readonly field. Combine it with the alpha already present in a #AARRGGBB colour string rather than treating them as alternatives." },
+
+                { "GlyphOutlineProvider.GetCharContours", "The provider's one method: given a VText and a character index, it returns that character's outline as a list of closed contours in WORLD coordinates, already positioned, anchored and rotated to match how the text is drawn — or null for whitespace or an out-of-range index. A glyph with a hole (o, A, 8) comes back as more than one contour. You would not normally call this; VText.ToCharShape(i), VText.LiftChar(i), the indexer text[i] and VText.LiftChars(start, count) wrap it and hand back real shapes instead of raw point lists." },
+
+                // Control-point handles, per shape. Index 0 is always the whole-shape Move handle,
+                // and MoveControlPoint takes a DESTINATION, not a displacement.
+                { "VLine.GetControlPoints", "Three handles: [0] Move at the midpoint, [1] Vertex at Start, [2] Vertex at End." },
+                { "VLine.MoveControlPoint", "Index 0 translates the whole line so its midpoint lands on newPosition; 1 sets Start; 2 sets End. Any other index is ignored." },
+                { "VCircle.GetControlPoints", "Two handles: [0] Move at Center, [1] Radius on the circle at Center + (Radius, 0)." },
+                { "VCircle.MoveControlPoint", "Index 0 moves the circle so its centre lands on newPosition; 1 sets Radius to the distance from Center to newPosition, so dragging it resizes about the centre. Any other index is ignored." },
+                { "VArc.GetControlPoints", "Four handles: [0] Move at Center, [1] Radius, [2] Vertex at StartPoint, [3] Vertex at EndPoint." },
+                { "VArc.MoveControlPoint", "Index 0 recentres the arc on newPosition; 1 sets Radius to the distance from Center. Indices 2 and 3 set StartAngle and EndAngle from the direction of newPosition relative to Center AND ALSO set Radius to its distance — so dragging an end handle both sweeps and resizes the arc, which is what makes the handle follow the cursor exactly. Set StartAngle or EndAngle directly if you want to sweep without resizing." },
+                { "VRectangle.GetControlPoints", "Three handles: [0] Move at the centre, [1] Vertex at Corner, [2] Vertex at the opposite corner. There are no edge-midpoint handles — resize by dragging a corner." },
+                { "VRectangle.MoveControlPoint", "Index 0 recentres the rectangle on newPosition. Index 1 drags the Corner while HOLDING THE OPPOSITE CORNER FIXED, and index 2 drags the opposite corner while holding Corner fixed — so both resize rather than translate, and Width and Height both change. Dragging a handle past the far corner flips the rectangle rather than producing a negative size. It stays axis-aligned throughout; use RotationAngle to turn it." },
+                { "VPolygon.GetControlPoints", "One Move handle at the vertex centroid, at index 0, followed by one Vertex handle per point in Points order — so handle N corresponds to Points[N-1]. An empty polygon returns an empty list, with no Move handle." },
+                { "VPolygon.MoveControlPoint", "Index 0 translates the polygon so its centroid lands on newPosition. Index 1..Points.Count sets Points[index-1] and rebuilds the internal edge curves. Out-of-range indices are ignored. Note the centroid used is the plain average of the vertices, not the area centroid." },
+                { "VPolyline.GetControlPoints", "One Move handle at the vertex average, at index 0, then one Vertex handle per point in Points order — handle N is Points[N-1]. An empty polyline returns an empty list." },
+                { "VPolyline.MoveControlPoint", "Index 0 translates the polyline so its vertex average lands on newPosition; index 1..Points.Count sets Points[index-1]. Out-of-range indices are ignored." },
+                { "VBezier.GetControlPoints", "Five handles: [0] Move at the curve centre, [1] Vertex at P0, [2] CurveControl at P1, [3] CurveControl at P2, [4] Vertex at P3. The two CurveControl handles are the off-curve tangent handles — the curve does not pass through them." },
+                { "VBezier.MoveControlPoint", "Index 0 translates the whole curve; 1 to 4 set P0, P1, P2 and P3 respectively. Moving P1 or P2 changes the curvature without moving either endpoint." },
+                { "VSpline.GetControlPoints", "One Move handle at the average of the control points, at index 0, then one CurveControl handle per entry of ControlPoints — handle N is ControlPoints[N-1]. They are typed CurveControl even though a Catmull-Rom spline passes THROUGH its control points, so dragging one moves the curve to it." },
+                { "VSpline.MoveControlPoint", "Index 0 translates the whole spline; index 1..ControlPoints.Count sets ControlPoints[index-1]. Because the tangent at each point depends on its neighbours, moving one point visibly reshapes the two spans on either side, not just the adjacent one." },
+                { "VEllipse.GetControlPoints", "Three handles: [0] Move at Center, [1] Radius at Center + (RadiusX, 0), [2] Radius at Center + (0, RadiusY). Nothing for StartAngle/EndAngle — set those directly." },
+                { "VEllipse.MoveControlPoint", "Index 0 recentres the ellipse on newPosition; 1 sets RadiusX to |newPosition.X - Center.X| and 2 sets RadiusY to |newPosition.Y - Center.Y|. The absolute value means dragging a handle past the centre does not produce a negative radius." },
+                { "VText.GetControlPoints", "A single Move handle at Location, at index 0. Height, Anchor and Angle are not draggable." },
+                { "VText.MoveControlPoint", "Index 0 sets Location to newPosition. Remember Location's meaning depends on Anchor, so the text moves relative to whichever corner or edge the anchor names." },
+                { "VArrow.GetControlPoints", "Three handles: [0] Move at MidPoint, [1] Vertex at Start, [2] Vertex at End (the tip)." },
+                { "VArrow.MoveControlPoint", "Index 0 translates the arrow so its midpoint lands on newPosition; 1 sets Start; 2 sets End. The head is rebuilt from the new shaft direction automatically." },
+                { "VDimension.GetControlPoints", "Three handles: [0] Move at the centre, [1] Vertex at Point1, [2] Vertex at Point2. Offset is not a handle — set it directly to push the dimension line further out." },
+                { "VDimension.MoveControlPoint", "Index 0 translates the whole dimension; 1 and 2 set Point1 and Point2, which re-measures Distance and rebuilds DisplayText." },
+                { "VRadialDimension.GetControlPoints", "Two handles: [0] Move at Center, [1] Vertex at the leader's outer end. Dragging the second one is how LeaderAngle is edited interactively." },
+                { "VRadialDimension.MoveControlPoint", "Index 0 recentres the dimension on newPosition; 1 sets LeaderAngle from the direction of newPosition relative to Center, swinging the leader around without changing Radius." },
+                { "VRadialDimension.GetBounds", "The bounding box covering the dimensioned circle's extent and the leader and text — the bounding-box answer, since a dimension has no outline of its own. Contains and DistanceTo are likewise box-based on this shape." },
+                { "VRadialDimension.Flip", "Mirrors Center across the given line and mirrors the leader direction with it, so the annotation stays on the same side of the geometry it belongs to. Radius is unchanged — a mirror does not resize." },
+                { "VGroup.GetControlPoints", "Five handles: [0] Move at the group centre, then four Vertex handles at the corners of the group's bounding box (Min, Max, top-left, bottom-right). Only the Move handle does anything today; the corner handles are placeholders for a future box scale, so dragging one has no effect." },
+                { "VGroup.MoveControlPoint", "Index 0 translates the whole group so its centre lands on newPosition, which moves every child. The corner indices are accepted and ignored." },
+                { "VGroup.Move", "Translates every child by the displacement vector; the group holds no geometry of its own. Distinct from setting OffsetX/OffsetY, which the renderer applies as a transform around the whole group without touching the children — that is what animations use, and it is why an animated group snaps back if you clear the offsets." },
+                { "VGroup.Rotate", "Rotates every child about the SAME pivot, so the group turns as one rigid body rather than each child spinning in place. Angle in degrees, counter-clockwise. Pass GetCenter() as the pivot to turn a group about itself." },
+                { "VGroup.Scale", "Scales every child about the same centre point, so spacing between children scales too. Pass GetCenter() to grow a group in place." },
+                { "VGroup.Flip", "Mirrors every child across the given line. Because each child mirrors independently about the same line, the group's internal arrangement mirrors correctly as a whole." },
+                { "VGroup.Clone", "A deep copy: every child is cloned, the Name is carried across (unusually — most Clone implementations drop it) and the group's own styling is copied. The clones are new shapes, so the copy is fully independent of the original." },
+                { "VGroup.GetBounds", "The union of every child's bounding box. An EMPTY GROUP RETURNS A DEGENERATE BOX AT THE ORIGIN rather than null, so check Count if the difference matters — an empty group would otherwise drag a zoom-to-fit back to (0, 0)." },
+                { "VGroup.Contains", "True when ANY child contains the point — each child using its own exact test, so a point inside a circle in the group counts and a point merely inside the group's bounding box does not. Returns false for an empty group. Not to be confused with ContainsShape, which asks about membership." },
+                { "VGroup.DistanceTo", "The smallest DistanceTo across every child, so it measures to whichever child is nearest — zero when the point sits on any child's outline. An EMPTY GROUP RETURNS double.MaxValue." },
+                { "VGroup.DoesIntersect", "True when any child intersects the other shape. When the other shape is itself a VGroup, every pair of children is tested, so it is O(n × m) — fine for tens of shapes, worth avoiding in a loop over thousands." },
+                { "VGroup.Intersect", "Returns the FIRST intersection found between any child and the other shape, as a Shape, or null if none intersects. \"First\" is in child order, which is creation order — so it is a hit test, not a complete answer. Iterate Shapes yourself if you need every intersection." },
+                { "VCell.Clone", "An independent copy of the cell keeping the same UniqueId, Column and Row as the original — deliberately, since those identify its position in the grid, so a cloned cell is a copy of a specific cell rather than a new one. Neighbours are NOT cloned: the copy is detached from the grid, so pathfinding across a clone will not work." },
+                { "VCell.Move", "Translates the cell's four corners and its Center together. Moving a single cell out of its grid leaves the grid's own Location and cell layout unchanged, so the grid will no longer agree with where the cell is — move the VSpatialGrid instead if you want the whole grid to travel." },
+                { "VCell.Rotate", "Rotates the cell's corners and its Center about the pivot, in degrees counter-clockwise. The cell stops being axis-aligned, which is fine for drawing but means GetCellAt/GetClosestCell lookups on the parent grid become unreliable." },
+                { "VCell.Scale", "Scales the corners and Center about the given centre point and multiplies CellSize by |factor|, so the cell's recorded size stays consistent with its drawn size." },
+                { "VCell.Flip", "Mirrors the cell's corners and its Center across the given line." },
+                { "VSpatialGrid.Clone", "A new grid with the same Location, XCount, YCount and CellSize, and the styling copied — the cells are REBUILT rather than copied, so per-cell state does not come across: Blocked flags are cleared and any styling you applied to individual cells is lost. Set them again after cloning." },
+                { "VSpatialGrid.Move", "Translates the grid Location and every cell together, and drops the internal nearest-cell index so subsequent GetClosestCell lookups are correct. Prefer this over moving cells individually." },
+                { "VSpatialGrid.Rotate", "Rotates the Location and every cell about the pivot, in degrees counter-clockwise. The cells stop being axis-aligned, so GetCellAt — which relies on an axis-aligned layout — becomes unreliable; GetClosestCell still works, since it measures distance." },
+                { "VSpatialGrid.Scale", "Scales the Location and every cell about the given centre and multiplies CellSize by |factor|, keeping the grid's recorded cell size consistent with its geometry. The nearest-cell index is dropped." },
+                { "VSpatialGrid.Flip", "Mirrors the Location and every cell across the given line. Row and column numbering is unchanged, so after a mirror the cell at column 0 is on the opposite side." },
+                { "VSpatialGrid.GetBounds", "The union of every cell's bounding box — the drawn extent of the grid, which is slightly larger than XCount × CellSize by the outer cell walls. A grid with no cells returns a degenerate box at Location." },
+                { "VSpatialGrid.DistanceTo", "The smallest distance from the point to any cell's outline, so it is zero on any cell edge and positive inside a cell as well as outside the grid. A grid with no cells falls back to the distance to Location. There is deliberately no Contains override: a grid is a diagram, not an area." },
+
+                // Curve members whose behaviour is specific to the shape
+                { "VEllipse.Divide", "Returns numberOfSegments + 1 points spaced by EQUAL ARC LENGTH along the ellipse. This matters on an eccentric ellipse: equal SWEEP ANGLE would bunch points near the flat ends, and everything sampling the curve — dashes, animation paths, morph targets — would inherit the distortion. Use EvaluateByAngle if you specifically want equal angles. Zero or fewer segments returns an empty list." },
+                { "VEllipse.Measure", "Returns points spaced segmentLength apart by arc length, walking from StartAngle. The count comes from the numerically-computed total length divided by segmentLength, so the last point can fall short of the end by up to one interval. A segmentLength of zero or less returns an empty list." },
+                { "VEllipse.StartPoint", "The point at parameter 0 — the ellipse's position at StartAngle. On a full ellipse (0 to 360) this is Center + (RadiusX, 0), and StartPoint and EndPoint coincide." },
+                { "VEllipse.EndPoint", "The point at parameter 1 — the ellipse's position at EndAngle. Equal to StartPoint on a full ellipse." },
+                { "VEllipse.Vertices", "Just the Center, as a one-element list — an ellipse has no natural vertices. The ICurve contract asks for the shape's defining points, and for an ellipse that is its centre plus its two radii, which are separate properties. Use Divide or Measure to get points along the curve." },
+                { "VEllipse.Project", "The closest point ON the ellipse to the given point, found by sampling the curve at 100 positions and taking the nearest — so it is accurate to about a hundredth of the perimeter, not exact. Good enough for snapping and for SplitAtPoint; raise your own sampling if you need better." },
+                { "VEllipse.NormalAtPoint", "The outward unit normal derived from the ellipse's implicit equation — ((p.X - Center.X)/RadiusX², (p.Y - Center.Y)/RadiusY²) normalised. It is evaluated at the point you pass, so pass a point on or near the curve; a point at the centre gives a zero vector. Note this assumes the ellipse is axis-aligned, which it is — VEllipse has no rotation property." },
+                { "VEllipse.Offset", "Returns a NEW VEllipse with both radii grown by distance (negative shrinks), keeping the centre and the angle range. That is a concentric ellipse, which is NOT the true offset curve of an ellipse — the exact offset is not an ellipse at all — so the gap between the two varies around the perimeter. Fine for a visual halo; not for a tolerance band." },
+                { "VEllipse.PointAtSegmentLength", "The point at the given arc-length distance from the start, found by walking a sampled polyline and interpolating within the segment where the distance runs out. Approximate for the same reason Project is." },
+                { "VEllipse.PointsAtChordLengthFromPoint", "The points on the ellipse exactly chordLength away in a straight line from the projection of your reference point onto the curve — found by sampling 100 positions and keeping the crossings, so expect one on each side and an empty list if the chord never reaches. Use Measure for arc-length spacing instead." },
+                { "VEllipse.SplitAtPoint", "Splits at the projection of the given point, returning two VEllipse arcs — (StartAngle to split) and (split to EndAngle) — as ICurve. Both are new shapes and register on the canvas, and the original is NOT removed, so call Remove() on it if you only want the pieces." },
+                { "VRay.Divide", "Divides the ray's DRAWN portion, not the ray itself — a ray has no far end, so the parameter range [0, 1] is mapped onto [Origin, Origin + Direction × RenderExtent] (RenderExtent defaults to 10,000). You get numberOfSegments + 1 points. Raise RenderExtent first if you need to sample further out; zero or fewer segments returns an empty list." },
+                { "VRay.Measure", "Points every segmentLength along the ray starting at Origin, stopping at RenderExtent — so the count is RenderExtent / segmentLength, which with the default extent of 10,000 can be a very large list. Set RenderExtent to the range you actually care about before calling. A segmentLength at or below 1e-9 returns an empty list." },
+                { "VRay.NormalAtPoint", "The unit normal perpendicular to Direction, rotated 90° clockwise from it — (Direction.Y, -Direction.X) normalised. Constant along the ray, so the point you pass is ignored." },
+                { "VRay.Offset", "Returns a NEW VRay parallel to this one, displaced by distance along the normal (positive one side, negative the other), carrying the same Direction and RenderExtent. A parallel ray, not a trimmed one." },
+                { "VRay.PointAtSegmentLength", "The point at the given distance from Origin along Direction. A NEGATIVE distance returns Origin rather than extrapolating backwards, because a ray does not exist behind its origin. Unlike Divide and Measure, this is not limited by RenderExtent — the ray really is infinite, only its drawing is bounded." },
+                { "VRay.PointsAtChordLengthFromPoint", "The points chordLength either side of the projection of your reference point onto the ray. Returns TWO points normally, but only ONE when the backwards point would fall behind Origin, since that is off the ray — so check the count rather than assuming two." },
+                { "VXLine.Divide", "Divides the line's DRAWN portion: an infinite line has no ends, so [0, 1] is mapped symmetrically onto [-RenderExtent, +RenderExtent] measured from BasePoint (RenderExtent defaults to 10,000). Parameter 0.5 is therefore BasePoint itself. You get numberOfSegments + 1 points; zero or fewer returns an empty list." },
+                { "VXLine.Measure", "Points every segmentLength in BOTH directions from BasePoint out to RenderExtent, returned sorted along the direction — so roughly 2 × RenderExtent / segmentLength points, which with the default extent is a lot. Reduce RenderExtent first. A segmentLength at or below 1e-9 returns an empty list." },
+                { "VXLine.NormalAtPoint", "The unit normal perpendicular to Direction — (Direction.Y, -Direction.X) normalised. Constant along the line, so the point argument is ignored." },
+                { "VXLine.Offset", "Returns a NEW VXLine parallel to this one, displaced by distance along the normal, with the same Direction and RenderExtent. This is the natural way to build a family of parallel construction lines." },
+                { "VXLine.PointAtSegmentLength", "The point at the signed distance from BasePoint along Direction. NEGATIVE VALUES ARE VALID here, unlike on VRay — the line extends both ways — and the result is not clamped to RenderExtent, which only bounds what is drawn." },
+                { "VXLine.PointsAtChordLengthFromPoint", "The two points chordLength either side of the projection of your reference point onto the line. Always returns exactly two, since there is line in both directions." },
+                { "VCircle.Vertices", "Just the Center, as a one-element list — a circle has no vertices; its other defining value, Radius, is a separate property. Use Divide or Measure for points on the circumference." },
+                { "VCircle.PointAtSegmentLength", "The point at the given arc-length distance measured counter-clockwise from angle 0 (Center + (Radius, 0)). Exact, not sampled: the angle is simply distance / Radius. Distances beyond the circumference wrap around." },
+                { "VCircle.PointsAtChordLengthFromPoint", "The points on the circle exactly chordLength away in a straight line from the projection of your reference point onto the circle — two symmetric points when the chord fits within the diameter, and an empty list when chordLength exceeds 2 × Radius. Handy for stepping around a circle by true chord rather than by arc." },
+                { "VCircle.SplitAtPoint", "Splits the circle at the projection of the given point, returning TWO VArcs as ICurve — 0-to-angle and angle-to-360 — because a circle cut once is no longer a circle. Both arcs are new shapes and register on the canvas, and the circle itself is NOT removed, so call Remove() on it unless you want all three." },
+                { "VArc.Vertices", "Three points: Center, StartPoint and EndPoint — the arc's defining geometry apart from Radius. Not points along the curve; use Divide or Measure for those." },
+                { "VArc.PointAtSegmentLength", "The point at the given arc-length distance from StartPoint, measured along the sweep. Exact rather than sampled — the angle is simply distance / Radius — and it follows the sweep direction, so it works on an arc whose EndAngle is less than its StartAngle. A distance beyond the arc's own length CLAMPS to EndPoint rather than continuing round the circle." },
+                { "VArc.PointsAtChordLengthFromPoint", "The points on the arc exactly chordLength away in a straight line from the projection of your reference point onto it. Points that would land outside the arc's sweep are excluded, so you can get two, one or none — check the count. The right call for setting out equal chords along a curved alignment." },
+                { "VArc.SplitAtPoint", "Splits at the projection of the given point, returning two VArcs as ICurve — StartAngle-to-split and split-to-EndAngle. Both register on the canvas and the original arc stays, so Remove() it if you only want the pieces." },
+                { "VPolyline.Vertices", "The Points list ITSELF, not a copy — mutating what you get back mutates the polyline, and does so without bumping Shape.Revision, so call Invalidate() afterwards. Use Points directly for clarity." },
+                { "VPolygon.Vertices", "The Points list ITSELF, not a copy — mutating it mutates the polygon, and it will NOT rebuild the internal edge curves or bump Shape.Revision, so call Invalidate() (and prefer assigning Points, or AddPoint) if you go that route." },
+                { "VBezier.Vertices", "The four defining points as a new list: P0, P1, P2, P3 — endpoints and both off-curve control handles, in order. A copy, so editing it does nothing to the curve; assign P0..P3 instead." },
+                { "VSpline.Vertices", "The ControlPoints list ITSELF, not a copy. Because a Catmull-Rom spline passes through its control points, these are points on the curve — unlike a bézier's. Mutating the list mutates the spline without bumping Shape.Revision; call Invalidate() if you do." },
+                { "VPolyline.NormalAtPoint", "The normal of whichever SEGMENT the given point is nearest — (dy, -dx) of that segment, so 90° clockwise from the direction of travel. It is per-segment, so the value jumps discontinuously as the point crosses a vertex; there is no averaged vertex normal. The result is a unit vector. A polyline with fewer than two points returns (0, 1, 0), straight up, as a safe default rather than a zero vector." },
+                { "VPolyline.PointAtSegmentLength", "The point at the given arc-length distance from the first vertex, walking the segments in order. A distance beyond the total length returns the last point rather than extrapolating." },
+                { "VPolyline.PointsAtChordLengthFromPoint", "The points on the polyline exactly chordLength away in a straight line from the projection of your reference point. A straight chord can cross a zig-zag more than twice, so this can return more than two points — take them all rather than assuming a pair." },
+                { "VPolyline.SplitAtPoint", "Splits at the segment nearest the given point, returning two VPolylines as ICurve: the vertices up to the split plus the split point, and the split point plus the vertices after it. Both register on the canvas; the original is not removed." },
+                { "VBezier.Measure", "Points spaced segmentLength apart by ARC LENGTH along the curve, which is not the same as equal steps in t — a cubic bézier moves at very different speeds along its length. It walks a 200-step polyline approximation and interpolates within it, so spacing is accurate to well under a percent of the curve for any reasonable step. A segmentLength at or below 1e-9 returns an empty list; the first point is always the curve start." },
+                { "VBezier.NormalAtPoint", "The unit normal at the nearest point on the curve: the derivative there, rotated to (-ty, tx) — 90° counter-clockwise, so it points to the left of the direction of travel. Continuous along the curve, unlike a polyline's." },
+                { "VBezier.Offset", "Returns a NEW VBezier offset by the given distance. Be aware how coarse this is: it uses only the END tangents — P0 and P1 are displaced along the normal at the start, P2 and P3 along the normal at the end — so it is exact only where the curve is nearly straight or nearly circular. The true offset of a cubic bézier is not a cubic bézier at all, and this approximation drifts noticeably on an S-curve or where curvature is tight relative to the offset distance. Sample the curve and offset the points yourself if you need accuracy." },
+                { "VBezier.Project", "The closest point on the curve to the given point, by finding the closest parameter and evaluating there. This is what SplitAtPoint, DistanceTo and PointsAtChordLengthFromPoint build on." },
+                { "VBezier.PointAtSegmentLength", "The point at the given arc-length distance from P0, found by walking a 100-step polyline approximation. Clamps: a distance of zero or less returns P0, and anything at or beyond the total length returns P3." },
+                { "VBezier.PointsAtChordLengthFromPoint", "The points on the curve exactly chordLength in a straight line from the projection of your reference point. Found by scanning 100 sampled positions for crossings, so a chord much smaller than the sample spacing can be missed; normally one point on each side." },
+                { "VBezier.SplitAtPoint", "Splits at the nearest point on the curve using De Casteljau's algorithm twice, so both halves are EXACT cubic béziers rather than approximations — the returned pair reproduces the original curve precisely. Both are new VBezier shapes and register on the canvas; the original is not removed." },
+                { "VSpline.Measure", "Points spaced segmentLength apart by ARC LENGTH along the spline, walking a fixed 32-steps-per-span approximation (independent of SegmentsPerSpan, which only affects rendering). A segmentLength at or below 1e-9 returns an empty list; the first point is always the spline start." },
+                { "VSpline.NormalAtPoint", "The unit normal at the nearest point on the spline: the derivative there rotated to (-ty, tx) — 90° counter-clockwise, so it points to the left of the direction of travel." },
+                { "VSpline.Offset", "Returns a new spline through offset CONTROL POINTS: each control point is displaced along the normal estimated from its neighbours. That keeps the shape recognisable, but it is not the true offset curve — the offset spline passes through the displaced control points rather than staying a constant distance from the original, so the gap varies where curvature changes. Tight curvature relative to the offset distance will pinch or self-intersect." },
+                { "VSpline.Project", "The closest point on the spline to the given point, by finding the closest parameter and evaluating there. Underpins DistanceTo and SplitAtPoint." },
+                { "VSpline.PointAtSegmentLength", "The point at the given arc-length distance from the first control point, walking the rendered point list. Clamps: zero or less returns StartPoint, at or beyond the total length returns EndPoint." },
+                { "VSpline.PointsAtChordLengthFromPoint", "The points on the spline approximately chordLength in a straight line from the projection of your reference point. Read \"approximately\" literally: it scans the rendered polyline for segments that cross the chord circle and returns each crossing SEGMENT'S MIDPOINT rather than the true intersection, so accuracy is bounded by the sampling density — raise SegmentsPerSpan if you need better. A wandering spline can be crossed more than twice by the same circle, so do not assume a pair." },
+                { "VSpline.SplitAtPoint", "Splits at the nearest point, returning two VSplines as ICurve: the control points up to the split span plus the split point, and the split point plus the remaining control points. Because Catmull-Rom tangents depend on neighbouring points, THE TWO HALVES DO NOT EXACTLY REPRODUCE THE ORIGINAL near the cut — the end tangents change. Both halves register on the canvas; the original is not removed." },
+                { "VRectangle.GetLength", "The perimeter — 2 × (Width + Height). VRectangle derives from VPolygon, so this is the closed polygon's total edge length, not a diagonal." },
+                { "VRectangle.Offset", "Inherited from VPolygon: each vertex is displaced along the average of its two adjacent edge normals, giving a parallel rectangle. Two things to know. There is NO MITER COMPENSATION, so on a general polygon a sharp corner ends up closer than the requested distance; on a rectangle every corner is 90° so the shortfall is a uniform factor of √2 rather than the exact distance you asked for. And WHICH WAY IT GROWS depends on the winding of Points — the normal is taken 90° counter-clockwise from each edge — so try both signs rather than assuming positive means outward. For a robust offset with proper mitring use BooleanOps.OffsetPolygon, which goes through Clipper2. A rectangle collapsed by an inward offset larger than half its smaller dimension comes back inverted rather than empty, so check the result." },
+                { "VRectangle.Intersect", "Returns the first intersection between this rectangle's outline and the other shape, as a Shape, or null. Inherited Shape behaviour: it is a hit test on the OUTLINE, so a shape wholly inside the rectangle does not intersect it — use Contains for containment. GeometryHelper.IntersectRectRect is the call for two rectangles specifically." },
             };
         }
+
+        /// <summary>
+        /// True when the member is reached through the type rather than an instance. Enum values
+        /// are static fields but reporting them as such would be noise, so they are excluded.
+        /// </summary>
+        internal static bool IsStaticMember(MemberInfo member) => member switch
+        {
+            MethodInfo m => m.IsStatic,
+            PropertyInfo p => (p.GetMethod ?? p.SetMethod)?.IsStatic == true,
+            FieldInfo f => f.IsStatic && !(f.DeclaringType?.IsEnum ?? false),
+            _ => false
+        };
 
         private string GetMemberDescription(string className, string memberName)
         {
             var key = $"{className}.{memberName}";
             if (_memberDescriptions != null && _memberDescriptions.TryGetValue(key, out var desc))
                 return desc;
+            return "";
+        }
+
+        /// <summary>
+        /// The description for a member, falling back to whichever base type or interface actually
+        /// declares it. Most inherited members are documented once on the declaring type — Shape's
+        /// forty-odd styling and transform members, ICurve's sampling methods, Animation's timing
+        /// members, VPolygon's vertex members (which VRectangle and VCell inherit) — and repeating
+        /// each of those on every subclass would be a hundred-odd copies to keep in step.
+        ///
+        /// <para>
+        /// The walk is driven by the member's REAL declaring type and the type's interface list, not
+        /// by a hard-coded pair of names as it was before. That matters because the previous version
+        /// tried "Shape" and "ICurve" for every type regardless of whether it was one, so an
+        /// unrelated type with a member of the same name (Name, Color, Move, Intersect — all common)
+        /// could pick up a description belonging to something else entirely.
+        /// </para>
+        /// </summary>
+        private string GetInheritedMemberDescription(string className, MemberInfo member)
+        {
+            var direct = GetMemberDescription(className, member.Name);
+            if (!string.IsNullOrEmpty(direct)) return direct;
+
+            // The type that actually declares it, then its bases: VRectangle.AddPoint is
+            // VPolygon.AddPoint, DrawAnimation.StartTime is Animation.StartTime.
+            for (var t = member.DeclaringType; t != null && t != typeof(object); t = t.BaseType)
+            {
+                var inherited = GetMemberDescription(GetCleanTypeName(t), member.Name);
+                if (!string.IsNullOrEmpty(inherited)) return inherited;
+            }
+
+            // Interfaces last: a curve shape's Divide/Measure/Project are documented on ICurve, and
+            // an explicit interface implementation is not reflected as declared on the shape at all.
+            var owner = member.DeclaringType ?? member.ReflectedType;
+            if (owner != null)
+            {
+                foreach (var iface in owner.GetInterfaces())
+                {
+                    var fromInterface = GetMemberDescription(GetCleanTypeName(iface), member.Name);
+                    if (!string.IsNullOrEmpty(fromInterface)) return fromInterface;
+                }
+            }
+
             return "";
         }
 
@@ -4369,11 +4926,17 @@ namespace StartViz
             AddShortcutRow(rowGroup, "Middle Click", "Pan canvas", true);
             AddShortcutRow(rowGroup, "Ctrl+G", "Zoom to shape by ID", false);
             AddShortcutRow(rowGroup, "Ctrl+M", "Toggle Measuring Tape tool", true);
+            AddShortcutRow(rowGroup, "F4", "Toggle Properties panel", false);
+            AddShortcutRow(rowGroup, "F6", "Toggle Global Parameters panel", true);
+            AddShortcutRow(rowGroup, "F9", "Toggle Snap to Grid", false);
+            AddShortcutRow(rowGroup, "F10", "Toggle the frame-timing readout", true);
+            AddShortcutRow(rowGroup, "Ctrl+Shift+M", "Toggle Minimap", false);
             // Drawing Tools
-            AddShortcutRow(rowGroup, "P", "Point drawing tool", false);
-            AddShortcutRow(rowGroup, "L", "Line drawing tool", true);
-            AddShortcutRow(rowGroup, "C", "Circle drawing tool", false);
-            AddShortcutRow(rowGroup, "R", "Rectangle drawing tool", true);
+            AddShortcutRow(rowGroup, "P", "Point drawing tool", true);
+            AddShortcutRow(rowGroup, "L", "Line drawing tool", false);
+            AddShortcutRow(rowGroup, "C", "Circle drawing tool", true);
+            AddShortcutRow(rowGroup, "R", "Rectangle drawing tool", false);
+            AddShortcutRow(rowGroup, "Shift (hold)", "Orthogonal constraint while drawing", true);
             AddShortcutRow(rowGroup, "Esc", "Cancel drawing / Return to select", false);
             // Code Navigation & Intellisense
             AddShortcutRow(rowGroup, "F12", "Go to Definition", true);
@@ -4396,6 +4959,48 @@ namespace StartViz
                 "Positive angles are measured counter-clockwise from the positive X-axis."))
             { FontSize = 14, Margin = new Thickness(0, 0, 0, 20) });
 
+            // Performance and rendering
+            AddWelcomeSectionHeader(doc, "Performance and Rendering");
+            doc.Blocks.Add(new Paragraph(new Run(
+                "Press F10 to show the frame-timing readout in the top-left corner of the canvas. It is a diagnostic " +
+                "and is off by default, because measuring costs something; while it is off it costs nothing. Four lines:"))
+            { FontSize = 14, Margin = new Thickness(0, 0, 0, 8) });
+
+            var hudList = new List
+            {
+                MarkerStyle = TextMarkerStyle.Disc,
+                Margin = new Thickness(20, 0, 0, 15)
+            };
+            AddListItem(hudList, "p50 / p95",
+                "Median and 95th-percentile frame time in milliseconds, with the frame rate the p95 figure implies. p95 is the number to judge smoothness by — it is the occasional slow frame you feel, not the average one");
+            AddListItem(hudList, "cull / raster / backend",
+                "Time spent deciding what is on screen, time spent drawing it, and which renderer drew this frame (\"vector\" or \"raster\")");
+            AddListItem(hudList, "visible / examined",
+                "Shapes drawn versus shapes considered. The ratio is the one to watch: near 1.0 means the spatial index is doing its job; if \"examined\" tracks the size of the whole drawing, it is not");
+            AddListItem(hudList, "alloc / gen0",
+                "Bytes allocated per frame and garbage collections so far. Steady allocation per frame in a still scene is the signature of derived data being rebuilt that could be cached");
+            doc.Blocks.Add(hudList);
+
+            doc.Blocks.Add(new Paragraph(new Run(
+                "Which renderer draws the scene is a setting, RenderBackend, in %APPDATA%\\DoodleSharp\\appsettings.json. " +
+                "There is no reason to change it unless you are chasing a specific problem — the default adapts on its own."))
+            { FontSize = 14, Margin = new Thickness(0, 0, 0, 8) });
+
+            var backendList = new List
+            {
+                MarkerStyle = TextMarkerStyle.Disc,
+                Margin = new Thickness(20, 0, 0, 15)
+            };
+            AddListItem(backendList, "Auto (default)",
+                "Chooses per frame. A light view is drawn by the vector renderer for exact fidelity; when a frame gets expensive it switches to the rasterizer, and switches back when the scene thins out. This is faster than either fixed choice, because it takes each one where it wins");
+            AddListItem(backendList, "Legacy",
+                "WPF vector drawing throughout. The most faithful, and what every existing drawing was authored against — annotation and geometry interleave in creation order. Choose it if anything looks wrong under Auto");
+            AddListItem(backendList, "Managed",
+                "Always use the built-in software rasterizer for hairline geometry, with text, dimensions and canvas chrome drawn over it. Much faster on large drawings; the trade-off is that annotation always composites above geometry regardless of creation order");
+            AddListItem(backendList, "GPU",
+                "Direct3D 11. Geometry is uploaded once and a pan or zoom only rewrites the camera, so navigation cost is flat and it is the only backend that holds up at 4K. It fails soft: no suitable device, or a device lost to a driver update or sleep/resume, falls back to a CPU path for the rest of the session with the reason recorded in the crash journal — you will never see an error, only the slower renderer");
+            doc.Blocks.Add(backendList);
+
             // Tips
             AddWelcomeSectionHeader(doc, "Tips");
             var tipsList = new List
@@ -4409,7 +5014,9 @@ namespace StartViz
             AddListItem(tipsList, "No Placement Call Needed", "Shapes appear automatically when created - Place() is only for shapes that did not come from a plain `new`");
             AddListItem(tipsList, "Show/Hide Shapes", "Use shape.Hide() and shape.Show() to control visibility without removing from canvas");
             AddListItem(tipsList, "ShapeDefaults", "Set ShapeDefaults.GlobalColor to apply colors to all new shapes");
-            AddListItem(tipsList, "Animation", "Create a Timeline, add animations, and call .Play() to animate shapes");
+            AddListItem(tipsList, "Animation", "Create an Animator, add animations with AddToAnimations(...), then call Animate(). There is no Timeline type in the scripting API");
+            AddListItem(tipsList, "Per-frame Callbacks", "Frame.Request(t => { ... }) runs a callback on the next frame; re-request from inside it to keep going, stop requesting to end. Use it when a timeline is more ceremony than the job needs");
+            AddListItem(tipsList, "Frame Timing", "Press F10 for a frame-timing readout on the canvas. The visible/examined ratio is the number worth watching");
             AddListItem(tipsList, "Drawing Tools", "Use the toolbar or press P/L/C/R to draw shapes directly on canvas with auto-generated code");
             AddListItem(tipsList, "Help Browser", "Select any class from the tree on the left to see its documentation");
             AddListItem(tipsList, "Find and Replace", "Press Ctrl+F to find, Ctrl+H to find and replace. Supports regex and project-wide search");
