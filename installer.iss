@@ -74,6 +74,14 @@ Source: "{#BuildOutput}\Vortice.Mathematics.dll"; DestDir: "{app}"; Flags: ignor
 Source: "{#BuildOutput}\SharpGen.Runtime.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildOutput}\SharpGen.Runtime.COM.dll"; DestDir: "{app}"; Flags: ignoreversion
 
+; Docking layout (AvalonDock). The NuGet packages are named Dirkster.AvalonDock* but the assemblies
+; drop that prefix, so these names come from the Release build output rather than the package ids.
+; Themes.VS is a transitive dependency of Themes.VS2013 and ships as its own assembly.
+Source: "{#BuildOutput}\AvalonDock.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutput}\AvalonDock.Core.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutput}\AvalonDock.Themes.VS.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutput}\AvalonDock.Themes.VS2013.dll"; DestDir: "{app}"; Flags: ignoreversion
+
 ; Dependencies
 Source: "{#BuildOutput}\ICSharpCode.AvalonEdit.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildOutput}\Microsoft.CodeAnalysis.dll"; DestDir: "{app}"; Flags: ignoreversion

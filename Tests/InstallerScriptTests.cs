@@ -87,11 +87,67 @@ public class InstallerScriptTests
     [InlineData("Vortice.D3DCompiler.dll")]
     [InlineData("Vortice.DXGI.dll")]
     [InlineData("Vortice.DirectX.dll")]
+    [InlineData("AvalonDock.dll")]
+    [InlineData("AvalonDock.Core.dll")]
+    [InlineData("AvalonDock.Themes.VS2013.dll")]
     public void RequiredPayloadIsEnumerated(string fileName)
     {
         var text = File.ReadAllText(InstallerPath());
 
         Assert.Contains(fileName, text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The general form of the test above, and the one that ends the whole class of bug: every
+    /// assembly the app actually builds against must be named in the script.
+    ///
+    /// <para>
+    /// Adding a NuGet package has now silently under-shipped three times, because a package's
+    /// transitive closure is not guessable from its id — Vortice's three <c>PackageReference</c>s
+    /// produce eight assemblies, and AvalonDock's packages are named <c>Dirkster.AvalonDock*</c> while
+    /// their assemblies drop the prefix. Enumerating the build output removes the guesswork: whatever
+    /// the restore actually produced is what has to ship.
+    /// </para>
+    ///
+    /// <para>
+    /// Reads the app's own build output, which the test run has necessarily just built (the test
+    /// project references it) — deliberately not the *test* project's output, which also contains
+    /// xunit and its friends, none of which ship.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void EveryAssemblyInTheBuildOutputIsShipped()
+    {
+        var outputDir = FindAppBuildOutput();
+        if (outputDir == null) return;   // no build output to compare against; nothing to assert
+
+        var script = File.ReadAllText(InstallerPath());
+
+        var missing = Directory.GetFiles(outputDir, "*.dll")
+            .Select(Path.GetFileName)
+            .Where(name => !script.Contains(name!, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(name => name)
+            .ToArray();
+
+        Assert.True(missing.Length == 0,
+            "These assemblies are built but never installed, so the app would fail at run time on a "
+            + "user's machine while working perfectly here:\n  " + string.Join("\n  ", missing));
+    }
+
+    /// <summary>
+    /// Locates the DoodleSharp build output for whichever configuration was built most recently.
+    /// Returns null rather than failing when there is none, so the suite still runs on a clean tree.
+    /// </summary>
+    private static string? FindAppBuildOutput()
+    {
+        var root = ArrowheadConsistencyTests.RepoRoot();
+
+        return new[] { "Debug", "Release" }
+            .Select(cfg => Path.Combine(root, "bin", cfg, "net9.0-windows"))
+            .Where(Directory.Exists)
+            .Where(dir => File.Exists(Path.Combine(dir, "DoodleSharp.dll")))
+            .OrderByDescending(dir => File.GetLastWriteTimeUtc(Path.Combine(dir, "DoodleSharp.dll")))
+            .FirstOrDefault();
     }
 
     /// <summary>
