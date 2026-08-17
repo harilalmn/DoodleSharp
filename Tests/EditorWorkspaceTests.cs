@@ -47,6 +47,42 @@ public class EditorWorkspaceTests : IDisposable
         Assert.Null(workspace.GetCompilation().GetTypeByMetadataName("B"));
     }
 
+    /// <summary>
+    /// Everything the app itself publishes to user code — <c>VizConsole</c>, the animation types,
+    /// the sketch base — lives in the host assembly, and the editor only knows about them because
+    /// <c>ModuleCompiler</c> references it explicitly. Drop that reference and every one of those
+    /// namespaces fails with CS0246 in IntelliSense.
+    ///
+    /// <para>
+    /// The types are looked up by metadata name rather than asserted as a list, so this covers
+    /// anything added to those namespaces later without needing to be updated. It cannot, however,
+    /// tell you that a *stale build* is loaded: the reference is to the running assembly, so an API
+    /// added since the last build genuinely does not exist as far as the editor is concerned, and
+    /// the squiggle is correct. That is a rebuild, not a bug.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Workspace_ResolvesTheHostAssemblysPublicApi()
+    {
+        var workspace = new CachedCompilationWorkspace(new ModuleCompiler().GetReferences());
+        var compilation = workspace.GetCompilation();
+
+        foreach (var name in new[]
+                 {
+                     "DoodleSharp.Console.VizConsole",
+                     "DoodleSharp.Animation.Frame",
+                     "DoodleSharp.Animation.Animator",
+                     "DoodleSharp.Sketching.Sketch",
+                     "C2VGeometry.VCircle",
+                 })
+        {
+            Assert.True(compilation.GetTypeByMetadataName(name) != null,
+                $"{name} does not resolve in the editor's compilation. User code that references it " +
+                "will show CS0246 in the editor even though it compiles and runs, because " +
+                "ModuleCompiler.GetReferences() is what supplies both.");
+        }
+    }
+
     [Fact]
     public void Workspace_ReplacesContentOnUpdate()
     {
