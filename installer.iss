@@ -59,6 +59,19 @@ Source: "{#BuildOutput}\C2VGeometry.dll"; DestDir: "{app}"; Flags: ignoreversion
 ; Clipper2 (robust polygon boolean-operation engine used by C2VGeometry's BooleanOps/RegionBooleanOps)
 Source: "{#BuildOutput}\Clipper2Lib.dll"; DestDir: "{app}"; Flags: ignoreversion
 
+; Direct3D backend (optional; the app falls back to its CPU rasterizer when no device is
+; available). Managed-only assemblies -- no runtimes\win-x64
+ative folder -- so they land flat in
+; the build output and each needs its own line here, per the explicit-enumeration convention.
+Source: "{#BuildOutput}\Vortice.Direct3D11.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutput}\Vortice.Direct3D9.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutput}\Vortice.D3DCompiler.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutput}\Vortice.DXGI.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutput}\Vortice.DirectX.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutput}\Vortice.Mathematics.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutput}\SharpGen.Runtime.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutput}\SharpGen.Runtime.COM.dll"; DestDir: "{app}"; Flags: ignoreversion
+
 ; Dependencies
 Source: "{#BuildOutput}\ICSharpCode.AvalonEdit.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildOutput}\Microsoft.CodeAnalysis.dll"; DestDir: "{app}"; Flags: ignoreversion

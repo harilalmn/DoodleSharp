@@ -101,6 +101,17 @@ public class RenderCanvas : FrameworkElement
     private readonly DrawingVisual _rasterVisual;
     private readonly DrawingVisual _overlayVisual;
     private readonly Rendering.Raster.ManagedRasterBackend _rasterBackend = new();
+    private Rendering.Raster.D3D11RasterBackend? _gpuBackend;
+    private readonly C2VGeometry.Rendering.ShapeTessellator _gpuTessellator = new();
+
+    /// <summary>
+    /// Bumped whenever the shape set changes. The GPU backend uploads geometry once and then only
+    /// rewrites its view matrix, so it needs to know when that assumption breaks — this is what
+    /// tells it, and it is a counter rather than a hash because the answer only has to be "is this
+    /// the same scene I uploaded".
+    /// </summary>
+    private int _sceneVersion;
+    private int _gpuUploadedVersion = -1;
     private readonly List<Shape> _rasterVisibleBuffer = new();
     private readonly DoodleSharp.Rendering.SceneIndex _sceneIndex = new();
     private readonly DoodleSharp.Rendering.FrameMetrics _frameMetrics =
@@ -572,6 +583,7 @@ public class RenderCanvas : FrameworkElement
     {
         _currentShapes = shapes.ToList();
         RebuildSpatialIndex();
+        _sceneVersion++;
         RedrawAll();
     }
 
@@ -604,6 +616,7 @@ public class RenderCanvas : FrameworkElement
     {
         _currentShapes = shapes.ToList();
         _sceneIndex.Rebuild(_currentShapes);
+        _sceneVersion++;
     }
 
     /// <summary>
@@ -640,6 +653,7 @@ public class RenderCanvas : FrameworkElement
     public void AddShape(IDrawable shape)
     {
         _currentShapes.Add(shape);
+        _sceneVersion++;
 
         // O(1) append. The index has no root bounds to outgrow, so unlike the QuadTree this can
         // never trigger a surprise full rebuild from a shape landing far outside the scene.
@@ -657,6 +671,7 @@ public class RenderCanvas : FrameworkElement
     {
         _currentShapes.Remove(shape);
         _sceneIndex.Remove(shape);
+        _sceneVersion++;
         RedrawAll();
     }
 
@@ -2445,6 +2460,12 @@ public class RenderCanvas : FrameworkElement
     /// belongs with the text layer rather than here.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// WPF's own hard limit on <c>FormattedText</c>'s em size, minus a margin. Exceeding it throws
+    /// <c>ArgumentOutOfRangeException</c> from inside the render pass.
+    /// </summary>
+    private const double MaxFontSize = 35000;
+
     private static readonly Dictionary<(VFont font, VFontWeight weight), Typeface> _typefaceCache = new();
 
     private double? _cachedPixelsPerDip;
@@ -2475,9 +2496,13 @@ public class RenderCanvas : FrameworkElement
         var screenPos = WorldToScreen(text.Location.X, text.Location.Y);
         var brush = GetCachedBrush(text.Color);
 
-        // Scale font size with zoom, but keep it readable
+        // Scale font size with zoom, but keep it readable -- and keep it inside what WPF will
+        // accept. FormattedText throws above roughly 35,791 em, and zooming far enough into a
+        // drawing reaches that: the exception escapes the render pass and takes the frame, and with
+        // it the process. A glyph that large fills the viewport many times over, so clamping costs
+        // nothing visible.
         var fontSize = text.Height * _viewport.Scale;
-        fontSize = Math.Max(fontSize, 6); // Minimum readable size
+        fontSize = Math.Clamp(fontSize, 6, MaxFontSize);
 
         var typeface = GetCachedTypeface(text.Font, text.FontWeight);
         var dpi = _cachedPixelsPerDip ??= VisualTreeHelper.GetDpi(this).PixelsPerDip;
@@ -3176,6 +3201,7 @@ public class RenderCanvas : FrameworkElement
     {
         var setting = ApplicationSettings.Instance.RenderBackend;
 
+        if (string.Equals(setting, "GPU", StringComparison.OrdinalIgnoreCase)) return true;
         if (string.Equals(setting, "Managed", StringComparison.OrdinalIgnoreCase)) return true;
         if (string.Equals(setting, "Legacy", StringComparison.OrdinalIgnoreCase)) return false;
 
@@ -3215,6 +3241,15 @@ public class RenderCanvas : FrameworkElement
         var width = (int)Math.Round(ActualWidth);
         var height = (int)Math.Round(ActualHeight);
 
+        if (string.Equals(ApplicationSettings.Instance.RenderBackend, "GPU",
+                          StringComparison.OrdinalIgnoreCase))
+        {
+            var gpuDeferred = RenderThroughGpuBackend(width, height);
+            if (gpuDeferred != null) return gpuDeferred;
+            // Device unavailable or lost: fall through to the CPU rasterizer for this and every
+            // later frame, rather than failing repeatedly.
+        }
+
         var background = _backgroundBrush is SolidColorBrush sb
             ? Rendering.Raster.ColorTable.Resolve(sb.Color.ToString())
             : Rendering.Raster.ColorTable.Resolve("#1E1E1E");
@@ -3244,6 +3279,72 @@ public class RenderCanvas : FrameworkElement
 
         return _rasterBackend.Deferred;
     }
+
+    /// <summary>
+    /// Draws through Direct3D, or returns null if no device is usable.
+    ///
+    /// <para>
+    /// The geometry is uploaded only when <see cref="_sceneVersion"/> moves, so panning and zooming
+    /// cost one constant-buffer write no matter how large the drawing is — which is the entire
+    /// reason this backend exists, and the only way past the full-frame bitmap copy that caps the
+    /// CPU paths at 4K.
+    /// </para>
+    /// </summary>
+    private IReadOnlyList<Shape>? RenderThroughGpuBackend(int width, int height)
+    {
+        _gpuBackend ??= new Rendering.Raster.D3D11RasterBackend();
+
+        if (!_gpuBackend.Initialise())
+        {
+            DoodleSharp.Diagnostics.Journal.Warn("CANVAS.GPU.UNAVAILABLE",
+                "Direct3D backend unavailable; using the CPU rasterizer",
+                _gpuBackend.UnavailableReason ?? "<no reason>");
+            return null;
+        }
+
+        if (_gpuUploadedVersion != _sceneVersion)
+        {
+            _rasterVisibleBuffer.Clear();
+            foreach (var drawable in _currentShapes)
+                if (drawable is Shape shape && shape.IsVisible) _rasterVisibleBuffer.Add(shape);
+
+            _gpuBackend.UploadScene(_rasterVisibleBuffer, _gpuTessellator);
+            _gpuUploadedVersion = _sceneVersion;
+        }
+
+        var bg = _backgroundBrush is SolidColorBrush b
+            ? new Vortice.Mathematics.Color4(b.Color.R / 255f, b.Color.G / 255f, b.Color.B / 255f, 1f)
+            : new Vortice.Mathematics.Color4(0.118f, 0.118f, 0.118f, 1f);
+
+        if (!_gpuBackend.Render(width, height, bg, _viewport.Scale, _viewport.PanX, _viewport.PanY))
+            return null;
+
+        _frameMetrics.AddSegments(_gpuBackend.SegmentCount);
+
+        using (var rdc = _rasterVisual.RenderOpen())
+        {
+            if (_gpuBackend.Output != null)
+                rdc.DrawImage(_gpuBackend.Output, new Rect(0, 0, ActualWidth, ActualHeight));
+        }
+
+        // Text and anything else the GPU sink declines is drawn by the vector layer above -- but
+        // only what is actually on screen. Walking the whole document here meant every label in the
+        // drawing was handed to the text renderer regardless of the viewport, which is both wasteful
+        // and how the font-size overflow above was reached: a label far off screen at extreme zoom
+        // still had its size computed.
+        _gpuDeferred.Clear();
+
+        var view = _viewport.GetVisibleWorldBounds();
+        var pad = 20.0 / Math.Max(_viewport.Scale, ViewportTransform.MinZoom);
+        _sceneIndex.Query(view.Left - pad, view.Top - pad, view.Right + pad, view.Bottom + pad);
+
+        foreach (var slot in _sceneIndex.Visible)
+            if (_sceneIndex.ShapeAt(slot) is VText t && t.IsVisible) _gpuDeferred.Add(t);
+
+        return _gpuDeferred;
+    }
+
+    private readonly List<Shape> _gpuDeferred = new();
 
     /// <summary>Empties the bitmap layer, so switching back to the vector backend leaves nothing behind.</summary>
     private void ClearRasterLayer()

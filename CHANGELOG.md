@@ -49,11 +49,23 @@ tags; this file is the curated, human-friendly summary.
   geometry in step with edits. If you modify a shape's point list in place — rather than
   assigning a new one — call `Invalidate()` so the cache is rebuilt.
 
+- **A Direct3D backend**, off by default and selectable with `RenderBackend: "GPU"`. It
+  uploads the drawing to the graphics card once, so panning and zooming cost the same
+  whether the drawing holds a thousand shapes or a million. It is the only mode that keeps
+  up on a 4K display. If your machine cannot provide a device it quietly uses the software
+  renderer instead and records why.
+- **Exports no longer lose shapes.** Dimensions were missing entirely from DXF files, and
+  radial dimensions produced an empty SVG. Every shape type is now checked, in every format.
+- **A frame-timing readout on F10**, showing where each frame's time goes.
+
+### Fixed (continued)
+- **The application could be crashed by zooming in far enough** on a drawing containing
+  text — the font size passed a limit inside Windows and took the whole process with it.
+
 ### Known limitations
 - The rasterizer draws geometry beneath text, dimensions and annotation rather than in
   strict creation order. On technical drawings this is what you want; if you need exact
   ordering, set `RenderBackend` to `Legacy` in settings.
-- A GPU backend was planned and is **not** included. The adaptive renderer reaches 21 fps
-  on the heaviest benchmark frame; going further needs Direct3D, which cannot be exercised
-  on the GPU-less CI runners that build these releases. Shipping an untestable device path
-  was judged the wrong trade for a first release.
+- Text is still drawn on the CPU in every mode. On a drawing with thousands of labels on
+  screen at once that is the slowest part of a frame, and the Direct3D backend cannot help
+  with it yet.

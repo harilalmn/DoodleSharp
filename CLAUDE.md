@@ -298,6 +298,18 @@ from this fork; a new note takes the next unused number.
     - **An `.ico` whose directory entry disagrees with its payload is not a build error.** The previous one declared 256×256 while the embedded PNG was 2048×2048, and carried no small frames at all; the build succeeded and it would simply have looked wrong on other machines. If you regenerate it, check the headers against the payloads.
     - Rendered to PNG/ICO with a throwaway WPF app built **outside** the repository (note 69) — a second `Main()` under the project root breaks the app's build with a duplicate entry point. `img/logo.png` is the README lockup only and is deliberately **not** a `<Resource>`.
 
+87. **`C2VGeometry/Rendering/` is the one shape-to-primitive type-switch, and exporters fall through to it.** Each exporter keeps its own switch mapping a type to that format's native construct — flattening a circle to sixty-four chords in a DXF would make the file useless in a CAD package — but every one of them now ends in a `default` that tessellates instead of falling off the end. That fall-through was the defect: an unrecognised type produced nothing, no error, no trace, and because the switches were written separately they had drifted to cover different subsets. `Tests/ExporterCoverageTests.cs` walks the real public shape surface by reflection and immediately found that **VDimension was dropped entirely from DXF** and **VRadialDimension produced an SVG with no drawing element**. A reflection guard fails when a new shape type is added without being covered.
+    - **`ShapeTessellator` now decomposes the annotation shapes it used to decline** — `VArrow`, `VDimension`, `VRadialDimension`, `VRay`, `VXLine` — from their own world-space properties. Its return value is **not optional**: a caller that ignores it drops every shape the tessellator declines.
+    - **The dimension label must be a fresh `VText` per call, not a reused one.** Reusing one and mutating it is the obvious optimisation and is wrong: a sink is not obliged to consume text synchronously, and the raster sink defers it to the vector layer holding the reference to end of frame — so every label pointed at the same object and the whole drawing showed a single number. Built inside `Shape.SuspendAutoRegistration()` so it does not land on the canvas.
+
+88. **`D3D11RasterBackend` is the GPU path, and its premise is that navigation costs nothing.** Geometry is uploaded to a vertex buffer **once**, in world coordinates, and a pan or zoom rewrites a single 64-byte constant buffer while the GPU re-transforms and re-clips everything. That is why it is the only backend whose frame time is flat across pan, zoom and idle, and the only one that survives 4K — the two CPU paths copy a full-frame bitmap every frame, 8 MB at 1080p and 33 MB at 2160p, which is over a 60 Hz budget before anything is drawn. `_sceneVersion` on `RenderCanvas` is what tells it the upload is stale; bump it anywhere the shape set changes.
+    - **No `unsafe`, verified by spike before a line of it was written** (the plan required this). Device creation, render targets, `CreateBuffer` from a `ReadOnlySpan<T>`, the DXGI shared handle, the D3D9Ex device opened onto it, and `D3DImage.SetBackBuffer` all work through safe managed APIs. `AllowUnsafeBlocks=false` stands.
+    - **It fails soft, always.** Hardware device, then WARP, then `IsAvailable` goes false with a reason recorded for the journal and the caller uses a CPU path. A device lost at runtime — driver update, sleep/resume, GPU hang — marks it unavailable for the session rather than throwing once a frame. CI runners have no GPU, so `Tests/D3D11BackendTests.cs` asserts the hardware-independent properties always and the rendering ones only when a device actually exists.
+    - **Vortice ships managed-only assemblies** (no `runtimes\win-x64\native`), so they land flat in the build output and each needs its own `installer.iss` line — eight of them.
+    - **Measured at 3840×2160, 100k shapes:** city-grid 2.89–3.91 ms across all three camera paths, meeting the ≤4 ms gate; mixed-cad's worst frame 120.9 ms → 44.9 ms. **The residual is text, not geometry** — that frame has ~2,700 labels going through WPF `FormattedText`. Getting past it needs a glyph atlas on the GPU, which is its own piece of work.
+
+89. **`DrawText` clamps its font size, and must keep doing so.** `FormattedText` throws `ArgumentOutOfRangeException` above roughly 35,791 em, and `text.Height * scale` reaches that by simply zooming far enough in. The exception escapes the render pass and takes the process. A glyph that large fills the viewport many times over, so the clamp costs nothing visible. Found because the GPU path initially deferred *every* text in the document rather than the visible ones — which was a second bug, and the reason an off-screen label was being sized at all.
+
 ## Keyboard Shortcuts (Key Bindings)
 
 ### File/Run
@@ -328,6 +340,7 @@ from this fork; a new note takes the next unused number.
 - `F4` - Toggle Properties panel
 - `F6` - Toggle Global Parameters panel
 - `F9` - Toggle Snap to Grid
+- `F10` - Toggle the frame-timing readout
 - `Ctrl+Shift+M` - Toggle Minimap
 - `Esc` - Cancel current tool
 

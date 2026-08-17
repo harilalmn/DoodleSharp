@@ -37,6 +37,12 @@
     <PackageReference Include="NuGet.Protocol" Version="6.13.2" />
     <PackageReference Include="NuGet.Packaging" Version="6.13.2" />
     <PackageReference Include="PDFsharp" Version="6.1.0" />
+
+    <!-- Optional GPU backend. Managed-only assemblies (no runtimes/native folder), so they land
+         flat in the build output and each needs one explicit installer line. -->
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.Direct3D9" Version="3.8.3" />
+    <PackageReference Include="Vortice.D3DCompiler" Version="3.8.3" />
   </ItemGroup>
 
   <ItemGroup>
