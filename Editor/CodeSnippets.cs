@@ -402,6 +402,17 @@ $1rect.Color = ""$6Yellow"";
 $1rect.FillColor = ""$7DarkGoldenrod"";
 $1rect.Place();$0"),
 
+        ["frame"] = ("Per-frame animation loop (requestAnimationFrame style)",
+@"void $1Tick(double t)
+{
+    // Motion as a function of t stays frame-rate independent.
+    $2circle.Center = new VXYZ(200 * Math.Cos(t), 200 * Math.Sin(t));
+
+    Frame.Request($1Tick);
+}
+
+Frame.Request($1Tick);$0"),
+
         ["vpoly"] = ("Create a polygon",
 @"var $1poly = new VPolygon(
     new VXYZ($20, $30),

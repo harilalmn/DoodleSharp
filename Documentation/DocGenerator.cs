@@ -122,7 +122,8 @@ namespace DoodleSharp.Documentation
                 { "ColorName", "Enum of the same 82 colour names VColor exposes as properties, for when you want a colour as a value you can switch on or store rather than a string: Red, Green, Blue, Yellow, Orange, Purple, Pink, Cyan, Magenta, White, Black, Gray, Brown and the 69 extended names (Coral through YellowGreen). Convert with VColor.FromEnum(ColorName.Crimson), which returns the string that Color and FillColor take." },
 
                 // Animation
-                { "DoodleSharp.Animation", "Contains classes for animating shapes over time. Use the Animator class to manage animation sequencing automatically." },
+                { "DoodleSharp.Animation", "Contains classes for animating shapes over time. Two models: Frame for per-frame callbacks that reschedule themselves (the requestAnimationFrame pattern), and Animator for a finite timeline that can be scrubbed and exported to GIF or video." },
+                { "Frame", "Per-frame callbacks, in the shape JavaScript uses: a function that asks for the next frame. Frame.Request(callback) queues it and returns a handle; call Frame.Request again from inside the callback to keep going, and simply stop asking to end. The callback receives elapsed seconds since the loop started - write motion as a function of that rather than accumulating state and it stays frame-rate independent. Frame.Cancel(handle) removes a queued callback. Requesting during a callback runs on the NEXT frame, never the current one. Use this for open-ended, interactive or procedural motion; use Animator when you need a finite sequence you can scrub or export, which a self-rescheduling callback cannot provide." },
                 { "Animator", "Main class for creating animations. Manages sequencing automatically - animations added with AddToAnimations() play sequentially; pass a List<Animation> for parallel playback. Use Pause(seconds) to insert a time gap between animations. Call Animate() to start, Stop() to end. Properties: Duration (read-only total in seconds), Repeat (default false; when true each animation loops independently on its own duration), Speed (playback multiplier, default 1.0, shared with the toolbar speed slider), Fps (target frame rate, default 60, clamped to 1-120). Adding an animation also places its target on the canvas if it is not already there. Only one Animator plays at a time - Animate() replaces the active timeline, so put every animation into a single Animator." },
                 { "Animation", "Abstract base class for all animations. An animation attaches to one Shape and runs for a fixed Duration in seconds; the timeline feeds it a normalized time t (0 at its start, 1 at its end) which is passed through EasingFunction before being written into the target. Members: Target (the shape, null for ObjectPropertyAnimation), Duration, StartTime (assigned by the Animator when you add it), EasingFunction (defaults to EasingFunctions.Linear; any Func<double,double> works), Name (optional label for the timeline panel track), Apply(t) (called by the timeline, not by you)." },
                 { "DrawAnimation", "Animates the DrawFactor property to progressively draw a shape from 0% to 100%. Constructor: new DrawAnimation(shape, duration). Sets DrawFactor to 0 at construction so the shape stays invisible until its turn; a VGroup target is set recursively so children draw along with it." },
@@ -1697,6 +1698,21 @@ GeometryDiagnostics.Sink = previous;        // put the host's sink back
 // Setting Sink to null discards messages entirely." },
 
                 // Animation
+                { "Frame", @"// A function that asks for the next frame - the JavaScript idiom.
+var circle = new VCircle(new VXYZ(0, 0), 20) { FillColor = ""Cyan"" };
+
+void Tick(double t)
+{
+    // Motion as a function of time, not accumulated state: frame-rate independent,
+    // and it lands in the same place whatever the machine is doing.
+    circle.Center = new VXYZ(200 * Math.Cos(t), 200 * Math.Sin(t));
+
+    if (t < 5.0) Frame.Request(Tick);   // keep going
+    // stop asking, and the loop ends
+}
+
+Frame.Request(Tick);" },
+
                 { "Animator", @"// Create shapes
 var line = new VLine(0, 0, 100, 50);
 var circle = new VCircle(50, 50, 30);
@@ -3475,6 +3491,12 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "ICurve.Place", "Puts the curve on the canvas and keeps it there. Declared on IDrawable, which ICurve extends, so the recommended name is reachable through an ICurve reference and not only through Shape. Exactly equivalent to Draw()." },
                 { "ICurve.Draw", "The historical name for Place(), and exactly equivalent to it. Declared on IDrawable, which ICurve extends." },
                 { "ICurve.Intersect", "Computes intersection with another curve, returning an IntersectionResult with points and overlapping segments." },
+
+                // Frame
+                { "Frame.Request", "Queues a callback for the next frame and returns a handle. The Action<double> overload receives elapsed seconds since the loop started; the Action overload is for callbacks that do not need it. Call it again from inside the callback to keep the loop running - that request lands on the next frame, not the current one, so the function does not re-enter itself. Requesting the same method twice queues it twice, as in JavaScript." },
+                { "Frame.Cancel", "Removes a callback queued by Request, using the handle it returned. Unknown or already-run handles are ignored, so cancelling twice is safe." },
+                { "Frame.Clear", "Drops every queued callback. Called automatically before each run, so a script never inherits the previous run's loops." },
+                { "Frame.HasPending", "True while at least one callback is queued." },
 
                 // Animator
                 { "Animator.Duration", "Gets the total duration of all animations in seconds — the end of the last animation added, gaps from Pause() included. Read-only; it extends automatically as you add animations." },

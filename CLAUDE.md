@@ -310,6 +310,12 @@ from this fork; a new note takes the next unused number.
 
 89. **`DrawText` clamps its font size, and must keep doing so.** `FormattedText` throws `ArgumentOutOfRangeException` above roughly 35,791 em, and `text.Height * scale` reaches that by simply zooming far enough in. The exception escapes the render pass and takes the process. A glyph that large fills the viewport many times over, so the clamp costs nothing visible. Found because the GPU path initially deferred *every* text in the document rather than the visible ones — which was a second bug, and the reason an off-screen label was being sized at all.
 
+90. **`Animation/Frame.cs` is the requestAnimationFrame model, and it does not replace the timeline.** `Frame.Request(callback)` queues a callback for the next frame; the callback re-requests to keep going and stops asking to end. It exists because composing an `Animator` and adding `Animation` objects to it is a lot of ceremony for "move this a bit each frame". **The timeline stays** because `Animation.Apply(double t)` is a pure function of normalised time, which is what makes it *seekable* — `timeline.Update(t)` is called from six places, including the `TimelinePanel` scrub bar and both the GIF and MP4 exporters, which render the drawing at time T without playing up to it. A self-rescheduling callback is stateful and forward-only and can never offer that.
+    - **Two queues, swapped each pump.** A callback that calls `Request` during the pump must run on the *next* frame. Draining one list in place re-enters the callback forever and hangs the UI thread — which is the entire self-rescheduling idiom, so this is not an edge case.
+    - **`Frame.Clear()` must run before every execution, and `ModuleCompiler` does it.** User code is compiled into a collectible `AssemblyLoadContext`; a delegate left queued points into that assembly and pins it, so the context never unloads and the previous run's callbacks keep firing against shapes the new run has replaced.
+    - **A throwing callback stops the loop.** User code runs in-process; an exception reaching WPF's dispatcher sixty times a second takes the application down. The host reports it to the console instead.
+    - The pump re-indexes before repainting, for the same reason the timeline branch does: callbacks mutate shapes in place, so the cull index holds stale boxes. Its clock is separate from `_animationStopwatch`, which starts and stops with timeline playback — a self-rescheduling callback has no notion of being paused.
+
 ## Keyboard Shortcuts (Key Bindings)
 
 ### File/Run

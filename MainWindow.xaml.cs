@@ -98,6 +98,13 @@ public partial class MainWindow : Window
 
     // Animation
     private System.Diagnostics.Stopwatch _animationStopwatch = new();
+
+    /// <summary>
+    /// Free-running clock for frame callbacks. Separate from <see cref="_animationStopwatch"/>,
+    /// which starts and stops with timeline playback — a self-rescheduling callback has no notion
+    /// of being paused, so it needs a clock that never stops.
+    /// </summary>
+    private readonly System.Diagnostics.Stopwatch _frameLoopClock = new();
     private double _lastAnimationFrameTime = -1;
 
     // Peek Definition popup
@@ -315,6 +322,16 @@ public partial class MainWindow : Window
         };
 
         // Animation Loop — uses CompositionTarget.Rendering for vsync-aligned frames
+        // Frame callbacks get their timestamp from here rather than from the timeline's stopwatch,
+        // which starts and stops with playback.
+        _frameLoopClock.Restart();
+        DoodleSharp.Animation.Frame.CallbackFailed += ex =>
+        {
+            Console.ConsoleOutput.Instance.WriteError("Animation", 0,
+                $"Frame callback threw; the loop has been stopped. {ex.GetType().Name}: {ex.Message}");
+            Console.ConsoleOutput.Instance.Flush();
+        };
+
         bool _needsInitialZoom = true;
         TimeSpan _lastRenderTime = TimeSpan.Zero;
         CompositionTarget.Rendering += (s, e) =>
@@ -360,6 +377,20 @@ public partial class MainWindow : Window
 
                 UpdateAnimationControlsVisibility();
                 return;
+            }
+
+            // ── Frame callbacks (the requestAnimationFrame model) ──
+            // Independent of the timeline: a Main()-mode script can drive motion by rescheduling a
+            // callback, without composing an Animator.
+            if (DoodleSharp.Animation.Frame.HasPending)
+            {
+                if (DoodleSharp.Animation.Frame.Pump(_frameLoopClock.Elapsed.TotalSeconds))
+                {
+                    // Callbacks mutate shapes in place, so the cull index holds stale boxes --
+                    // same reason the timeline branch below re-indexes.
+                    RenderCanvas.ReindexForAnimationFrame();
+                    RenderCanvas.Refresh();
+                }
             }
 
             var timeline = CanvasRenderer.Instance.ActiveTimeline;

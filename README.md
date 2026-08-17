@@ -1579,7 +1579,49 @@ and `NormalizeAngleDegrees(degrees)` into `[0, 360)`.
 
 ## Animation System
 
-DoodleSharp includes an animation system using the `Animator` class for creating animated visualizations with automatic sequencing.
+There are two ways to animate, and they answer different questions.
+
+### Frame callbacks — the `requestAnimationFrame` pattern
+
+For open-ended, interactive or procedural motion, write a function that asks for the next frame:
+
+```csharp
+var circle = new VCircle(new VXYZ(0, 0), 20) { FillColor = "Cyan" };
+
+void Tick(double t)
+{
+    circle.Center = new VXYZ(200 * Math.Cos(t), 200 * Math.Sin(t));
+    Frame.Request(Tick);        // keep going
+}
+
+Frame.Request(Tick);            // start
+```
+
+That is the whole API. `Frame.Request` returns a handle you can pass to `Frame.Cancel`, and the
+loop ends the moment you stop asking. The callback receives **elapsed seconds since the loop
+started** — the same timestamp JavaScript passes. Write motion as a function of that rather than
+accumulating state (`x += 1`) and it stays frame-rate independent: the shape reaches the same place
+whether the machine is managing 144 fps or 30.
+
+A request made *inside* a callback runs on the **next** frame, never the current one, so the
+function does not re-enter itself.
+
+| | |
+|---|---|
+| `Frame.Request(callback)` | queue for the next frame; returns a handle |
+| `Frame.Cancel(handle)` | remove a queued callback |
+| `Frame.HasPending` | whether a loop is running |
+
+If a callback throws, the loop stops and the error goes to the console rather than repeating sixty
+times a second.
+
+### Timelines — for a finite sequence
+
+The `Animator` class builds a **seekable** timeline, which is what the scrub bar, GIF export and
+video export are built on: they render the drawing *at time T* without having to play up to it. A
+self-rescheduling callback cannot do that, because it is stateful and forward-only. So reach for
+`Animator` when you want a defined sequence you can scrub and export, and `Frame` when you want
+motion that simply runs.
 
 > **Note**: The animation timeline panel is automatically hidden when your code has no animations. It appears automatically when you run code that creates animations.
 

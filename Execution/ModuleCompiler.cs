@@ -123,6 +123,11 @@ public class ModuleCompiler
             // we compile a fresh user assembly; otherwise the prior context would leak.
             DoodleSharp.Sketching.SketchRuntime.Instance.Stop();
 
+            // Frame callbacks hold delegates into the user assembly. Left queued, they pin the
+            // collectible load context so it never unloads, and the previous run's callbacks keep
+            // firing against shapes this run has already replaced.
+            DoodleSharp.Animation.Frame.Clear();
+
             // Clear previous shapes and console
             CanvasRenderer.Instance.Clear();
             ConsoleOutput.Instance.Clear();
