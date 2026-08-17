@@ -2417,6 +2417,31 @@ surgically, leaving `min:`/`max:`/`group:` and your undo history intact — and 
 
 ---
 
+## Window Layout
+
+Every panel — Canvas, Console, Find Results, Timeline, Explorer, Outliner, Properties and Global
+Parameters — is a tool window you can rearrange. Drag one by its title bar and **guide diamonds**
+appear showing where it can land: against any edge, or into a tab group with another panel. Drop it
+outside the window and it floats, so it can live on a second monitor. Code and Settings are document
+tabs in the middle.
+
+The arrangement most people want on two screens — the code editor on one, the canvas and console on
+the other — is a matter of dragging the canvas out and moving it across.
+
+Your layout is remembered between sessions, including which monitor a floating panel was on. A panel
+left on a monitor that is no longer attached comes back onto the desktop rather than being stranded
+off-screen.
+
+| Action | How |
+|--------|-----|
+| Show or hide a panel | **Windows** menu |
+| Float a panel | Drag its title bar out of the window, or use its ▾ menu |
+| Dock it back | Drag it over a guide diamond |
+| Tab two panels together | Drop one onto the centre diamond of the other |
+| Restore the default layout | **View ▸ Reset Layout** (`Ctrl+R`) |
+
+If a layout ever misbehaves, deleting `%APPDATA%\DoodleSharp\layout.xml` restores the default.
+
 ## Canvas Features
 
 ### Interactive Controls
@@ -3337,6 +3362,11 @@ XY direction returns `null` / `false` rather than throwing.
 |----------|--------|
 | `F5` | Run code |
 | `Ctrl+Enter` | Run code |
+
+### Layout
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+R` | Reset Layout — restores the default panel arrangement |
 
 ### File Operations
 | Shortcut | Action |
