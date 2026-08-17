@@ -22,7 +22,7 @@ public class DiskRefreshTests : IDisposable
 
     public DiskRefreshTests()
     {
-        _dir = Path.Combine(Path.GetTempPath(), "C2VDiskRefresh_" + Guid.NewGuid().ToString("N"));
+        _dir = Path.Combine(Path.GetTempPath(), "dsDiskRefresh_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dir);
     }
 

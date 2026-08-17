@@ -26,7 +26,7 @@ DoodleSharp is a visual programming environment that lets you write C# code to c
 - **Export Options**: Save visualizations as PNG images, animated GIFs, or MP4 videos
 - **Project Management**: Organize multiple code files into projects with tabbed editing, drag-and-drop file organization, and "Go to Location" to open files in Windows Explorer
 - **Auto Save**: Optionally write every modified file to disk on a timer, with a prompt to pick a location if the project has never been saved
-- **Diagnostic Journals**: Every session writes a detailed, crash-proof journal to `%TEMP%\C2V` — machine and GPU details, every file opened, every run, and full exception chains — so a crash on any machine can be diagnosed from one file. See [Diagnostic Journals](#diagnostic-journals)
+- **Diagnostic Journals**: Every session writes a detailed, crash-proof journal to `%TEMP%\DoodleSharp` — machine and GPU details, every file opened, every run, and full exception chains — so a crash on any machine can be diagnosed from one file. See [Diagnostic Journals](#diagnostic-journals)
 - **NuGet Integration**: Add external packages to extend functionality
 - **Built-in Help**: Comprehensive API documentation with examples
 - **Code Minimap**: VSCode-style minimap with syntax coloring, viewport indicator, and error marker navigation
@@ -3785,7 +3785,7 @@ dotnet run
 
 ## Diagnostic Journals
 
-DoodleSharp records what it is doing to **`%TEMP%\C2V\YYYYMMDDhhmmss.log`** — one file
+DoodleSharp records what it is doing to **`%TEMP%\DoodleSharp\YYYYMMDDhhmmss.log`** — one file
 per run, opened before the first window appears and written continuously until the process ends.
 The point is crash diagnosis: if the app dies on any machine, that one file should be enough to
 find out why.
@@ -3817,13 +3817,13 @@ Records are flushed as they are written, so even a failure .NET cannot catch (st
 access violation) leaves the last thing the app did on disk.
 
 **Sending a journal**: `Help > Open Diagnostic Journals` opens the folder;
-`Help > Copy Current Journal Path` copies this session's path. `%TEMP%\C2V\crashes.txt` lists the
+`Help > Copy Current Journal Path` copies this session's path. `%TEMP%\DoodleSharp\crashes.txt` lists the
 sessions that ended abnormally, so you know which file to send. Journals are kept for 30 days
 (60 files max) and never leave the machine on their own.
 
-**Turning it off / tuning it**: `C2V_JOURNAL=0` disables it, `C2V_JOURNAL_LEVEL=Info` reduces the
-detail, `C2V_JOURNAL_SYNC=1` writes through to disk (survives a BSOD, slower), and
-`C2V_JOURNAL_DIR=<path>` changes the folder.
+**Turning it off / tuning it**: `DOODLESHARP_JOURNAL=0` disables it, `DOODLESHARP_JOURNAL_LEVEL=Info` reduces the
+detail, `DOODLESHARP_JOURNAL_SYNC=1` writes through to disk (survives a BSOD, slower), and
+`DOODLESHARP_JOURNAL_DIR=<path>` changes the folder.
 
 Full reference, including how to read a journal and how to add instrumentation:
 [`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md).
@@ -3835,7 +3835,7 @@ Full reference, including how to read a journal and how to add instrumentation:
 - **Built-in Help**: Help > API Reference (F1) opens comprehensive documentation
 - **Welcome Page**: The Help window shows a getting-started guide by default
 - **Console Output**: Use `VizConsole.Log()` for debugging
-- **Diagnostic Journals**: Help > Open Diagnostic Journals (`%TEMP%\C2V`) — send the journal file when reporting a crash
+- **Diagnostic Journals**: Help > Open Diagnostic Journals (`%TEMP%\DoodleSharp`) — send the journal file when reporting a crash
 
 ---
 

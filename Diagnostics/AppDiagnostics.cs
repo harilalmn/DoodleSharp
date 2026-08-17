@@ -307,7 +307,7 @@ public static class AppDiagnostics
             _thread = new Thread(Loop)
             {
                 IsBackground = true,
-                Name = "C2V.UiWatchdog",
+                Name = "DoodleSharp.UiWatchdog",
                 Priority = ThreadPriority.BelowNormal
             };
             _thread.Start();

@@ -8,7 +8,7 @@ namespace DoodleSharp.Tests;
 
 /// <summary>
 /// Behavioural tests for the crash journal. They run against a temp folder via the
-/// <c>C2V_JOURNAL_DIR</c> override rather than the real <c>%TEMP%\C2V</c>.
+/// <c>DOODLESHARP_JOURNAL_DIR</c> override rather than the real <c>%TEMP%\DoodleSharp</c>.
 ///
 /// <para>
 /// <see cref="Journal"/> is process-global and starts exactly once, so these tests share one session
@@ -22,8 +22,8 @@ public class JournalTests : IDisposable
 
     public JournalTests()
     {
-        _directory = Path.Combine(Path.GetTempPath(), "C2V_tests_" + Guid.NewGuid().ToString("N")[..8]);
-        Environment.SetEnvironmentVariable("C2V_JOURNAL_DIR", _directory);
+        _directory = Path.Combine(Path.GetTempPath(), "ds_tests_" + Guid.NewGuid().ToString("N")[..8]);
+        Environment.SetEnvironmentVariable("DOODLESHARP_JOURNAL_DIR", _directory);
         Journal.ResetDirectoryCache();
         Journal.Start("DoodleSharp.Tests");
     }
@@ -31,7 +31,7 @@ public class JournalTests : IDisposable
     public void Dispose()
     {
         Journal.Flush();
-        Environment.SetEnvironmentVariable("C2V_JOURNAL_DIR", null);
+        Environment.SetEnvironmentVariable("DOODLESHARP_JOURNAL_DIR", null);
     }
 
     private string ReadJournal()

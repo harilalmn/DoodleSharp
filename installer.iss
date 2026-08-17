@@ -13,8 +13,8 @@
 #define SampleProjects "Sample Projects"
 
 [Setup]
-; Fresh AppId — DoodleSharp is a separate product from Code2Viz, so it must not
-; upgrade-in-place over an existing Code2Viz installation.
+; DoodleSharp's own AppId. Changing it would make an installer upgrade-in-place over a
+; different product, so it stays fixed for the life of the application.
 AppId={{B3617608-7E68-45D8-B548-DA5681B286A9}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}

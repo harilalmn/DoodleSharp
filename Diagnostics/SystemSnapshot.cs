@@ -232,7 +232,7 @@ public static class SystemSnapshot
         try
         {
             // Deliberately a whitelist: the full environment is large and can carry secrets.
-            var prefixes = new[] { "C2V_", "ANIMATOR_", "DOTNET_", "COMPlus_" };
+            var prefixes = new[] { "DOODLESHARP_", "DOTNET_", "COMPlus_" };
             foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
             {
                 var key = entry.Key?.ToString();

@@ -20,7 +20,7 @@ public class DiagnosticRangeTests : IDisposable
 
     public DiagnosticRangeTests()
     {
-        _dir = Path.Combine(Path.GetTempPath(), "C2V_diag_" + Guid.NewGuid().ToString("N")[..8]);
+        _dir = Path.Combine(Path.GetTempPath(), "ds_diag_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_dir);
     }
 

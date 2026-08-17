@@ -12,12 +12,13 @@ tags; this file is the curated, human-friendly summary.
 ## [2026.8.0] - 2026-08-17
 
 ### Added
-- **DoodleSharp**, a WPF environment for drawing 2D geometry by writing C#. It began as a
-  fork of Code2Viz 2026.8.7 and keeps that application whole: the Roslyn-powered editor
-  with IntelliSense and refactoring, the interactive canvas with drawing and measuring
-  tools, the `C2VGeometry` shape library, charts, boolean operations and regions, the
-  animation timeline, Global Parameters, the properties panel, undo/redo, PNG/GIF/MP4/DXF/
-  PDF/SVG export, NuGet integration, F1 help, and the crash journals.
+- **DoodleSharp** — write C#, watch the geometry appear. A Roslyn-powered editor with
+  IntelliSense, refactoring and live diagnostics, beside an interactive canvas with drawing,
+  snapping and measuring tools. The `C2VGeometry` shape library underneath: shapes and
+  curves, charts, boolean operations, curve-bounded regions, hatches, dimensions and text.
+  Plus a timeline animation system, Global Parameters you can tune live, a properties panel,
+  undo/redo, export to PNG/GIF/MP4/DXF/PDF/SVG, NuGet package support, F1 help, and
+  crash journals for when something does go wrong.
 - **A new renderer.** Drawings that used to crawl now stay responsive. On a 100,000-shape
   benchmark, the worst frame of a mixed CAD drawing went from 107 ms (9 fps) to 49 ms
   (21 fps), a dense hatched drawing from 1,038 ms to 4 ms, and clicking to select from
@@ -43,24 +44,10 @@ tags; this file is the curated, human-friendly summary.
 - **Rotation animations, dimensions and infinite construction lines** are all drawn
   correctly by the new renderer; several were previously dropped or mis-clipped.
 
-### Changed
-- Renamed throughout: the application, its assembly, its solution and its `DoodleSharp.*`
-  namespaces. **The geometry library is unchanged** — it is still `C2VGeometry`, with the
-  same namespace and the same public API, so an existing sketch or `.vizproj` compiles as
-  it did before.
-- The installer registers a new application id, so DoodleSharp installs alongside an
-  existing Code2Viz rather than upgrading over it.
+### Notes for anyone writing sketches
 - `Shape` gained a `Revision` counter and an `Invalidate()` method, used to keep cached
-  geometry in step. If you modify a shape's point list in place — rather than assigning a
-  new one — call `Invalidate()` so the cache is rebuilt.
-
-### Removed
-- **The Animator sub-application** (`Animator.exe`) and its `SketchHost` process-isolation
-  child. With it go the *Switch to Animator* button, the welcome screen's Code/Animate mode
-  toggle, and the recent-animations list. Sketch mode inside the main app is untouched.
-- **The Blazor web app** and its Cloudflare Pages deployment workflow.
-- **The MCP server and bridge** — the named-pipe listener that let an external agent drive
-  the application is gone, along with its skill and API-reference documents.
+  geometry in step with edits. If you modify a shape's point list in place — rather than
+  assigning a new one — call `Invalidate()` so the cache is rebuilt.
 
 ### Known limitations
 - The rasterizer draws geometry beneath text, dimensions and annotation rather than in

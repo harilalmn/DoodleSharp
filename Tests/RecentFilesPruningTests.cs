@@ -15,7 +15,7 @@ public class RecentFilesPruningTests
     [Fact]
     public void GetRecentProjects_OmitsFilesDeletedAfterLoad()
     {
-        var temp = Path.Combine(Path.GetTempPath(), $"c2v_test_{Path.GetRandomFileName()}.vizproj");
+        var temp = Path.Combine(Path.GetTempPath(), $"ds_test_{Path.GetRandomFileName()}.vizproj");
         File.WriteAllText(temp, "{}");
         try
         {

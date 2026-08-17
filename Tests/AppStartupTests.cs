@@ -14,7 +14,7 @@ public class AppStartupTests : IDisposable
 
     public AppStartupTests()
     {
-        _dir = Path.Combine(Path.GetTempPath(), "C2V_args_" + Guid.NewGuid().ToString("N")[..8]);
+        _dir = Path.Combine(Path.GetTempPath(), "ds_args_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_dir);
     }
 

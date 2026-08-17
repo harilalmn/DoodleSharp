@@ -23,7 +23,7 @@ public class RefactoringProviderTests : IDisposable
 
     public RefactoringProviderTests()
     {
-        _dir = Path.Combine(Path.GetTempPath(), "C2V_refactor_" + Guid.NewGuid().ToString("N")[..8]);
+        _dir = Path.Combine(Path.GetTempPath(), "ds_refactor_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_dir);
     }
 

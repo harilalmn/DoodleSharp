@@ -20,7 +20,7 @@ public enum JournalLevel
 
 /// <summary>
 /// Crash-forensics journal. Writes a flushed, line-oriented log to
-/// <c>%TEMP%\C2V\YYYYMMDDhhmmss.log</c> for the lifetime of the process.
+/// <c>%TEMP%\DoodleSharp\YYYYMMDDhhmmss.log</c> for the lifetime of the process.
 ///
 /// <para>
 /// Design constraints, in order of importance:
@@ -42,17 +42,17 @@ public enum JournalLevel
 ///
 /// <para>Environment overrides (read once, at <see cref="Start"/>):
 /// <list type="bullet">
-///   <item><c>C2V_JOURNAL=0</c> — disable journaling entirely.</item>
-///   <item><c>C2V_JOURNAL_LEVEL=Trace|Debug|Info|Warn|Error|Fatal</c> — minimum level (default Debug).</item>
-///   <item><c>C2V_JOURNAL_SYNC=1</c> — write-through to disk (survives a machine-level crash/BSOD; slower).</item>
-///   <item><c>C2V_JOURNAL_DIR=&lt;path&gt;</c> — override the journal folder (used by tests).</item>
+///   <item><c>DOODLESHARP_JOURNAL=0</c> — disable journaling entirely.</item>
+///   <item><c>DOODLESHARP_JOURNAL_LEVEL=Trace|Debug|Info|Warn|Error|Fatal</c> — minimum level (default Debug).</item>
+///   <item><c>DOODLESHARP_JOURNAL_SYNC=1</c> — write-through to disk (survives a machine-level crash/BSOD; slower).</item>
+///   <item><c>DOODLESHARP_JOURNAL_DIR=&lt;path&gt;</c> — override the journal folder (used by tests).</item>
 /// </list>
 /// </para>
 /// </summary>
 public static class Journal
 {
     /// <summary>Folder created under the current user's temp directory.</summary>
-    public const string FolderName = "C2V";
+    public const string FolderName = "DoodleSharp";
 
     private const long DefaultMaxFileBytes = 64L * 1024 * 1024;
     private const int MaxRetainedFiles = 60;
@@ -82,7 +82,7 @@ public static class Journal
     /// <summary>Full path of the journal file for this session, or null when disabled.</summary>
     public static string? FilePath { get; private set; }
 
-    /// <summary>The folder journals are written to (<c>%TEMP%\C2V</c> unless overridden).</summary>
+    /// <summary>The folder journals are written to (<c>%TEMP%\DoodleSharp</c> unless overridden).</summary>
     public static string Directory => _directory ??= ResolveDirectory();
     private static string? _directory;
 
@@ -108,12 +108,12 @@ public static class Journal
 
             try
             {
-                if (string.Equals(Environment.GetEnvironmentVariable("C2V_JOURNAL"), "0", StringComparison.Ordinal))
+                if (string.Equals(Environment.GetEnvironmentVariable("DOODLESHARP_JOURNAL"), "0", StringComparison.Ordinal))
                     return;
 
                 _appName = string.IsNullOrWhiteSpace(appName) ? "DoodleSharp" : appName;
 
-                var levelText = Environment.GetEnvironmentVariable("C2V_JOURNAL_LEVEL");
+                var levelText = Environment.GetEnvironmentVariable("DOODLESHARP_JOURNAL_LEVEL");
                 if (!string.IsNullOrWhiteSpace(levelText) &&
                     Enum.TryParse<JournalLevel>(levelText, ignoreCase: true, out var configured))
                 {
@@ -124,7 +124,7 @@ public static class Journal
                 System.IO.Directory.CreateDirectory(dir);
 
                 var stamp = DateTime.Now.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
-                var writeThrough = string.Equals(Environment.GetEnvironmentVariable("C2V_JOURNAL_SYNC"), "1", StringComparison.Ordinal);
+                var writeThrough = string.Equals(Environment.GetEnvironmentVariable("DOODLESHARP_JOURNAL_SYNC"), "1", StringComparison.Ordinal);
                 var options = writeThrough ? FileOptions.WriteThrough : FileOptions.None;
 
                 // Two processes (two copies of the app) can start inside the same
@@ -473,13 +473,13 @@ public static class Journal
 
     private static string ResolveDirectory()
     {
-        var overridden = Environment.GetEnvironmentVariable("C2V_JOURNAL_DIR");
+        var overridden = Environment.GetEnvironmentVariable("DOODLESHARP_JOURNAL_DIR");
         return !string.IsNullOrWhiteSpace(overridden)
             ? overridden
             : Path.Combine(Path.GetTempPath(), FolderName);
     }
 
-    /// <summary>Test hook: forget the cached folder so <c>C2V_JOURNAL_DIR</c> is re-read.</summary>
+    /// <summary>Test hook: forget the cached folder so <c>DOODLESHARP_JOURNAL_DIR</c> is re-read.</summary>
     internal static void ResetDirectoryCache() => _directory = null;
 
     private static void WriteHeader(string[]? args, bool writeThrough)

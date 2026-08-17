@@ -19,7 +19,7 @@ public class EditorWorkspaceTests : IDisposable
 
     public EditorWorkspaceTests()
     {
-        _dir = Path.Combine(Path.GetTempPath(), "C2V_ws_" + Guid.NewGuid().ToString("N")[..8]);
+        _dir = Path.Combine(Path.GetTempPath(), "ds_ws_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_dir);
     }
 

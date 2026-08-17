@@ -539,7 +539,7 @@
                             Click="OpenDiagnosticsFolderMenuItem_Click"
                             Header="Open _Diagnostic Journals"
                             Style="{StaticResource MenuItemStyle}"
-                            ToolTip="Opens %TEMP%\C2V, where crash journals are written." />
+                            ToolTip="Opens %TEMP%\DoodleSharp, where crash journals are written." />
                         <MenuItem
                             Click="CopyJournalPathMenuItem_Click"
                             Header="Copy Current _Journal Path"

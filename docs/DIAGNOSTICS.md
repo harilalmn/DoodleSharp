@@ -1,7 +1,7 @@
 # Diagnostic Journals
 
 DoodleSharp writes a detailed journal of everything it does to
-**`%TEMP%\C2V`** (typically `C:\Users\<you>\AppData\Local\Temp\C2V`). The journal exists so that a
+**`%TEMP%\DoodleSharp`** (typically `C:\Users\<you>\AppData\Local\Temp\DoodleSharp`). The journal exists so that a
 crash on any machine can be diagnosed from a single file the user sends back.
 
 - One file per application run, named with the start time: **`YYYYMMDDhhmmss.log`**.
@@ -14,7 +14,7 @@ snapshot first). **Help > Copy Current Journal Path** puts this session's file p
 
 ## Which file do I send?
 
-Open `%TEMP%\C2V\crashes.txt`. Each launch appends a line for any earlier session that ended
+Open `%TEMP%\DoodleSharp\crashes.txt`. Each launch appends a line for any earlier session that ended
 abnormally, naming the file:
 
 ```
@@ -146,10 +146,10 @@ Journaling is on by default and needs no setup. Environment variables, read once
 
 | Variable | Effect |
 |---|---|
-| `C2V_JOURNAL=0` | Disable journaling entirely |
-| `C2V_JOURNAL_LEVEL=Trace\|Debug\|Info\|Warn\|Error\|Fatal` | Minimum level (default `Debug`) |
-| `C2V_JOURNAL_SYNC=1` | Write through to disk instead of the OS cache — survives a BSOD or power loss, at a real cost in speed |
-| `C2V_JOURNAL_DIR=<path>` | Write journals somewhere other than `%TEMP%\C2V` |
+| `DOODLESHARP_JOURNAL=0` | Disable journaling entirely |
+| `DOODLESHARP_JOURNAL_LEVEL=Trace\|Debug\|Info\|Warn\|Error\|Fatal` | Minimum level (default `Debug`) |
+| `DOODLESHARP_JOURNAL_SYNC=1` | Write through to disk instead of the OS cache — survives a BSOD or power loss, at a real cost in speed |
+| `DOODLESHARP_JOURNAL_DIR=<path>` | Write journals somewhere other than `%TEMP%\DoodleSharp` |
 
 Housekeeping is automatic: files older than 30 days are deleted, at most 60 are kept, and a single
 journal is capped at 64 MB.
