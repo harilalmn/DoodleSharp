@@ -125,8 +125,13 @@ $changelogPath = "CHANGELOG.md"
 if (Test-Path $changelogPath) {
     $changelog = Read-Utf8 $changelogPath
 
-    # Everything between "## [Unreleased]" and the next "## [" heading.
-    $unreleased = [regex]::Match($changelog, '(?ms)^## \[Unreleased\]\s*(.*?)(?=^## \[)')
+    # Everything between "## [Unreleased]" and the next "## [" heading -- or the end of the file.
+    #
+    # The end-of-file alternative matters for the FIRST release of a repository, where there is no
+    # earlier version section to anchor against. Without it the match simply fails, the script warns
+    # and moves on, and the release ships with its notes still sitting under [Unreleased]. That is
+    # exactly what happened to v2026.8.0.
+    $unreleased = [regex]::Match($changelog, '(?ms)^## \[Unreleased\]\s*(.*?)(?=^## \[|\z)')
 
     if (-not $unreleased.Success) {
         Write-Warning "CHANGELOG.md has no [Unreleased] section to stamp - leaving it alone."

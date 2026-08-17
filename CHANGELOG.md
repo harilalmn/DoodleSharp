@@ -9,6 +9,8 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+## [2026.8.0] - 2026-08-17
+
 ### Added
 - **DoodleSharp**, a WPF environment for drawing 2D geometry by writing C#. It began as a
   fork of Code2Viz 2026.8.7 and keeps that application whole: the Roslyn-powered editor
