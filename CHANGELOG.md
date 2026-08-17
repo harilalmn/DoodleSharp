@@ -9,7 +9,12 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
-## [2026.8.1] - 2026-08-17
+## [2026.8.2] - 2026-08-17
+
+> `2026.8.1` was tagged but never published: `installer.iss` had been left unparseable by an earlier
+> commit, so the release build aborted at the Inno Setup step. Nothing reads that file until a release
+> runs, which is why it went unnoticed. These are that release's notes, shipped as `2026.8.2` along
+> with the installer fix and a test that now validates the script on every build.
 
 ### Added
 - **Direct3D 11 render backend.** Geometry is uploaded to the GPU once, in world coordinates, so
