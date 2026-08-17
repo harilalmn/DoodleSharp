@@ -98,6 +98,9 @@ public class RenderCanvas : FrameworkElement
 
     private List<IDrawable> _currentShapes = new();
     private readonly DrawingVisual _visual;
+    private readonly DrawingVisual _rasterVisual;
+    private readonly Rendering.Raster.ManagedRasterBackend _rasterBackend = new();
+    private readonly List<Shape> _rasterVisibleBuffer = new();
     private readonly DoodleSharp.Rendering.SceneIndex _sceneIndex = new();
     private readonly DoodleSharp.Rendering.FrameMetrics _frameMetrics =
         DoodleSharp.Rendering.FrameMetrics.Instance;
@@ -215,6 +218,14 @@ public class RenderCanvas : FrameworkElement
         _backgroundBrush = new SolidColorBrush(Color.FromRgb(30, 30, 30));
         _backgroundBrush.Freeze();
 
+        // Two layers, bottom first. The raster layer holds the bitmap the managed backend writes
+        // hairline geometry into; the vector layer above it holds text, dimensions, chrome and every
+        // overlay. When the raster backend is off, the raster layer simply stays empty and the
+        // vector layer is the whole renderer, exactly as before.
+        _rasterVisual = new DrawingVisual();
+        AddVisualChild(_rasterVisual);
+        AddLogicalChild(_rasterVisual);
+
         _visual = new DrawingVisual();
         AddVisualChild(_visual);
         AddLogicalChild(_visual);
@@ -320,14 +331,16 @@ public class RenderCanvas : FrameworkElement
         }
     }
 
-    // Required overrides for hosting DrawingVisual
-    protected override int VisualChildrenCount => 1;
+    // Required overrides for hosting DrawingVisual. Index order is z-order: the raster layer is
+    // drawn first and the vector layer composites over it.
+    protected override int VisualChildrenCount => 2;
 
-    protected override Visual GetVisualChild(int index)
+    protected override Visual GetVisualChild(int index) => index switch
     {
-        if (index != 0) throw new ArgumentOutOfRangeException(nameof(index));
-        return _visual;
-    }
+        0 => _rasterVisual,
+        1 => _visual,
+        _ => throw new ArgumentOutOfRangeException(nameof(index)),
+    };
 
     private void OnSizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -772,12 +785,18 @@ public class RenderCanvas : FrameworkElement
     private void RedrawAll()
     {
         _frameMetrics.BeginFrame();
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var wasRaster = _rasterActive;
         try
         {
             RedrawAllCore();
         }
         finally
         {
+            watch.Stop();
+            // Only a vector frame tells us what the vector path costs. Timing a raster frame and
+            // feeding it back would measure the wrong renderer and latch the choice permanently.
+            if (!wasRaster) _lastVectorFrameMs = watch.Elapsed.TotalMilliseconds;
             _frameMetrics.EndFrame();
         }
     }
@@ -789,8 +808,15 @@ public class RenderCanvas : FrameworkElement
         if (ActualWidth <= 0 || ActualHeight <= 0)
             return;
 
-        // Draw background
-        dc.DrawRectangle(_backgroundBrush, null, new Rect(0, 0, ActualWidth, ActualHeight));
+        // Decide the backend before anything is painted, because it changes who owns the
+        // background. The raster layer sits *beneath* the vector one, so if the vector layer also
+        // filled an opaque background it would hide the bitmap completely — which is exactly what
+        // happened the first time: the rasterised geometry vanished and only the grid and the
+        // WPF-drawn text remained visible.
+        var useRaster = ShouldUseRasterBackend();
+
+        if (!useRaster)
+            dc.DrawRectangle(_backgroundBrush, null, new Rect(0, 0, ActualWidth, ActualHeight));
 
         if (_showGrid)
         {
@@ -829,8 +855,45 @@ public class RenderCanvas : FrameworkElement
         _frameMetrics.BeginStage(Rendering.FrameStage.Raster);
         var lodScale = _viewport.Scale;
 
+        // Raster backend: hairline geometry goes into the bitmap layer beneath, and only what it
+        // declines — text, dimensions, arrows, infinite lines — continues through the vector path
+        // below. Overlays and chrome are always vector.
+        IReadOnlyList<Shape>? rasterDeferred = null;
+
+        if (useRaster)
+        {
+            rasterDeferred = RenderThroughRasterBackend(lodScale);
+        }
+        else
+        {
+            ClearRasterLayer();
+        }
+
+        if (rasterDeferred != null)
+        {
+            for (int i = 0; i < rasterDeferred.Count; i++)
+            {
+                try { DispatchShapeDraw(dc, rasterDeferred[i]); }
+                catch (Exception ex)
+                {
+                    // A distinct key from the main draw loop's, so a journal shows which of the two
+                    // paths failed. Site keys are unique repo-wide precisely so a key in a
+                    // user-submitted log maps back to one line (CLAUDE.md note 40).
+                    DoodleSharp.Diagnostics.Journal.Fatal("CANVAS.DRAW.DEFERRED_THREW",
+                        "Raster-deferred shape rendering threw — this will terminate the render pass",
+                        ex, DescribeShapeForJournal(rasterDeferred[i]));
+                    throw;
+                }
+            }
+        }
+
         foreach (var slot in _sceneIndex.Visible)
         {
+            // With the raster backend on, the geometry has already been drawn into the bitmap and
+            // anything it declined was handled above; the vector pass here would draw everything a
+            // second time.
+            if (useRaster) break;
+
             var shape = _sceneIndex.ShapeAt(slot);
             if (shape == null) continue;
 
@@ -3031,6 +3094,118 @@ public class RenderCanvas : FrameworkElement
         }
 
         if (applyOpacity) dc.Pop();
+    }
+
+    /// <summary>
+    /// Frame time above which the vector path is judged too slow and the rasterizer takes over.
+    /// Set well under a 60 Hz budget so the switch happens before the user perceives a stall, but
+    /// above the rasterizer's own fixed overhead so it is never chosen for a frame it would lose.
+    /// </summary>
+    private const double RasterSwitchUpMs = 8.0;
+
+    /// <summary>
+    /// Visible-shape count below which the vector path is judged cheap enough to return to. A count
+    /// rather than a time, because the raster path's cost is dominated by its fixed per-frame buffer
+    /// work and so tells you nothing about what the vector path would have cost.
+    /// </summary>
+    private const int RasterSwitchDownShapes = 1_500;
+
+    private bool _rasterActive;
+
+    /// <summary>
+    /// Picks a backend for this frame.
+    ///
+    /// <para>
+    /// Neither is right as a fixed choice. The rasterizer pays about 2 ms a frame at 1080p to clear
+    /// and copy its buffer no matter what is on screen, and in exchange draws primitives far more
+    /// cheaply than WPF: on the benchmark's densest frame that is 107 ms down to 45 ms, while on a
+    /// near-empty view it is 0.2 ms up to 2.2 ms. So the choice is made per frame.
+    /// </para>
+    ///
+    /// <para>
+    /// The two thresholds are deliberately different quantities and deliberately far apart. Using
+    /// one number in both directions would flap between backends on frames sitting near it, and
+    /// because the backends differ in layer ordering, flapping is visible — annotation would appear
+    /// to jump above and below geometry from frame to frame.
+    /// </para>
+    /// </summary>
+    private bool ShouldUseRasterBackend()
+    {
+        var setting = ApplicationSettings.Instance.RenderBackend;
+
+        if (string.Equals(setting, "Managed", StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.Equals(setting, "Legacy", StringComparison.OrdinalIgnoreCase)) return false;
+
+        if (_rasterActive)
+        {
+            if (_sceneIndex.VisibleCount < RasterSwitchDownShapes) _rasterActive = false;
+        }
+        else
+        {
+            // The previous frame's cost, which is the only honest evidence of what this one will
+            // cost — shape count alone does not distinguish a hundred lines from a hundred hatches.
+            if (_lastVectorFrameMs > RasterSwitchUpMs) _rasterActive = true;
+        }
+
+        return _rasterActive;
+    }
+
+    private double _lastVectorFrameMs;
+
+    /// <summary>
+    /// Runs the managed rasterizer over the visible set and paints its bitmap into the lower layer.
+    /// Returns the shapes it declined, in draw order, for the vector path to finish.
+    /// </summary>
+    private IReadOnlyList<Shape> RenderThroughRasterBackend(double scale)
+    {
+        _rasterVisibleBuffer.Clear();
+
+        foreach (var slot in _sceneIndex.Visible)
+        {
+            if (_sceneIndex.ShapeAt(slot) is not Shape shape || !shape.IsVisible) continue;
+            if (Rendering.LodPolicy.Classify(_sceneIndex.MaxExtentAt(slot), scale)
+                == Rendering.LodLevel.Skip) continue;
+
+            _rasterVisibleBuffer.Add(shape);
+        }
+
+        var width = (int)Math.Round(ActualWidth);
+        var height = (int)Math.Round(ActualHeight);
+
+        var background = _backgroundBrush is SolidColorBrush sb
+            ? Rendering.Raster.ColorTable.Resolve(sb.Color.ToString())
+            : Rendering.Raster.ColorTable.Resolve("#1E1E1E");
+
+        // The closure captures the viewport rather than a snapshot of its numbers, so every band
+        // projects with the same transform the vector layer above it uses.
+        var ok = _rasterBackend.Render(width, height, background, _rasterVisibleBuffer, scale,
+            (wx, wy) =>
+            {
+                var p = _viewport.WorldToScreen(wx, wy);
+                return (p.X, p.Y);
+            });
+
+        if (!ok)
+        {
+            ClearRasterLayer();
+            return _rasterVisibleBuffer;   // nothing rasterised; let the vector path draw it all
+        }
+
+        _frameMetrics.AddSegments(_rasterBackend.SegmentsSubmitted);
+
+        using (var rdc = _rasterVisual.RenderOpen())
+        {
+            if (_rasterBackend.Output != null)
+                rdc.DrawImage(_rasterBackend.Output, new Rect(0, 0, ActualWidth, ActualHeight));
+        }
+
+        return _rasterBackend.Deferred;
+    }
+
+    /// <summary>Empties the bitmap layer, so switching back to the vector backend leaves nothing behind.</summary>
+    private void ClearRasterLayer()
+    {
+        using var rdc = _rasterVisual.RenderOpen();
     }
 
     private readonly Rendering.StrokeBatcher _strokeBatcher = new();

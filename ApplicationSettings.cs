@@ -14,6 +14,28 @@ public class AppSettingsData
     public bool AutoDraw { get; set; } = true;
     public bool DrawPointAsPatch { get; set; } = false;
 
+    /// <summary>
+    /// Which renderer draws the scene.
+    ///
+    /// <para>
+    /// <c>Legacy</c> is WPF's <c>DrawingVisual</c> throughout — complete, and the behaviour every
+    /// existing drawing was authored against. <c>Managed</c> rasterises hairline geometry into a
+    /// bitmap and leaves text, dimensions and chrome to the vector layer above it, which is far
+    /// faster on large drawings but is a two-layer split: annotation always composites over
+    /// geometry, regardless of the order shapes were created in.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>Auto</c> is the default and picks per frame. Neither backend is right as a fixed choice:
+    /// the rasterizer carries a fixed cost of roughly 2 ms a frame — clearing and copying an 8 MB
+    /// buffer at 1080p — regardless of what is on screen, in exchange for a per-primitive cost far
+    /// below WPF's. Measured on the benchmark, it turns the worst frame of a dense drawing from
+    /// 107 ms into 45 ms, and makes a near-empty view four times slower. Choosing per frame gets
+    /// both: exact vector semantics while a drawing is light, and a usable frame rate when it is not.
+    /// </para>
+    /// </summary>
+    public string RenderBackend { get; set; } = "Auto";
+
     // Window Visibility Settings
     public bool ShowRibbon { get; set; } = true;
     public bool ShowProjectBrowser { get; set; } = false;

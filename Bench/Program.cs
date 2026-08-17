@@ -48,6 +48,11 @@ internal static class Program
         var outPath = Arg(args, "--out");
         var rasterize = !args.Contains("--no-raster");
 
+        // Which renderer to measure. The whole point of keeping the legacy path alive is being able
+        // to run the same scene through both and compare, rather than remembering what it used to do.
+        var backend = Arg(args, "--backend") ?? "Legacy";
+        ApplicationSettings.Instance.RenderBackend = backend;
+
         var budget = int.TryParse(Arg(args, "--budget"), out var b) ? b : 50_000;
         var (width, height) = ParseSize(Arg(args, "--size") ?? "1920x1080");
 
@@ -65,6 +70,7 @@ internal static class Program
         Console.WriteLine($"  viewport   {width}x{height}");
         Console.WriteLine($"  budget     {budget:N0} shapes/scene");
         Console.WriteLine($"  rasterize  {(rasterize ? "yes (includes WPF tessellation + composition)" : "no (instruction build only)")}");
+        Console.WriteLine($"  backend    {backend}");
         Console.WriteLine();
 
         var runner = new BenchRunner(width, height, rasterize);
