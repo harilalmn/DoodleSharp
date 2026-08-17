@@ -99,6 +99,7 @@ public class RenderCanvas : FrameworkElement
     private List<IDrawable> _currentShapes = new();
     private readonly DrawingVisual _visual;
     private readonly DrawingVisual _rasterVisual;
+    private readonly DrawingVisual _overlayVisual;
     private readonly Rendering.Raster.ManagedRasterBackend _rasterBackend = new();
     private readonly List<Shape> _rasterVisibleBuffer = new();
     private readonly DoodleSharp.Rendering.SceneIndex _sceneIndex = new();
@@ -150,7 +151,9 @@ public class RenderCanvas : FrameworkElement
             if (_highlightedShapeId != value)
             {
                 _highlightedShapeId = value;
-                RedrawAll();
+                // Overlay only. This fires as the pointer travels down the outliner list, and the
+                // scene is identical every time.
+                RedrawOverlay();
             }
         }
     }
@@ -229,6 +232,10 @@ public class RenderCanvas : FrameworkElement
         _visual = new DrawingVisual();
         AddVisualChild(_visual);
         AddLogicalChild(_visual);
+
+        _overlayVisual = new DrawingVisual();
+        AddVisualChild(_overlayVisual);
+        AddLogicalChild(_overlayVisual);
 
         ClipToBounds = true;
         Focusable = true; // Allow canvas to receive keyboard focus
@@ -333,12 +340,13 @@ public class RenderCanvas : FrameworkElement
 
     // Required overrides for hosting DrawingVisual. Index order is z-order: the raster layer is
     // drawn first and the vector layer composites over it.
-    protected override int VisualChildrenCount => 2;
+    protected override int VisualChildrenCount => 3;
 
     protected override Visual GetVisualChild(int index) => index switch
     {
         0 => _rasterVisual,
         1 => _visual,
+        2 => _overlayVisual,
         _ => throw new ArgumentOutOfRangeException(nameof(index)),
     };
 
@@ -530,7 +538,7 @@ public class RenderCanvas : FrameworkElement
             // Check for Shift key to enable orthogonal constraint
             _drawingTool.IsOrthoMode = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
             _drawingTool.OnMouseMove(new VXYZ(worldPos.X, worldPos.Y), _currentShapes, _viewport.Scale, _sceneIndex);
-            RedrawAll();
+            RedrawOverlay();   // scene is unchanged; only the tool's overlay moved
 
             // Focus canvas when drawing to enable keyboard input for distance/angle
             if (_drawingTool.Points.Count > 0 && !IsFocused)
@@ -542,13 +550,13 @@ public class RenderCanvas : FrameworkElement
         {
             // Update measuring tool with cursor position (use spatial index for O(log n) snap detection)
             _measuringTool.OnMouseMove(new VXYZ(worldPos.X, worldPos.Y), _currentShapes, _viewport.Scale, _sceneIndex);
-            RedrawAll();
+            RedrawOverlay();   // scene is unchanged; only the tool's overlay moved
         }
         else if (_selectionTool?.IsBoxSelecting == true || _selectionTool?.IsDraggingHandle == true)
         {
             // Update selection box or handle drag (with snapping support, use spatial index for O(log n) performance)
             _selectionTool.OnMouseMove(new VXYZ(worldPos.X, worldPos.Y), _currentShapes, _viewport.Scale, _sceneIndex);
-            RedrawAll();
+            RedrawOverlay();   // scene is unchanged; only the tool's overlay moved
         }
     }
 
@@ -957,25 +965,42 @@ public class RenderCanvas : FrameworkElement
         FlushDots(dc);
         _frameMetrics.EndStage();
 
-        // Draw shape highlight (for Outliner hover)
+        RedrawOverlay();
+    }
+
+    /// <summary>
+    /// Redraws only the interactive layer — selection handles, the rubber band, snap markers, the
+    /// tool preview, the outliner highlight.
+    ///
+    /// <para>
+    /// These change on every mouse move; the scene beneath them does not. Rebuilding the whole
+    /// scene to move a snap marker four pixels is what made drawing and selecting feel heavy on a
+    /// large drawing, and it is pure waste: the geometry, its culling and its tessellation are all
+    /// identical between the two frames. Keeping them in a separate visual means WPF re-composites
+    /// the retained scene rather than the renderer rebuilding it.
+    /// </para>
+    /// </summary>
+    private void RedrawOverlay()
+    {
+        using var dc = _overlayVisual.RenderOpen();
+
+        if (ActualWidth <= 0 || ActualHeight <= 0) return;
+
         if (_highlightedShapeId.HasValue)
         {
             DrawShapeHighlight(dc, _highlightedShapeId.Value);
         }
 
-        // Draw measuring tool overlay
         if (_measuringTool?.Mode == ToolMode.Measuring)
         {
             DrawMeasuringOverlay(dc);
         }
 
-        // Draw drawing tool overlay
         if (_drawingTool?.Mode != DrawingMode.None)
         {
             DrawDrawingToolOverlay(dc);
         }
 
-        // Draw selection overlay
         if (IsSelectionMode && _selectionTool != null)
         {
             DrawSelectionOverlay(dc);

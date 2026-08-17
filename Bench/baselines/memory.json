@@ -1,0 +1,44 @@
+﻿{
+  "generatedUtc": "2026-08-17T12:02:49.5163083Z",
+  "machine": "HARILAP",
+  "processors": 16,
+  "runtime": "9.0.18",
+  "width": 1920,
+  "height": 1080,
+  "budget": 400000,
+  "rasterize": false,
+  "results": [
+    {
+      "Scene": "city-grid",
+      "Path": "idle-hover",
+      "ShapeCount": 399424,
+      "Width": 1920,
+      "Height": 1080,
+      "Rasterized": false,
+      "BuildMs": 3.2750293333333333,
+      "Frames": {
+        "Frames": 300,
+        "P50Ms": 2.96,
+        "P95Ms": 3.8589,
+        "P99Ms": 5.9748,
+        "MeanMs": 3.2731690000000015,
+        "MaxMs": 60.668800000000005,
+        "CullMs": 0.03844766666666666,
+        "TessellateMs": 0,
+        "RasterMs": 3.1899036666666647,
+        "PresentMs": 0,
+        "MeanVisibleShapes": 2543,
+        "MeanConsideredShapes": 2641,
+        "MeanSegments": 5342.096666666666,
+        "MeanAllocatedBytes": 134807.01333333334,
+        "Gen0Collections": 3,
+        "P95Fps": 259.14120604317293,
+        "CullRatio": 1.038537160833661
+      },
+      "SceneBuildSeconds": 0.4023073,
+      "IndexBuildMs": 173.4965,
+      "WorkingSetBytes": 332980224,
+      "HitTestP99Ms": 0.0503
+    }
+  ]
+}

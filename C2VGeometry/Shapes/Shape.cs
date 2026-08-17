@@ -186,19 +186,60 @@ public abstract class Shape : IDrawable
     #region Animation Properties
 
     /// <summary>
+    /// The eight animation values, allocated only once one of them is set away from its default.
+    ///
+    /// <para>
+    /// Almost no shape in a drawing is animated, but every shape used to carry all eight fields —
+    /// five doubles and two references, about 56 bytes — whether or not it ever moved. On a
+    /// million-shape document that is 56 MB of memory whose only purpose is to hold defaults.
+    /// Moving them behind a lazily-allocated object costs one reference on the shape and one null
+    /// check per read, and the properties below keep the same names and types, so nothing that
+    /// reads or writes them changes at all.
+    /// </para>
+    /// </summary>
+    private sealed class AnimationState
+    {
+        public double DrawFactor = 1.0;
+        public double OffsetX;
+        public double OffsetY;
+        public double RotationAngle;
+        public VXYZ? RotationPivot;
+        public double FlipProgress;
+        public VLine? FlipAxis;
+        public double Opacity = 1.0;
+    }
+
+    private AnimationState? _animation;
+
+    /// <summary>Allocates the animation state on first write. Reads never allocate.</summary>
+    private AnimationState Animation => _animation ??= new AnimationState();
+
+    /// <summary>
     /// Draw factor for progressive drawing animation (0 = invisible, 1 = fully drawn).
     /// </summary>
-    public double DrawFactor { get; set; } = 1.0;
+    public double DrawFactor
+    {
+        get => _animation?.DrawFactor ?? 1.0;
+        set => Animation.DrawFactor = value;
+    }
 
     /// <summary>
     /// X offset for translation animation.
     /// </summary>
-    public double OffsetX { get; set; } = 0;
+    public double OffsetX
+    {
+        get => _animation?.OffsetX ?? 0;
+        set => Animation.OffsetX = value;
+    }
 
     /// <summary>
     /// Y offset for translation animation.
     /// </summary>
-    public double OffsetY { get; set; } = 0;
+    public double OffsetY
+    {
+        get => _animation?.OffsetY ?? 0;
+        set => Animation.OffsetY = value;
+    }
 
     /// <summary>
     /// Rotation angle in degrees, counter-clockwise. Applied as a render transform about
@@ -211,27 +252,47 @@ public abstract class Shape : IDrawable
     /// while <c>RotateAnimation</c> (holding a <c>Shape</c>) wrote the animation one, so rotation
     /// animations on rectangles silently did nothing.
     /// </remarks>
-    public virtual double RotationAngle { get; set; } = 0;
+    public virtual double RotationAngle
+    {
+        get => _animation?.RotationAngle ?? 0;
+        set => Animation.RotationAngle = value;
+    }
 
     /// <summary>
     /// Pivot point for rotation animation.
     /// </summary>
-    public VXYZ? RotationPivot { get; set; }
+    public VXYZ? RotationPivot
+    {
+        get => _animation?.RotationPivot;
+        set => Animation.RotationPivot = value;
+    }
 
     /// <summary>
     /// Progress for flip animation (0 = original, 1 = fully flipped).
     /// </summary>
-    public double FlipProgress { get; set; } = 0;
+    public double FlipProgress
+    {
+        get => _animation?.FlipProgress ?? 0;
+        set => Animation.FlipProgress = value;
+    }
 
     /// <summary>
     /// Axis line for flip animation.
     /// </summary>
-    public VLine? FlipAxis { get; set; }
+    public VLine? FlipAxis
+    {
+        get => _animation?.FlipAxis;
+        set => Animation.FlipAxis = value;
+    }
 
     /// <summary>
     /// Opacity for fade animation (0 = fully transparent, 1 = fully opaque).
     /// </summary>
-    public double Opacity { get; set; } = 1.0;
+    public double Opacity
+    {
+        get => _animation?.Opacity ?? 1.0;
+        set => Animation.Opacity = value;
+    }
 
     #endregion
 
