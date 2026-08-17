@@ -1,3 +1,4 @@
+using DoodleSharp.Rendering;
 using C2VGeometry;
 
 namespace DoodleSharp.Canvas;
@@ -448,7 +449,7 @@ public class DrawingTool
     /// <param name="shapes">Current shapes on canvas.</param>
     /// <param name="scale">Current canvas scale.</param>
     /// <param name="spatialIndex">Optional spatial index for efficient snap detection.</param>
-    public void OnMouseMove(VXYZ worldPos, IReadOnlyList<IDrawable> shapes, double scale, QuadTree? spatialIndex = null)
+    public void OnMouseMove(VXYZ worldPos, IReadOnlyList<IDrawable> shapes, double scale, SceneIndex? spatialIndex = null)
     {
         if (Mode == DrawingMode.None)
             return;

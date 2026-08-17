@@ -347,6 +347,12 @@ public partial class MainWindow : Window
                 }
 
                 DoodleSharp.Sketching.SketchRuntime.Instance.Tick();
+
+                // Tick() calls CanvasRenderer.Clear() and re-runs the user's Draw(), so the shape
+                // objects are new every frame. Refresh() alone would keep repainting the snapshot
+                // that Render() took at Run time — which is why a sketch creating its shapes in
+                // Draw() used to sit on frame 0. Hand the canvas this frame's shapes first.
+                RenderCanvas.SetFrameShapes(CanvasRenderer.Instance.GetShapes());
                 RenderCanvas.Refresh();
 
                 if (DoodleSharp.Sketching.SketchRuntime.Instance.TryConsumeZoomRequest())
@@ -371,6 +377,12 @@ public partial class MainWindow : Window
                     _lastAnimationFrameTime = elapsedSeconds;
 
                     timeline.Update(scaledTime);
+
+                    // Update() mutates OffsetX/OffsetY/DrawFactor in place, so the shape objects
+                    // are unchanged but the bounds the cull index holds are now stale. Re-read them
+                    // before repainting — culling is no longer disabled during playback, and a
+                    // stale box means a moving shape either vanishes or fails to appear.
+                    RenderCanvas.ReindexForAnimationFrame();
 
                     // Redraw canvas first (critical path — before UI updates trigger layout)
                     RenderCanvas.Refresh();

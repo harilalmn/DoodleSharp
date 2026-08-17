@@ -19,28 +19,28 @@ public class VHatch : Shape
     public List<VXYZ> Boundary
     {
         get => _boundary;
-        set => _boundary = value ?? new List<VXYZ>();
+        set { _boundary = value ?? new List<VXYZ>(); BumpRevision(); }
     }
 
     /// <summary>The hatch pattern definition.</summary>
     public HatchType Pattern
     {
         get => _pattern;
-        set => _pattern = value ?? throw new ArgumentNullException(nameof(value));
+        set { _pattern = value ?? throw new ArgumentNullException(nameof(value)); BumpRevision(); }
     }
 
     /// <summary>Scale factor applied to the pattern. Default 1.0.</summary>
     public double PatternScale
     {
         get => _patternScale;
-        set => _patternScale = value;
+        set { _patternScale = value; BumpRevision(); }
     }
 
     /// <summary>Additional rotation angle in degrees applied to the entire pattern. Default 0.</summary>
     public double PatternAngle
     {
         get => _patternAngle;
-        set => _patternAngle = value;
+        set { _patternAngle = value; BumpRevision(); }
     }
 
     /// <summary>
@@ -123,7 +123,42 @@ public class VHatch : Shape
     /// </summary>
     public List<(VXYZ Start, VXYZ End)> GenerateLines()
     {
-        return HatchGenerator.Generate(_boundary, _pattern, _patternScale, _patternAngle);
+        // A copy, because the returned list is the caller's to keep and mutate. Renderers that just
+        // want to read the segments should use GetCachedLines() and avoid this copy entirely.
+        return new List<(VXYZ Start, VXYZ End)>(GetCachedLines());
+    }
+
+    private List<(VXYZ Start, VXYZ End)>? _cachedLines;
+    private uint _cachedLinesRevision;
+    private bool _hasCachedLines;
+
+    /// <summary>
+    /// The generated hatch segments, memoised against <see cref="Shape.Revision"/>.
+    ///
+    /// <para>
+    /// <b>The returned list is shared and must not be modified.</b> That is the deliberate trade:
+    /// hatch generation is by far the most expensive thing a drawing can ask a renderer to do, and
+    /// it was previously redone from scratch on <i>every frame</i>. Measured on a scene of ~15,000
+    /// shapes with a few hundred hatches, that cost 11.5 ms and <b>146 MB of allocation per
+    /// frame</b>, with nearly 5,000 gen-0 collections over a 600-frame camera path — the hatches
+    /// alone were two orders of magnitude more expensive than 100,000 lines.
+    /// </para>
+    ///
+    /// <para>
+    /// The cache turns over when any of boundary, pattern, scale or angle is assigned. Editing the
+    /// boundary list in place bypasses that, as it bypasses every other change notification in the
+    /// library; call <see cref="Shape.Invalidate"/> if you do.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<(VXYZ Start, VXYZ End)> GetCachedLines()
+    {
+        if (!_hasCachedLines || _cachedLinesRevision != Revision || _cachedLines == null)
+        {
+            _cachedLines = HatchGenerator.Generate(_boundary, _pattern, _patternScale, _patternAngle);
+            _cachedLinesRevision = Revision;
+            _hasCachedLines = true;
+        }
+        return _cachedLines;
     }
 
     #region Shape overrides

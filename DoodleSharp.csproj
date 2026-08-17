@@ -21,6 +21,7 @@
   <ItemGroup>
     <!-- Exclude sibling project folders from compilation -->
     <Compile Remove="Tests\**" />
+    <Compile Remove="Bench\**" />
     <Compile Remove="C2VGeometry\**" />
     <Compile Remove="RegionSample\**" />
     <Compile Remove="Sample Projects\**" />

@@ -260,6 +260,44 @@ public abstract class Shape : IDrawable
 
     #endregion
 
+    #region Change tracking
+
+    private uint _revision;
+
+    /// <summary>
+    /// Bumped whenever geometry that a cache could depend on changes. A renderer keeps derived data
+    /// — flattened curves, generated hatch lines, tessellated region loops — keyed by this, and
+    /// recomputes only when it moves.
+    ///
+    /// <para>
+    /// <b>Honest limitation:</b> this tracks *assignment*, not mutation. Vertex collections such as
+    /// <c>VPolygon.Points</c> are exposed as mutable lists, so editing one in place changes the
+    /// shape without changing its revision, and a cache would go stale. Call
+    /// <see cref="Invalidate"/> after any such edit. Encapsulating those collections is the real
+    /// fix and is the one genuinely source-breaking change on the roadmap; until then this is the
+    /// documented escape hatch rather than a silent trap.
+    /// </para>
+    /// </summary>
+    public uint Revision => _revision;
+
+    /// <summary>
+    /// Marks derived data stale. Increment is unchecked on purpose: wrapping is harmless because
+    /// the value is only ever compared for equality against a previously stored copy, and a false
+    /// match would need 2^32 intervening changes to the same shape.
+    /// </summary>
+    public void Invalidate()
+    {
+        unchecked { _revision++; }
+    }
+
+    /// <summary>Shorthand for <see cref="Invalidate"/>, for use from derived shapes' setters.</summary>
+    protected void BumpRevision()
+    {
+        unchecked { _revision++; }
+    }
+
+    #endregion
+
     #region Core Methods
 
     /// <summary>

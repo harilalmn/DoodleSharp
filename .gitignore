@@ -71,3 +71,6 @@ node_modules/
 
 # Inno Setup installer build output (built by release workflow / -LocalBuild)
 installer/output/
+
+# Benchmark PNG snapshots are for eyeballing a change, not for keeping.
+Bench/snapshots/

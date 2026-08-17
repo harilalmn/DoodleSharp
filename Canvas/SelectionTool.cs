@@ -1,3 +1,4 @@
+using DoodleSharp.Rendering;
 using System.Windows;
 using C2VGeometry;
 
@@ -120,6 +121,45 @@ public class SelectionTool
 
         return null;
     }
+
+    /// <summary>
+    /// Hit-tests through the scene index instead of scanning every shape.
+    ///
+    /// <para>
+    /// The list overload above walks the whole document on every click, so a click in a
+    /// million-shape drawing costs a million <see cref="HitTestShape"/> calls — each of which
+    /// type-switches and, for polygons and curves, does real geometry. Querying a
+    /// tolerance-sized box around the cursor first reduces that to the handful of shapes that
+    /// could plausibly be under it.
+    /// </para>
+    ///
+    /// <para>
+    /// Order still matters: candidates come back in draw order, so they are tested back-to-front to
+    /// return the topmost shape, matching the reverse iteration of the list overload. Getting this
+    /// backwards would silently pick the shape *underneath* the one you clicked.
+    /// </para>
+    /// </summary>
+    public Shape? HitTest(VXYZ worldPos, SceneIndex? index, double scale)
+    {
+        if (index == null) return null;
+
+        var tolerance = HitTolerance / scale;
+
+        index.QueryInto(worldPos.X - tolerance, worldPos.Y - tolerance,
+                        worldPos.X + tolerance, worldPos.Y + tolerance,
+                        _hitTestBuffer);
+
+        for (int i = _hitTestBuffer.Count - 1; i >= 0; i--)
+        {
+            if (_hitTestBuffer[i] is Shape shape && HitTestShape(shape, worldPos, tolerance))
+                return shape;
+        }
+
+        return null;
+    }
+
+    /// <summary>Reused so a click, or a hover, doesn't allocate a candidate list.</summary>
+    private readonly List<IDrawable> _hitTestBuffer = new();
 
     /// <summary>
     /// Tests if a point hits a specific shape.
@@ -409,7 +449,7 @@ public class SelectionTool
     /// <param name="shapes">All shapes on the canvas.</param>
     /// <param name="scale">Current canvas scale.</param>
     /// <returns>True if a shape was clicked, false to start box selection.</returns>
-    public bool OnMouseDown(VXYZ worldPos, bool shift, bool ctrl, IReadOnlyList<IDrawable> shapes, double scale)
+    public bool OnMouseDown(VXYZ worldPos, bool shift, bool ctrl, IReadOnlyList<IDrawable> shapes, double scale, SceneIndex? spatialIndex = null)
     {
         // First, check if we're clicking on a control point of a selected shape
         if (SelectedShapes.Count > 0)
@@ -426,7 +466,10 @@ public class SelectionTool
             }
         }
 
-        var hitShapeNormal = HitTest(worldPos, shapes, scale);
+        // Prefer the index; fall back to the full scan only when there isn't one.
+        var hitShapeNormal = spatialIndex != null
+            ? HitTest(worldPos, spatialIndex, scale)
+            : HitTest(worldPos, shapes, scale);
 
         if (hitShapeNormal != null)
         {
@@ -482,7 +525,7 @@ public class SelectionTool
     /// <param name="shapes">All shapes on the canvas (for snapping).</param>
     /// <param name="scale">Current canvas scale (for snap tolerance calculation).</param>
     /// <param name="spatialIndex">Optional spatial index for efficient snap detection.</param>
-    public void OnMouseMove(VXYZ worldPos, IReadOnlyList<IDrawable>? shapes = null, double scale = 1.0, QuadTree? spatialIndex = null)
+    public void OnMouseMove(VXYZ worldPos, IReadOnlyList<IDrawable>? shapes = null, double scale = 1.0, SceneIndex? spatialIndex = null)
     {
         if (IsDraggingHandle && DraggedShape != null)
         {

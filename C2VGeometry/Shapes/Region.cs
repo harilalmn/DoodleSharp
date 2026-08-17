@@ -430,6 +430,45 @@ public class Region : Shape
         return points;
     }
 
+    // Memoised outline, for the renderer. Keyed by revision *and* segment count, because callers
+    // legitimately ask for different densities (Contains and Area use the default; a renderer may
+    // want more or fewer as the zoom changes).
+    private List<VXYZ>? _cachedOuter;
+    private List<List<VXYZ>>? _cachedHoles;
+    private uint _cachedRevision;
+    private int _cachedSegments = -1;
+
+    /// <summary>
+    /// The sampled outer loop and hole loops, memoised against <see cref="Shape.Revision"/>.
+    ///
+    /// <para>
+    /// <b>The returned lists are shared and must not be modified.</b> Sampling a region is not
+    /// cheap — every non-line edge goes through <c>ICurve.Divide</c>, which allocates a fresh
+    /// <c>VXYZ</c> per point, and for béziers and splines internally walks the curve a few hundred
+    /// times to get arc-length parameterisation. Doing that per frame, per region, is why regions
+    /// were among the most expensive things on screen.
+    /// </para>
+    /// </summary>
+    public void GetCachedOutline(int segmentsPerCurve,
+                                 out List<VXYZ> outer,
+                                 out List<List<VXYZ>> holes)
+    {
+        if (_cachedOuter == null || _cachedHoles == null
+            || _cachedRevision != Revision || _cachedSegments != segmentsPerCurve)
+        {
+            _cachedOuter = SampleLoop(OuterLoop, segmentsPerCurve);
+            _cachedHoles = new List<List<VXYZ>>(Holes.Count);
+            foreach (var hole in Holes)
+                _cachedHoles.Add(SampleLoop(hole, segmentsPerCurve));
+
+            _cachedRevision = Revision;
+            _cachedSegments = segmentsPerCurve;
+        }
+
+        outer = _cachedOuter;
+        holes = _cachedHoles;
+    }
+
     #endregion
 
     #region Validation (reused from VPolygon pattern)

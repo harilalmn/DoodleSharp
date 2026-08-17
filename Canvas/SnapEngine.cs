@@ -1,3 +1,4 @@
+using DoodleSharp.Rendering;
 using C2VGeometry;
 
 namespace DoodleSharp.Canvas;
@@ -128,10 +129,10 @@ public class SnapEngine
     /// Finds the best snap point using spatial index for efficient culling (O(log n + k) instead of O(n)).
     /// </summary>
     /// <param name="cursorWorld">Cursor position in world coordinates.</param>
-    /// <param name="spatialIndex">QuadTree spatial index for efficient shape lookup.</param>
+    /// <param name="spatialIndex">Scene index for efficient shape lookup.</param>
     /// <param name="scale">Current canvas scale (zoom level).</param>
     /// <returns>The best snap result, or null if no snap found.</returns>
-    public SnapResult? FindSnapPoint(VXYZ cursorWorld, QuadTree? spatialIndex, double scale)
+    public SnapResult? FindSnapPoint(VXYZ cursorWorld, SceneIndex? spatialIndex, double scale)
     {
         // Store scale for extension reach calculations
         _currentScale = scale;
@@ -148,14 +149,16 @@ public class SnapEngine
         var extensionReach = ExtensionSnapEnabled ? ExtensionMaxReachPixels / scale : 0;
         var queryRadius = Math.Max(worldTolerance, extensionReach);
 
-        var queryBounds = new AABB(
+        // QueryInto, not Query: snapping runs from mouse-move, interleaved with rendering, and must
+        // not disturb the visibility bitset the renderer culls with. The buffer is reused because
+        // this runs on every mouse move.
+        var nearbyShapes = _snapQueryBuffer;
+        spatialIndex.QueryInto(
             cursorWorld.X - queryRadius,
             cursorWorld.Y - queryRadius,
             cursorWorld.X + queryRadius,
-            cursorWorld.Y + queryRadius
-        );
-
-        var nearbyShapes = spatialIndex.Query(queryBounds);
+            cursorWorld.Y + queryRadius,
+            nearbyShapes);
 
         var candidates = new List<SnapResult>();
 
@@ -785,6 +788,12 @@ public class SnapEngine
 
     // Store current scale for extension calculations
     private double _currentScale = 1.0;
+
+    /// <summary>
+    /// Reused across mouse-moves so the indexed snap path doesn't allocate a candidate list on
+    /// every pixel of cursor travel.
+    /// </summary>
+    private readonly List<IDrawable> _snapQueryBuffer = new();
 
     /// <summary>
     /// Collects extension snap points for a line segment.
