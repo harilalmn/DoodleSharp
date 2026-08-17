@@ -980,11 +980,29 @@ public class RenderCanvas : FrameworkElement
     /// the retained scene rather than the renderer rebuilding it.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// Shows the frame-timing readout. Off by default: <see cref="Rendering.FrameMetrics"/> costs
+    /// nothing while disabled, and the HUD is a diagnostic, not decoration.
+    /// </summary>
+    public bool ShowPerformanceHud
+    {
+        get => _frameMetrics.IsEnabled;
+        set
+        {
+            if (_frameMetrics.IsEnabled == value) return;
+            _frameMetrics.IsEnabled = value;
+            _frameMetrics.Reset();
+            RedrawOverlay();
+        }
+    }
+
     private void RedrawOverlay()
     {
         using var dc = _overlayVisual.RenderOpen();
 
         if (ActualWidth <= 0 || ActualHeight <= 0) return;
+
+        if (_frameMetrics.IsEnabled) DrawPerformanceHud(dc);
 
         if (_highlightedShapeId.HasValue)
         {
@@ -3231,6 +3249,67 @@ public class RenderCanvas : FrameworkElement
     private void ClearRasterLayer()
     {
         using var rdc = _rasterVisual.RenderOpen();
+    }
+
+    private static readonly Brush _hudBackground = Freeze(new SolidColorBrush(Color.FromArgb(0xC8, 0x10, 0x10, 0x10)));
+    private static readonly Brush _hudForeground = Freeze(new SolidColorBrush(Color.FromRgb(0x9C, 0xDC, 0xFE)));
+    private static readonly Typeface _hudTypeface = new(new FontFamily("Consolas"),
+        FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+
+    private static Brush Freeze(Brush b) { b.Freeze(); return b; }
+
+    /// <summary>
+    /// Draws the frame-timing readout, top-left.
+    ///
+    /// <para>
+    /// It lives on the overlay layer, so switching it on does not itself force the scene to be
+    /// rebuilt every frame — which would be a measurement instrument that changes what it measures.
+    /// The cull ratio is the number worth watching: shapes examined per shape drawn. At 1.0 culling
+    /// is perfect; when it tracks the document size, culling is doing nothing.
+    /// </para>
+    /// </summary>
+    private Rendering.FrameSummary? _hudSummary;
+    private int _hudSummaryAge;
+
+    private void DrawPerformanceHud(DrawingContext dc)
+    {
+        // Summarize() sorts a 600-entry history and allocates; doing that every frame made the HUD
+        // itself the largest per-frame allocation, so the instrument was dominating the number it
+        // reported. Refreshing a few times a second is more readable anyway — a figure updating at
+        // 60 Hz cannot be read.
+        if (_hudSummary == null || ++_hudSummaryAge >= 15)
+        {
+            _hudSummary = _frameMetrics.Summarize();
+            _hudSummaryAge = 0;
+        }
+
+        var s = _hudSummary;
+        if (s.Frames == 0) return;
+
+        var backend = _rasterActive ? "raster" : "vector";
+        var lines = new[]
+        {
+            $"p50 {s.P50Ms,6:F2} ms   p95 {s.P95Ms,6:F2} ms  ({s.P95Fps,5:F0} fps)",
+            $"cull {s.CullMs,5:F2}  raster {s.RasterMs,5:F2}   backend {backend}",
+            $"visible {s.MeanVisibleShapes,7:N0} / examined {s.MeanConsideredShapes,-7:N0}",
+            $"alloc {s.MeanAllocatedBytes / 1024.0,7:F1} KB/frame   gen0 {s.Gen0Collections}",
+        };
+
+        var dpi = _cachedPixelsPerDip ??= VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        var texts = lines.Select(l => new FormattedText(l, CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight, _hudTypeface, 12, _hudForeground, dpi)).ToList();
+
+        var w = texts.Max(t => t.Width) + 16;
+        var h = texts.Sum(t => t.Height) + 12;
+
+        dc.DrawRectangle(_hudBackground, null, new Rect(8, 8, w, h));
+
+        var y = 14.0;
+        foreach (var t in texts)
+        {
+            dc.DrawText(t, new Point(16, y));
+            y += t.Height;
+        }
     }
 
     private readonly Rendering.StrokeBatcher _strokeBatcher = new();

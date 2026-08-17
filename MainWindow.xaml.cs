@@ -6847,6 +6847,14 @@ public partial class MainWindow : Window
             ShowGlobalParametersMenuItem_Click(sender, e);
             e.Handled = true;
         }
+        else if (e.Key == Key.F10 && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            // Frame-timing readout. A diagnostic, so it is off unless asked for -- FrameMetrics
+            // costs nothing while disabled.
+            RenderCanvas.ShowPerformanceHud = !RenderCanvas.ShowPerformanceHud;
+            SetStatus($"Performance HUD: {(RenderCanvas.ShowPerformanceHud ? "ON" : "OFF")}", isError: false);
+            e.Handled = true;
+        }
         else if (e.Key == Key.F9 && Keyboard.Modifiers == ModifierKeys.None)
         {
             // Toggle Snap to Grid

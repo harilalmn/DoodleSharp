@@ -128,7 +128,7 @@ public sealed class BenchRunner
     /// visible changes, not just faster ones — a number saying the frame got quicker tells you
     /// nothing about whether it still shows the right drawing.
     /// </summary>
-    public void RenderSnapshot(string sceneName, int shapeBudget, double zoomFraction, string outPath)
+    public void RenderSnapshot(string sceneName, int shapeBudget, double zoomFraction, string outPath, bool hud = false)
     {
         SceneGenerator.Build(sceneName, shapeBudget);
         var shapes = CanvasRenderer.Instance.GetShapes();
@@ -145,6 +145,14 @@ public sealed class BenchRunner
         canvas.Viewport.CenterOnWorldPoint(
             (bounds.Min.X + bounds.Max.X) * 0.5,
             (bounds.Min.Y + bounds.Max.Y) * 0.5);
+        // Exercise the frame-timing readout through the real overlay path, so a snapshot proves it
+        // renders rather than merely compiles.
+        if (hud)
+        {
+            canvas.ShowPerformanceHud = true;
+            for (int i = 0; i < 12; i++) canvas.Refresh();
+        }
+
         canvas.Refresh();
         canvas.UpdateLayout();
 

@@ -86,7 +86,7 @@ internal static class Program
                 var file = scenes.Length == 1 ? png
                     : Path.Combine(Path.GetDirectoryName(png) ?? ".",
                                    $"{Path.GetFileNameWithoutExtension(png)}-{scene.Name}.png");
-                runner.RenderSnapshot(scene.Name, budget, zoom, file);
+                runner.RenderSnapshot(scene.Name, budget, zoom, file, args.Contains("--hud"));
                 Console.WriteLine($"  wrote {file}");
             }
             return 0;
