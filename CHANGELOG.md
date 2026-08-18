@@ -9,6 +9,8 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+## [2026.8.5] - 2026-08-18
+
 ### Fixed
 - **Lines, polylines and unfilled rectangles/polygons disappeared after the first redraw.** The
   stroke batcher — which collapses many same-coloured strokes into one draw call — stopped emitting
