@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -213,26 +213,52 @@ public class DockingLayoutTests
     }
 
     [Theory]
-    [MemberData(nameof(AllToolIds))]
-    public void EveryToolPanelIsRegisteredInCodeBehind(string contentId)
+    [MemberData(nameof(AllPanelIds))]
+    public void EveryPanelIsRegisteredInCodeBehind(string contentId)
     {
         // Catches "added a panel to the XAML, forgot to register it" — which produces a panel whose
         // menu entry does nothing and which no saved layout can restore.
+        //
+        // This deliberately covers documents as well as tool panels. It used to filter to ds.tool.*,
+        // on the reasoning that only tool panels have menu entries — and that is exactly the hole the
+        // Code and Settings tabs fell through: unregistered, they had no content to be re-attached
+        // after a restore, so both came back blank on every launch after the first while every tool
+        // panel restored correctly. Registration is what makes a pane restorable, not its type.
         Assert.Contains($"\"{contentId}\"", MainWindowCode());
+    }
+
+    [Fact]
+    public void BothDocumentsHaveTheirContentCapturedForRestore()
+    {
+        // Stronger than the scan above, which a passing mention in a comment would satisfy. A restored
+        // layout carries ids and arrangement only, so a pane whose content was never captured renders
+        // as an empty tab — no exception, no fallback, just a missing code editor.
+        var code = MainWindowCode();
+
+        Assert.Contains("CaptureContent(\"ds.document.code\", CodeDocument);", code);
+        Assert.Contains("CaptureContent(\"ds.document.settings\", SettingsDocument);", code);
+    }
+
+    [Fact]
+    public void DocumentsCannotBeClosed()
+    {
+        // Documents are not moved to Hidden when closed — they leave the tree for good, and neither
+        // RestoreMissingPanels nor the Windows menu covers them. CanClose="False" is what keeps the
+        // editor from being a one-way trip.
+        var xaml = MainWindowXaml();
+
+        foreach (var id in PanelIds.Where(i => i.StartsWith("ds.document.", StringComparison.Ordinal)))
+        {
+            var at = xaml.IndexOf($"ContentId=\"{id}\"", StringComparison.Ordinal);
+            Assert.True(at > 0);
+            Assert.Contains("CanClose=\"False\"", xaml[Math.Max(0, at - 200)..at]);
+        }
     }
 
     public static TheoryData<string> AllPanelIds()
     {
         var data = new TheoryData<string>();
         foreach (var id in PanelIds) data.Add(id);
-        return data;
-    }
-
-    public static TheoryData<string> AllToolIds()
-    {
-        var data = new TheoryData<string>();
-        foreach (var id in PanelIds.Where(i => i.StartsWith("ds.tool.", StringComparison.Ordinal)))
-            data.Add(id);
         return data;
     }
 

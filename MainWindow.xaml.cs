@@ -5741,12 +5741,26 @@ public partial class MainWindow : Window
             _globalParametersPanel?.Rebuild();
         });
 
+        // The two documents are not panels in the registry sense — they have no menu entry, no
+        // persisted visibility and CanClose="False" — but their content still has to be recoverable
+        // by ContentId, because a restored layout brings *every* pane back empty and ReattachPanelContent
+        // can only refill the ones it has content for. Registration is what makes a pane restorable,
+        // not its type: with the documents absent from _dockContent, Code and Settings came back as
+        // blank tabs on every launch after the first while every tool panel restored correctly.
+        CaptureContent("ds.document.code", CodeDocument);
+        CaptureContent("ds.document.settings", SettingsDocument);
+
         void Register(string contentId, AvalonDock.Layout.LayoutAnchorable pane, MenuItem? menuItem,
                       Action<bool>? onChanged = null)
         {
             _dockPanels[contentId] = new DockPanelEntry(pane, menuItem, onChanged);
-            if (pane.Content != null) _dockContent[contentId] = pane.Content;
+            CaptureContent(contentId, pane);
             pane.IsVisibleChanged += (_, __) => OnPaneVisibilityChanged(contentId);
+        }
+
+        void CaptureContent(string contentId, AvalonDock.Layout.LayoutContent pane)
+        {
+            if (pane.Content != null) _dockContent[contentId] = pane.Content;
         }
     }
 
@@ -5957,8 +5971,21 @@ public partial class MainWindow : Window
     {
         foreach (var content in AvalonDock.Layout.Extensions.Descendents(Dock.Layout).OfType<AvalonDock.Layout.LayoutContent>())
         {
-            if (content.ContentId is string id && _dockContent.TryGetValue(id, out var control))
+            if (content.ContentId is not string id) continue;
+
+            if (_dockContent.TryGetValue(id, out var control))
+            {
                 content.Content = control;
+            }
+            else
+            {
+                // The pane survives the restore but stays blank, which reads as "the editor is gone"
+                // rather than as a wiring mistake. Naming it is the difference between a bug report
+                // and a journal line that points at the missing registration.
+                Journal.Warn("MW.LAYOUT.NOCONTENT",
+                    "A restored pane has no registered content and will render empty",
+                    $"contentId={id}");
+            }
         }
 
         // Hidden anchorables live outside the visual tree walk above, but must still be re-attached
