@@ -9,6 +9,30 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+### Added
+- **`Canvas.Clear()` and `Canvas.Remove(...)`** — a way to take shapes back off the canvas from your
+  own code. This is what a callback that *redraws* needs: shapes register themselves as you construct
+  them, so a mouse-move handler that builds a circle leaves one behind per pixel of travel.
+
+  ```csharp
+  Mouse.OnMove(e =>
+  {
+      Canvas.Clear();
+      var rings = (int)(e.X / 40);
+      for (var i = 1; i <= rings; i++)
+          new VCircle(new VXYZ(0, 0), i * 20) { Color = "Cyan" };
+  });
+  ```
+
+  `Canvas.Remove(a, b)` — or `Canvas.Remove(list)` — takes off only what you name, ignoring nulls and
+  shapes that are not on the canvas. Both are geometry only: neither rewinds shape IDs, stops a
+  running timeline, nor resets the view.
+
+  Note that **`Frame.Clear()` is not this** — it drops queued `Frame.Request` callbacks and leaves the
+  drawing untouched. If you had been calling it expecting a blank canvas, that is why shapes kept
+  piling up. And most handlers should not clear at all: when only *positions* change, build the shapes
+  once and assign to them, which allocates nothing per event.
+
 ### Changed
 - **Line weight rendering is now one checkbox, "Display Line Weight", and it is off by default.**
   It replaces the pair of Absolute / "Relative to zoom level" dropdowns for line weight and line
@@ -20,6 +44,14 @@ tags; this file is the curated, human-friendly summary.
   and there is no setting for them. If you had either option set to "relative to zoom level", it
   now behaves as absolute until you tick Display Line Weight. Existing settings files are read
   without complaint; the retired keys are dropped on the next save.
+- **Dash patterns are identical on every renderer.** `Center`, `Phantom` and `Hidden` drew as solid
+  lines whenever the faster software renderer was active, and the other four patterns used different
+  dash lengths there than on the vector renderer — so a dashed line could change appearance based only
+  on how busy your drawing was. There is now one definition behind all of them, including SVG export.
+- **Snapping reports a missing scene index instead of silently not snapping.** `SnapEngine.FindSnapPoint`
+  returned "no snap" when handed no index, which is indistinguishable from nothing being near the
+  cursor; it now fails loudly and names the overload to use. `SnapResult.ConstraintPoint` is deprecated
+  — it was always exactly `Point`.
 
 ### Fixed
 - **Seven help pages you could not open.** `SvgExporter`, `SnapEngine`, `SnapType`, `SnapResult`,
@@ -30,8 +62,16 @@ tags; this file is the curated, human-friendly summary.
   but nothing ever handled it.
 - The F1 **Drawing Tools** page said Arc is "click center, start, end". It is start, a point on the
   arc, then end — the centre is derived. Four shape types missing from that table were added.
-- Snapping: passing no scene index to `SnapEngine.FindSnapPoint` silently reported "no snap"
-  forever instead of failing; it now throws with a message naming the overload to use.
+- **The grid no longer paints over your drawing.** With the faster renderers active the grid was drawn
+  on top of the geometry rather than beneath it.
+- **Dragging a shape works on the GPU renderer.** The shape's selection handles and its hit-testing
+  moved while the geometry itself stayed painted where it was; in-place edits and animations were
+  invisible there for the same reason.
+- **Dimensions, arrows, grids and construction lines appear on the GPU renderer.** They were silently
+  dropped.
+- **SVG exports have usable stroke widths.** Widths were written in drawing units rather than pixels,
+  so a large drawing exported with strokes too thin to see and a small one with strokes like blobs.
+  Line types now export as dashes too, instead of everything coming out solid.
 
 ## [2026.8.3] - 2026-08-18
 

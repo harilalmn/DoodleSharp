@@ -131,9 +131,9 @@ Inherited from `Shape`, so they work on all of the types above.
 |----------|------|---------|-------|
 | `Color` | string | `"Cyan"` | Stroke. Named color, `#RRGGBB` or `#AARRGGBB`. Some shapes override the default (VPoint → White, VCircle → Yellow, VPolygon → LightBlue, VRectangle → Magenta, VArc → Orange). |
 | `FillColor` | string | `"Transparent"` | Fill for closed shapes |
-| `LineWeight` | double | `2.0` | Stroke thickness — world units by default, screen pixels in absolute mode |
+| `LineWeight` | double | `2.0` | Stroke thickness — **device pixels** by default, world units when [Display Line Weight](#display-line-weight) is on |
 | `LineType` | LineType | `Continuous` | Dash pattern (8 values) |
-| `LineTypeScale` | double | `1.0` | Stretches or compresses the dash pattern |
+| `LineTypeScale` | double | `1.0` | Stretches or compresses the dash pattern. Always a fixed **on-screen** size — it does not follow Display Line Weight, and does not change with zoom or with `LineWeight` |
 | `Opacity` | double | `1.0` | 0 = invisible, 1 = opaque; multiplies any alpha in the colors |
 | `Name` | string | `""` | Label — also keeps the shape from being auto-hidden after `Main()` |
 | `Id` | long | auto | Unique, read-only; the counter restarts each run |
@@ -166,8 +166,9 @@ touch them to change behaviour deliberately.
 | `Shape.ResetIdCounter()` | void | Restarts `Id` at 1. Called automatically at the start of each run, which is why IDs are stable between runs |
 
 Ordering and lifetime methods on an individual shape: `Place()`, `Remove()`, `Show()` / `Hide()`,
-`BringAbove(other)` and `SendBehind(other)`. Plus `Invalidate()`, which bumps `Revision` — the one
-call you need after editing a vertex list in place:
+`BringAbove(other)` and `SendBehind(other)`. To take shapes off *en masse* there is the static
+[`Canvas`](#redrawing-from-a-handler) class — `Canvas.Clear()` and `Canvas.Remove(a, b)`. Plus
+`Invalidate()`, which bumps `Revision` — the one call you need after editing a vertex list in place:
 
 ```csharp
 var poly = new VPolygon(new VXYZ(0, 0), new VXYZ(100, 0), new VXYZ(50, 80));
@@ -1442,6 +1443,27 @@ line2.LineType = LineType.DashDot;
 line2.LineTypeScale = 0.5;   // half-length dashes and gaps
 ```
 
+The dash and gap lengths themselves are defined once, in **device pixels**, by
+`C2VGeometry.Rendering.LineTypePatterns`, and every renderer and exporter draws from that one
+table — so a dashed line looks the same whichever backend painted the frame, and the same in an
+exported SVG. `LineTypeScale` multiplies those lengths. Two consequences worth knowing: dash length
+does **not** change with zoom (unlike AutoCAD's `LTSCALE`, which is in drawing units), and it does
+**not** change with `LineWeight` — a hairline and a heavy line of the same type dash identically.
+
+You only need the table itself if you are writing your own exporter and want to match the canvas:
+
+```csharp
+using C2VGeometry.Rendering;   // at the top of the file
+
+var runs = LineTypePatterns.DevicePixels(LineType.Dashed);   // 8, 4 — dash, gap
+var solid = LineTypePatterns.IsSolid(LineType.Dotted, 0);    // true: a scale of 0 draws solid
+var scale = LineTypePatterns.ClampScale(2.5);                // into [MinScale, MaxScale]
+```
+
+`DevicePixels` returns a `ReadOnlySpan<double>` over a **shared** array so it can be called per
+shape per frame without allocating — read it, never write to it, and copy into your own buffer to
+scale it. `Continuous` comes back as an empty span.
+
 ### Display Line Weight
 
 One checkbox, in **Settings > Application Settings > Line Style Rendering**, decides how
@@ -1457,6 +1479,12 @@ whatever the zoom, and there is no setting for it. This is a change: line weight
 scale used to be separate Absolute/Relative dropdowns defaulting to relative, which offered four
 combinations when two were wanted. If you had either set to relative, it now behaves as absolute
 until you tick Display Line Weight.
+
+**Turning it on keeps the canvas on the Legacy renderer.** Neither the software rasterizer nor the
+GPU path reads line weight — both draw one-pixel hairlines — so while Display Line Weight is on,
+[Auto](#render-backends) stays on the WPF vector backend rather than silently throwing the setting
+away on exactly the large drawings where you would notice. Naming a backend explicitly still wins,
+so choosing Managed or GPU by hand gives you hairlines regardless.
 
 The setting is application-level and saved globally; changing it redraws the canvas immediately.
 
@@ -1719,9 +1747,17 @@ Mouse.OnMove(e =>
 });
 ```
 
-`Canvas.Remove(a, b)` — or `Canvas.Remove(someList)` — takes off only what you name, skipping nulls
-and shapes that are not on the canvas, so it is safe to call with a list you are also rebuilding.
-Both are geometry only: neither rewinds shape IDs, stops a running timeline, nor resets the view.
+`Canvas.Remove(a, b)` — or `Canvas.Remove(someList)`, where the list is of `Shape` — takes off only
+what you name, skipping nulls and shapes that are not on the canvas, so it is safe to call with a
+list you are also rebuilding. The list overload copies its argument before removing anything, so
+passing a live view of the canvas will not throw part way through. Both are geometry only: neither
+rewinds shape IDs, stops a running timeline, nor resets the view. Both are also no-ops with no
+canvas attached, so code that uses them still runs headless.
+
+> **One name clash.** `DoodleSharp.Canvas` is also a *namespace*, and in a file that says
+> `using DoodleSharp.Canvas;` the namespace wins, so a bare `Canvas.Clear()` there will not compile.
+> Project templates never import it, so this only bites if you added the import yourself for
+> `SvgExporter` or `CanvasRenderer` — write `C2VGeometry.Canvas.Clear()` in that file.
 
 > **`Frame.Clear()` is not this.** It drops queued `Frame.Request` callbacks and leaves the drawing
 > exactly as it was. If you have been calling it expecting a blank canvas, that is why the shapes
@@ -2512,11 +2548,14 @@ immediately — no restart — and is saved globally for all projects.
 | **Managed (software rasterizer)** | A CPU rasterizer draws the line work into a bitmap; text, dimensions and canvas chrome are drawn over it by WPF | A consistently dense drawing. It pays a fixed cost per frame (clearing and copying a full-window bitmap) in exchange for a much cheaper per-shape cost |
 | **GPU (Direct3D 11)** | Direct3D 11. Geometry is uploaded once in world coordinates, so panning and zooming rewrite one small transform instead of re-submitting the drawing | Very large drawings, high-resolution displays, or when navigation rather than the first frame is what feels heavy. Opt-in only — Auto never selects it |
 
-**Three things to know before you change it.** Managed and GPU draw in two layers, so annotation
+**Four things to know before you change it.** Managed and GPU draw in two layers, so annotation
 (text, dimensions) always composites **above** geometry, whatever order the shapes were created in;
 Legacy honours creation order throughout. They also **outline arrowheads rather than filling them**,
 on arrows and dimensions alike — the head keeps its size, angle and position, but a solid triangle
-under Legacy becomes a hollow one (see [Arrowhead geometry](#arrowhead-geometry)). And the GPU path
+under Legacy becomes a hollow one (see [Arrowhead geometry](#arrowhead-geometry)). Neither of them
+reads `LineWeight` — both draw one-pixel hairlines — which is why Auto stays on Legacy while
+[Display Line Weight](#display-line-weight) is on, and why naming Managed or GPU explicitly gives
+you hairlines whatever that setting says. And the GPU path
 **fails soft**: with no usable device —
 no GPU, an old driver, a remote session — it falls back to the software rasterizer for the rest of
 the session and records the reason in the [diagnostic journal](#diagnostic-journals), rather than
@@ -2906,7 +2945,11 @@ File > Export > SVG exports shapes to SVG (Scalable Vector Graphics) format:
 - Web-compatible vector format
 - Opens in any browser or vector editor (Inkscape, Illustrator)
 - XML-based, can be edited as text
-- Supports all shape types with full styling
+- Supports all shape types with full styling. Stroke widths are pinned to **device pixels** with
+  `vector-effect="non-scaling-stroke"` — the `viewBox` is world coordinates at 1:1, so without it
+  `LineWeight = 2` would come out two *world* units thick and vanish on a large drawing — and
+  `LineType` is written as a `stroke-dasharray` taken from the same
+  [`LineTypePatterns`](#line-types) table the canvas uses, so a dashed line exports dashed
 
 ### Exporting from your own code
 
