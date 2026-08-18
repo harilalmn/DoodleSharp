@@ -77,14 +77,30 @@ public sealed class StrokeBatcher
         || fill.Equals("Transparent", StringComparison.OrdinalIgnoreCase)
         || fill.Equals("None", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Holds one segment for a pen.
+    ///
+    /// <para>
+    /// <b>Enrolment in <see cref="_order"/> keys off the bucket being empty, not off the bucket
+    /// being new</b>, and the difference is the whole correctness of this class. The buckets are
+    /// deliberately kept across flushes so a frame does not allocate a list per pen; only their
+    /// contents are cleared. Enrolling only when the dictionary entry was created therefore worked
+    /// exactly once per pen: from the second flush onward <c>TryGetValue</c> succeeded, the pen was
+    /// never re-added, and <see cref="Flush"/> — which iterates <see cref="_order"/> — walked an
+    /// empty list. Every batched stroke after the first flush was dropped without a trace, and
+    /// because the drawing loop is what clears the segment lists, they also grew without bound.
+    /// </para>
+    /// </summary>
     public void Add(Pen pen, Point a, Point b)
     {
         if (!_buckets.TryGetValue(pen, out var list))
         {
             list = new List<Segment>(64);
             _buckets[pen] = list;
-            _order.Add(pen);
         }
+
+        if (list.Count == 0) _order.Add(pen);
+
         list.Add(new Segment(a, b));
         _pending++;
     }

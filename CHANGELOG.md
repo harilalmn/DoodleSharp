@@ -9,6 +9,16 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+### Fixed
+- **Lines, polylines and unfilled rectangles/polygons disappeared after the first redraw.** The
+  stroke batcher — which collapses many same-coloured strokes into one draw call — stopped emitting
+  anything for a pen once it had flushed that pen a first time, so the geometry was culled,
+  tessellated and then dropped. The shapes were still there: they hit-tested, selected and showed
+  their real values in the Properties panel; they just were not painted. Anything that triggers a
+  full redraw (pan, zoom, select, run, an animation frame) made them vanish. The same bug left the
+  undrawn segments in memory frame after frame.
+
+
 ## [2026.8.4] - 2026-08-18
 
 ### Added
