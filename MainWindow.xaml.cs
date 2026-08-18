@@ -1397,11 +1397,19 @@ public partial class MainWindow : Window
             // user has finished choosing — an opening bracket, a separator, a terminator. Anything
             // else that cannot continue an identifier merely dismisses. See CompletionInteraction
             // for why space is in neither set.
-            if (Editor.CompletionInteraction.Commits(ch))
+            // A snippet expands into a multi-line construct with placeholders, so a bracket or a
+            // separator must not accept it. That only became reachable once snippets sorted first
+            // and won the selection: typing `for(` would otherwise expand the whole loop around the
+            // parenthesis the user was in the middle of writing. Tab and Enter — handled by
+            // AvalonEdit as explicit accept keys — stay the only way to take one.
+            var snippetSelected = _completionWindow.CompletionList.SelectedItem is Editor.SnippetCompletionData;
+
+            if (Editor.CompletionInteraction.Commits(ch, snippetSelected))
             {
                 _completionWindow.CompletionList.RequestInsertion(e);
             }
-            else if (Editor.CompletionInteraction.Dismisses(ch))
+            else if (Editor.CompletionInteraction.Dismisses(ch) ||
+                     (snippetSelected && Editor.CompletionInteraction.Commits(ch)))
             {
                 _completionWindow.Close();
             }
@@ -1814,6 +1822,22 @@ public partial class MainWindow : Window
                  }
              }
 
+             // A keyword whose spelling a snippet already occupies is pure duplication now that the
+             // snippet sits above it: `for` listed the loop snippet and then the bare `for` keyword
+             // two rows apart, and the keyword row can no longer be reached by ranking or by a commit
+             // character. Only the ~19 keywords that have a snippet are dropped — the rest (`int`,
+             // `var`, `return`, `float`, …) are why keywords are injected at all, since Roslyn's
+             // LookupSymbols returns declared symbols only and without them `for (int` ranked
+             // IntersectionResult first.
+             if (snippets.Count > 0)
+             {
+                 var triggers = new HashSet<string>(snippets.Select(s => s.Text), StringComparer.Ordinal);
+                 sortedCompletions = sortedCompletions
+                     .Where(c => c is not Editor.CompletionData { Kind: Editor.CompletionKind.Keyword } kw
+                                 || !triggers.Contains(kw.Text))
+                     .ToList();
+             }
+
              if (sortedCompletions.Count > 0 || snippets.Count > 0)
              {
                  // Build the window in a local first and only publish it to the field once it is
@@ -1828,14 +1852,19 @@ public partial class MainWindow : Window
 
                  var data = window.CompletionList.CompletionData;
 
-                 foreach (var item in sortedCompletions)
-                 {
-                     data.Add(item);
-                 }
-
+                 // Snippets go first, and the initial selection is CompletionData[0], so a matching
+                 // snippet is what Tab inserts. AvalonEdit renders items in insertion order and never
+                 // consults Priority for it — appending them left `for`/`foreach` below every
+                 // FormatException-shaped type in the list, several scrolls down, which is not a
+                 // place a snippet can be discovered, let alone accepted with one key.
                  foreach (var snippet in snippets)
                  {
                      data.Add(snippet);
+                 }
+
+                 foreach (var item in sortedCompletions)
+                 {
+                     data.Add(item);
                  }
 
                  window.Closed += (s, args) =>

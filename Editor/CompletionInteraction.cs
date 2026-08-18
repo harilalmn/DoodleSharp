@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace DoodleSharp.Editor;
 
@@ -26,6 +26,22 @@ public static class CompletionInteraction
     /// </para>
     /// </summary>
     public static bool Commits(char c) => c is '(' or '[' or '{' or ';' or ',' or ')';
+
+    /// <summary>
+    /// True when typing <paramref name="c"/> should accept the highlighted completion, given whether
+    /// that highlighted item is a snippet.
+    ///
+    /// <para>
+    /// <b>A snippet is never accepted by a commit character.</b> Committing one rewrites a single
+    /// identifier into a multi-line construct with placeholders, so the cost of getting it wrong is
+    /// far higher than for a symbol — and snippets now sort first and win the selection, which means
+    /// <c>for(</c> would expand an entire loop around a parenthesis the user was typing by hand.
+    /// Tab and Enter are unambiguous requests for the highlighted item and remain available; a
+    /// bracket is not. The caller closes the list instead, leaving what was typed intact.
+    /// </para>
+    /// </summary>
+    public static bool Commits(char c, bool selectedItemIsSnippet)
+        => !selectedItemIsSnippet && Commits(c);
 
     /// <summary>
     /// True when <paramref name="c"/> cannot continue an identifier, so an open list is no longer

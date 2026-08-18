@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Documents;
@@ -170,6 +170,19 @@ public class CompletionData : ICompletionData
         return style;
     }
 
+    /// <summary>
+    /// Ranks snippets above every symbol kind when match quality ties.
+    ///
+    /// <para>
+    /// AvalonEdit's <c>CompletionList.SelectItem</c> scores each item by match quality and breaks
+    /// ties with the <b>higher</b> Priority — so the old value of 0.5, the lowest in the table, meant
+    /// a snippet lost every tie it entered: typing <c>for</c> selected the <c>for</c> *keyword*
+    /// (1.0) over the <c>for</c> *snippet*, while the comment beside the 0.5 claimed it put snippets
+    /// on top. Above the highest symbol kind (Property/Method/Delegate at 3.0) is what actually does.
+    /// </para>
+    /// </summary>
+    public const double SnippetPriority = 100.0;
+
     private double? _priority;
     public double Priority
     {
@@ -180,7 +193,7 @@ public class CompletionData : ICompletionData
             CompletionKind.Property => 3.0,
             CompletionKind.Method => 3.0,
             CompletionKind.Delegate => 3.0,
-            CompletionKind.Snippet => 0.5,
+            CompletionKind.Snippet => SnippetPriority,
             _ => 1.0
         };
         set => _priority = value;
@@ -249,7 +262,10 @@ public class SnippetCompletionData : ICompletionData
     public string Text => _trigger;
     public object Description => $"[Snippet] {_description}\n\n{GetDisplayCode()}";
     public ImageSource? Image => null;
-    public double Priority => 0.5;  // Show snippets at top
+    // Above every symbol kind, so an equal-quality snippet wins the selection and keeps it as the
+    // user types. Higher wins in AvalonEdit — see CompletionData.SnippetPriority for why 0.5 did
+    // the exact opposite of what the comment here used to claim.
+    public double Priority => CompletionData.SnippetPriority;
 
     private string GetDisplayCode()
     {
@@ -295,6 +311,26 @@ public class SnippetCompletionData : ICompletionData
 
     public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs)
     {
+        // Enter must never expand a snippet — Tab is the only accept key.
+        //
+        // Enter is how a line is ended, and several triggers are also ordinary things to type:
+        // `null`, `else`, `throw`, `using`, `do`. Once snippets sort first and win the selection on
+        // an exact match, `x = null` followed by Enter would rewrite the line into a four-line
+        // ArgumentNullException guard. That is destructive in a way the bug this ranking fixed
+        // never was, so the ranking and this exclusion belong together — do not keep one without
+        // the other.
+        //
+        // AvalonEdit's CompletionList.HandleKey sets Handled *before* calling RequestInsertion, and
+        // Complete runs synchronously inside it, so clearing the flag here hands the keystroke back
+        // to the editor and the normal newline (with its indentation) happens. The list is already
+        // closing either way.
+        if (insertionRequestEventArgs is System.Windows.Input.KeyEventArgs
+            { Key: System.Windows.Input.Key.Enter } enterKey)
+        {
+            enterKey.Handled = false;
+            return;
+        }
+
         // Use the snippet session if available
         if (ActiveSession != null)
         {
