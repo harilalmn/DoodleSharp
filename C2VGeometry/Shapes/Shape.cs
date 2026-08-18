@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace C2VGeometry;
@@ -167,7 +167,21 @@ public abstract class Shape : IDrawable
     public string FillColor { get; set; }
 
     /// <summary>
-    /// The stroke thickness in pixels.
+    /// The stroke thickness.
+    ///
+    /// <para>
+    /// <b>Device pixels by default</b>, so a stroke keeps the same on-screen width at any zoom.
+    /// When the host's <i>Display Line Weight</i> setting is on it is read as <b>world units</b>
+    /// instead, so strokes thicken as you zoom in the way a CAD package shows true widths. This doc
+    /// used to say "in pixels" flatly, which stopped being true when that setting was added.
+    /// </para>
+    ///
+    /// <para>
+    /// It is not a plot width. AutoCAD's lineweight is an ink width in millimetres and its display
+    /// is zoom-independent in model space; this is a screen quantity, and the exporters treat it as
+    /// one — SVG pins it to device pixels via <c>vector-effect</c>, PDF converts it from DIPs to
+    /// points at 96 DPI, and DXF does not carry it at all.
+    /// </para>
     /// </summary>
     public double LineWeight { get; set; }
 
@@ -177,7 +191,16 @@ public abstract class Shape : IDrawable
     public LineType LineType { get; set; }
 
     /// <summary>
-    /// Scale factor for stroke pattern (dash/gap lengths). Default is 1.0.
+    /// Multiplier on the dash and gap lengths of <see cref="LineType"/>. Default is 1.0.
+    ///
+    /// <para>
+    /// The pattern itself is defined in <b>device pixels</b> (see
+    /// <c>C2VGeometry.Rendering.LineTypePatterns</c>), and this scales it. Dash lengths are always a
+    /// fixed on-screen size: unlike <see cref="LineWeight"/> they do not follow the Display Line
+    /// Weight setting, and unlike AutoCAD's <c>LTSCALE</c> they are not measured in drawing units,
+    /// so zooming does not change how long a dash looks. They are also independent of
+    /// <see cref="LineWeight"/> — a heavy line and a hairline of the same type dash identically.
+    /// </para>
     /// </summary>
     public double LineTypeScale { get; set; }
 

@@ -106,6 +106,7 @@ public class RenderCanvas : FrameworkElement
 
     private List<IDrawable> _currentShapes = new();
     private readonly DrawingVisual _visual;
+    private readonly DrawingVisual _gridVisual;
     private readonly DrawingVisual _rasterVisual;
     private readonly DrawingVisual _overlayVisual;
     private readonly Rendering.Raster.ManagedRasterBackend _rasterBackend = new();
@@ -240,10 +241,20 @@ public class RenderCanvas : FrameworkElement
         _backgroundBrush = new SolidColorBrush(Color.FromRgb(30, 30, 30));
         _backgroundBrush.Freeze();
 
-        // Two layers, bottom first. The raster layer holds the bitmap the managed backend writes
-        // hairline geometry into; the vector layer above it holds text, dimensions, chrome and every
-        // overlay. When the raster backend is off, the raster layer simply stays empty and the
-        // vector layer is the whole renderer, exactly as before.
+        // Four layers, bottom first: grid, raster, vector, overlay. The raster layer holds the
+        // bitmap the managed backend writes hairline geometry into; the vector layer above it holds
+        // text, dimensions, chrome; the overlay holds selection and tool feedback. When the raster
+        // backend is off, the raster layer simply stays empty and the vector layer is the whole
+        // renderer.
+        //
+        // The grid has its own layer BELOW the raster bitmap because it used to be drawn into the
+        // vector layer, which sits above it — so with any raster backend active the grid painted
+        // straight over the drawing. Grid under geometry under annotation under overlay is the order
+        // a drafting viewport needs.
+        _gridVisual = new DrawingVisual();
+        AddVisualChild(_gridVisual);
+        AddLogicalChild(_gridVisual);
+
         _rasterVisual = new DrawingVisual();
         AddVisualChild(_rasterVisual);
         AddLogicalChild(_rasterVisual);
@@ -359,15 +370,16 @@ public class RenderCanvas : FrameworkElement
         }
     }
 
-    // Required overrides for hosting DrawingVisual. Index order is z-order: the raster layer is
-    // drawn first and the vector layer composites over it.
-    protected override int VisualChildrenCount => 3;
+    // Required overrides for hosting DrawingVisual. Index order IS z-order, bottom first: the grid
+    // sits under the geometry, the raster bitmap under the vector layer, and the overlay over both.
+    protected override int VisualChildrenCount => 4;
 
     protected override Visual GetVisualChild(int index) => index switch
     {
-        0 => _rasterVisual,
-        1 => _visual,
-        2 => _overlayVisual,
+        0 => _gridVisual,
+        1 => _rasterVisual,
+        2 => _visual,
+        3 => _overlayVisual,
         _ => throw new ArgumentOutOfRangeException(nameof(index)),
     };
 
@@ -385,9 +397,37 @@ public class RenderCanvas : FrameworkElement
 
     /// <summary>
     /// Forces an immediate redraw of the canvas.
+    ///
+    /// <para>
+    /// This bumps <c>_sceneVersion</c>, because by contract it means "something about the scene
+    /// changed" and the usual reason to call it is a shape mutated in place — a property edit, a
+    /// live slider preview, user code moving something. The GPU backend keys its vertex upload off
+    /// that counter, so without the bump a mutation repainted the CPU layers and left the GPU
+    /// geometry showing the old state.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The cost is real and deliberate.</b> <c>UploadScene</c> is a full rebuild — re-tessellate
+    /// every shape, three copies of the scene — so this makes an in-place edit re-upload the whole
+    /// drawing on the GPU path. It bites hardest in <c>MainWindow.RepaintAfterUserCode</c>, which
+    /// calls this once per animation frame, so a running animation now re-uploads at frame rate on
+    /// that backend. That is still the correct trade: without the bump those animations rendered
+    /// <i>frozen</i> geometry, because the vertex buffer was uploaded once and never invalidated.
+    /// It also makes the mutate-in-place path behave like the create-new-shapes path, which went
+    /// through <c>SetFrameShapes</c> and was already re-uploading every frame.
+    /// </para>
+    ///
+    /// <para>
+    /// The actual fix is incremental upload — per-shape vertex ranges and a partial
+    /// <c>UpdateSubresource</c> — which is a different piece of work. Note that panning and zooming
+    /// do <b>not</b> come through here: they call <c>RedrawAll</c> directly, so navigation still
+    /// costs one constant-buffer write and note 88's premise is intact. Prefer
+    /// <c>RedrawOverlay</c> for anything that only moves chrome.
+    /// </para>
     /// </summary>
     public void Refresh()
     {
+        _sceneVersion++;
         RedrawAll();
     }
 
@@ -913,6 +953,11 @@ public class RenderCanvas : FrameworkElement
         // The index stores bounds by value, so a moved shape must be re-indexed. A rebuild is the
         // honest answer: the alternative is tracking each shape's slot, and moves come from
         // dragging, which repaints anyway.
+        //
+        // The version bump is what makes the GPU backend re-upload. Without it, dragging a shape
+        // moved its hit-testing and its selection handles while the geometry itself stayed put on
+        // screen — the shape appeared stuck to the canvas.
+        _sceneVersion++;
         RebuildSpatialIndex();
         RedrawAll();
     }
@@ -974,12 +1019,12 @@ public class RenderCanvas : FrameworkElement
         // Clamped, or a world-unit stroke vanishes zoomed out and swallows the canvas zoomed in.
         var thickness = Math.Clamp(lineWeight * zoom, MinRelativeLineWeight, MaxRelativeLineWeight);
 
-        // Divide the thickness scaling back out of the dash pattern, using the CLAMPED thickness so
-        // clamping does not distort the pattern either.
-        var dashScale = lineTypeScale;
-        if (lineWeight > 0 && thickness > 0) dashScale *= lineWeight / thickness;
-
-        return GetCachedPen(colorName, thickness, style, Math.Clamp(dashScale, MinDashScale, MaxDashScale));
+        // No dash compensation here any more. It used to divide the thickness scaling back out of
+        // the pattern, because WPF dash lengths are multiples of the pen thickness and the pattern
+        // was expressed in those multiples. The pattern is now canonical device pixels
+        // (LineTypePatterns) and GetDashStyle divides by the thickness it is actually given, so the
+        // on-screen dash length is thickness-independent by construction rather than by correction.
+        return GetCachedPen(colorName, thickness, style, lineTypeScale);
     }
 
     private static Pen GetCachedPen(string colorName, double thickness, LineType style = LineType.Continuous, double scale = 1.0)
@@ -1002,7 +1047,7 @@ public class RenderCanvas : FrameworkElement
         // Apply dash pattern based on stroke style
         if (style != LineType.Continuous)
         {
-            pen.DashStyle = GetDashStyle(style, roundedScale);
+            pen.DashStyle = GetDashStyle(style, roundedScale, roundedThickness);
             pen.DashCap = PenLineCap.Round;
         }
 
@@ -1011,35 +1056,36 @@ public class RenderCanvas : FrameworkElement
         return pen;
     }
 
-    private static DashStyle GetDashStyle(LineType style, double scale = 1.0)
+    /// <summary>
+    /// Builds the WPF dash style for a line type.
+    ///
+    /// <para>
+    /// The pattern comes from <see cref="C2VGeometry.Rendering.LineTypePatterns"/>, the single
+    /// definition shared with the software rasterizer — there used to be a second table here that
+    /// disagreed with it and rendered Center, Phantom and Hidden as solid lines on the other backend.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>WPF dash lengths are multiples of the pen thickness</b>, so the canonical device-pixel runs
+    /// are divided by <paramref name="thickness"/> here; WPF multiplies it straight back and the
+    /// stroke lands at the intended pixel length whatever the pen weight or the zoom. That division
+    /// is why <c>GetShapePen</c> no longer carries a compensation term of its own.
+    /// </para>
+    /// </summary>
+    private static DashStyle GetDashStyle(LineType style, double scale, double thickness)
     {
-        double[] pattern = style switch
-        {
-            LineType.Dashed => new double[] { 4, 2 },
-            LineType.Dotted => new double[] { 1, 2 },
-            LineType.DashDot => new double[] { 4, 2, 1, 2 },
-            LineType.DashDotDot => new double[] { 4, 2, 1, 2, 1, 2 },
-            LineType.Center => new double[] { 6, 2, 2, 2 },
-            LineType.Phantom => new double[] { 6, 2, 2, 2, 2, 2 },
-            LineType.Hidden => new double[] { 2, 2 },
-            _ => Array.Empty<double>()
-        };
+        var pattern = C2VGeometry.Rendering.LineTypePatterns.DevicePixels(style);
 
-        if (pattern.Length == 0)
+        if (pattern.IsEmpty ||
+            C2VGeometry.Rendering.LineTypePatterns.IsSolid(style, scale) ||
+            thickness <= 0 || !double.IsFinite(thickness))
             return DashStyles.Solid;
 
-        // A non-positive scale would collapse the pattern to zero-length dashes.
-        if (scale <= 0)
-            return DashStyles.Solid;
+        var runs = new double[pattern.Length];
+        for (int i = 0; i < pattern.Length; i++)
+            runs[i] = pattern[i] * scale / thickness;
 
-        // Apply scale to pattern
-        if (Math.Abs(scale - 1.0) > 0.001)
-        {
-            for (int i = 0; i < pattern.Length; i++)
-                pattern[i] *= scale;
-        }
-
-        return new DashStyle(pattern, 0);
+        return new DashStyle(runs, 0);
     }
 
     private void RedrawAll()
@@ -1075,13 +1121,27 @@ public class RenderCanvas : FrameworkElement
         // WPF-drawn text remained visible.
         var useRaster = ShouldUseRasterBackend();
 
-        if (!useRaster)
-            dc.DrawRectangle(_backgroundBrush, null, new Rect(0, 0, ActualWidth, ActualHeight));
-
-        if (_showGrid)
+        // Background and grid both go into the bottom layer, underneath the raster bitmap.
+        //
+        // The grid used to be drawn into the vector layer, which composites ABOVE the raster bitmap,
+        // so with a raster backend active it painted over the geometry. The background has to move
+        // with it: leaving it in the vector layer would draw an opaque rectangle on top of the grid
+        // and hide it completely — which is exactly what happened the first time this was split, and
+        // is why the offscreen comparison showed no grid on either backend.
+        //
+        // Painting it beneath the raster bitmap is harmless: that backend clears its own surface to
+        // the same colour and writes opaque pixels over it. Note 82's rule — that the VECTOR layer
+        // must not paint a background while the raster layer is active — is unchanged and is why
+        // nothing is drawn into `dc` here.
+        using (var gridDc = _gridVisual.RenderOpen())
         {
-            DrawGrid(dc);
-            DrawAxes(dc);
+            gridDc.DrawRectangle(_backgroundBrush, null, new Rect(0, 0, ActualWidth, ActualHeight));
+
+            if (_showGrid)
+            {
+                DrawGrid(gridDc);
+                DrawAxes(gridDc);
+            }
         }
 
         // Calculate Viewport in World Coordinates for Culling
@@ -3499,6 +3559,18 @@ public class RenderCanvas : FrameworkElement
         if (string.Equals(setting, "Managed", StringComparison.OrdinalIgnoreCase)) return true;
         if (string.Equals(setting, "Legacy", StringComparison.OrdinalIgnoreCase)) return false;
 
+        // Auto must not silently throw away Display Line Weight. Neither raster backend reads
+        // PenSpec.LineWeight — both draw one-pixel hairlines — so switching away from the vector
+        // path turns the setting off without telling anyone, and Auto switches on frame time and
+        // shape count, which is exactly the large drawings where a user notices stroke weights. An
+        // explicit Managed or GPU choice still wins above: naming a backend is a decision, and it is
+        // the caller's to make.
+        if (ApplicationSettings.Instance.DisplayLineWeight)
+        {
+            _rasterActive = false;
+            return false;
+        }
+
         if (_rasterActive)
         {
             if (_sceneIndex.VisibleCount < RasterSwitchDownShapes) _rasterActive = false;
@@ -3544,9 +3616,12 @@ public class RenderCanvas : FrameworkElement
             // later frame, rather than failing repeatedly.
         }
 
-        var background = _backgroundBrush is SolidColorBrush sb
-            ? Rendering.Raster.ColorTable.Resolve(sb.Color.ToString())
-            : Rendering.Raster.ColorTable.Resolve("#1E1E1E");
+        // Transparent, not the background colour. The bottom layer paints the background and the
+        // grid; an opaque clear here would cover both, because this bitmap spans the whole canvas.
+        // The surface is Pbgra32, so 0 is fully transparent premultiplied and WPF composites the
+        // finished bitmap over the grid in one step — the rasterizer itself still writes only opaque
+        // pixels and does no per-pixel blending, so note 82's premise is untouched.
+        const int background = 0;
 
         // The closure captures the viewport rather than a snapshot of its numbers, so every band
         // projects with the same transform the vector layer above it uses.
@@ -3632,8 +3707,17 @@ public class RenderCanvas : FrameworkElement
         var pad = 20.0 / Math.Max(_viewport.Scale, ViewportTransform.MinZoom);
         _sceneIndex.Query(view.Left - pad, view.Top - pad, view.Right + pad, view.Bottom + pad);
 
+        // Text, plus anything the tessellator or the GPU sink declined at upload time. The latter
+        // used to be dropped on the floor: UploadScene ignored Tessellate's return value, so a
+        // dimension or an arrow simply did not exist on this backend.
+        var declined = _gpuBackend.DeclinedShapes;
+
         foreach (var slot in _sceneIndex.Visible)
-            if (_sceneIndex.ShapeAt(slot) is VText t && t.IsVisible) _gpuDeferred.Add(t);
+        {
+            if (_sceneIndex.ShapeAt(slot) is not Shape s || !s.IsVisible) continue;
+
+            if (s is VText || declined.Contains(s)) _gpuDeferred.Add(s);
+        }
 
         return _gpuDeferred;
     }

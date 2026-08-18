@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using C2VGeometry;
 using C2VGeometry.Rendering;
@@ -190,23 +190,27 @@ public sealed class RasterPrimitiveSink : IPrimitiveSink
     }
 
     /// <summary>
-    /// Dash runs in device pixels, or null for a solid line. Mirrors the legacy renderer's
-    /// <c>GetDashStyle</c> so the two backends draw the same patterns.
+    /// Dash runs in device pixels, or null for a solid line.
+    ///
+    /// <para>
+    /// The pattern comes from <see cref="LineTypePatterns"/>, whose canonical unit is device pixels —
+    /// so this consumes it directly. It used to be a second, hand-written table that claimed to
+    /// mirror the legacy renderer's and did not: the numbers differed, and Center, Phantom and Hidden
+    /// fell through to <c>null</c> and drew solid.
+    /// </para>
     /// </summary>
     private static double[]? DashPatternFor(LineType lineType, double scale)
     {
-        if (lineType == LineType.Continuous) return null;
+        if (LineTypePatterns.IsSolid(lineType, scale)) return null;
 
-        var s = Math.Clamp(scale <= 0 ? 1.0 : scale, 0.01, 1000.0);
+        var pattern = LineTypePatterns.DevicePixels(lineType);
+        var s = LineTypePatterns.ClampScale(scale);
 
-        return lineType switch
-        {
-            LineType.Dashed => new[] { 8 * s, 4 * s },
-            LineType.Dotted => new[] { 1 * s, 3 * s },
-            LineType.DashDot => new[] { 8 * s, 3 * s, 1 * s, 3 * s },
-            LineType.DashDotDot => new[] { 8 * s, 3 * s, 1 * s, 3 * s, 1 * s, 3 * s },
-            _ => null,
-        };
+        var runs = new double[pattern.Length];
+        for (int i = 0; i < pattern.Length; i++)
+            runs[i] = pattern[i] * s;
+
+        return runs;
     }
 
 }

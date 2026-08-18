@@ -1857,7 +1857,7 @@
                                                         FontSize="11"
                                                         FontStyle="Italic"
                                                         Foreground="Gray"
-                                                        Text="Off, a shape's LineWeight is screen pixels and strokes look the same at any zoom. On, it is world units, so strokes thicken as you zoom in. Dash and gap lengths are always a fixed on-screen size."
+                                                        Text="Off, a shape's LineWeight is screen pixels and strokes look the same at any zoom. On, it is world units, so strokes thicken as you zoom in - and the canvas stays on the Legacy renderer, because the faster backends draw hairlines only. Dash and gap lengths are always a fixed on-screen size."
                                                         TextWrapping="Wrap" />
 
                                                     <!--  Auto Save Sub-header  -->

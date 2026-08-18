@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -195,15 +195,37 @@ float4 PS(VSOut i) : SV_TARGET { return i.col; }
     /// Uploads the scene. Call only when the geometry actually changes — the whole point of this
     /// backend is that navigating does not.
     /// </summary>
+    /// <summary>
+    /// Shapes the tessellator or this sink declined during the last <see cref="UploadScene"/> call,
+    /// so the caller can hand them to the vector layer. Persists between uploads, like the vertex
+    /// buffer, because the upload is only redone when the scene version moves.
+    /// </summary>
+    public IReadOnlyCollection<Shape> DeclinedShapes => _declined;
+
+    private readonly HashSet<Shape> _declined = new();
+
     public void UploadScene(IReadOnlyList<Shape> shapes, ShapeTessellator tessellator)
     {
+        // Populated by the upload and read every frame, so it persists between uploads exactly as
+        // the vertex buffer does.
+
         if (!IsAvailable || _device == null) return;
 
         var vertices = new List<Vertex>(Math.Max(1024, shapes.Count * 4));
 
+        _declined.Clear();
+
         var sink = new GpuSink(vertices);
         for (int i = 0; i < shapes.Count; i++)
-            tessellator.Tessellate(shapes[i], sink);
+        {
+            // The return value is not optional (note 81). Shapes the tessellator declines —
+            // dimensions, arrows, grids, infinite construction lines — and shapes this sink itself
+            // refuses, such as text, must be handed back for the vector layer to draw. Discarding it
+            // made them silently vanish on the GPU backend alone, which is the same defect
+            // ManagedRasterBackend was fixed for and the reason it collects them into Deferred.
+            if (!tessellator.Tessellate(shapes[i], sink))
+                _declined.Add(shapes[i]);
+        }
 
         _vertexCount = vertices.Count;
         if (_vertexCount == 0) return;
