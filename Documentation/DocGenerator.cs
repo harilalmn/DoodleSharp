@@ -65,6 +65,7 @@ namespace DoodleSharp.Documentation
                 { "BoundingBox", "Represents an axis-aligned bounding box with Min (lower-left) and Max (upper-right) corner points, both VXYZ. Returned by Shape.GetBounds() on every shape. Read-only properties: Min, Max, Width (Max.X - Min.X), Height (Max.Y - Min.Y), Center, Area (Width × Height). Methods: Contains(point) — inclusive of the boundary and ignoring Z; Intersects(other) — true when the boxes overlap or merely touch; Union(other) — the smallest box containing both; Expand(distance) — grown by the distance on all four sides (negative values contract, and may invert the box). Constructible directly: new BoundingBox(min, max). Supports tuple deconstruction: var (min, max) = bounds. Infinite shapes (VRay, VXLine) return boxes with non-finite corners." },
                 { "IDrawable", "Interface for any object that can be drawn on the canvas. Defines Draw() plus the five styling properties every drawable exposes: Color, FillColor, LineWeight, LineType and LineTypeScale. Shape implements it, and ICurve extends it. Both Place() and Draw() are declared here, so either reaches the same behaviour through an IDrawable or ICurve reference exactly as it does through Shape." },
                 { "ICurve", "Interface for geometric shapes that can be treated as curves. Implemented by VLine, VCircle, VArc, VEllipse, VPolyline, VPolygon, VBezier, VSpline, VRay and VXLine (VRectangle and VCell inherit it through VPolygon). Extends IDrawable, so all curves have Draw(), Color, FillColor, LineWeight, LineType and LineTypeScale. Properties: StartPoint, EndPoint (VXYZ; equal for closed curves), Vertices (List<VXYZ> of the defining points), SelfIntersecting. Methods: GetLength(), Divide(n), Measure(segmentLength), Project(point), PointAtSegmentLength(len), Offset(distance), Offset(List<double>), PointsAtChordLengthFromPoint(point, chordLength), SplitAtPoint(point), NormalAtPoint(point), Intersect(otherCurve), PointAtParameter(t), ParameterAtPoint(point), SetBounds(startParam, endParam). All coordinate results are VXYZ. PointAtParameter() takes a normalized 0-1 position; ParameterAtPoint() is its inverse for the closest point on the curve. SetBounds() trims a curve in place and throws NotSupportedException on VCircle, VPolygon, VRay and VXLine, whose trimmed form would be a different shape type." },
+                { "Canvas", "The drawing surface as your code sees it. Shapes register themselves when you construct them, so most sketches never touch this - it exists for the case that had no answer before: a callback that redraws, and therefore has to take the previous frame's shapes back off. Canvas.Clear() removes every shape; Canvas.Remove(a, b) or Canvas.Remove(list) removes the ones you name, skipping nulls and shapes that are not on the canvas. Both are geometry only: they do NOT rewind shape ids, stop a running timeline or reset the view, because none of that is implied by \"clear the canvas\" and firing it from inside a mouse handler would be a nasty surprise. Note that Frame.Clear() is NOT this - it drops queued per-frame callbacks and leaves the drawing untouched. Both are null-safe with no canvas attached, so they work in a unit test." },
                 { "IShapeRegistry", "The hook that connects the geometry library to a canvas. Shape.DefaultRegistry holds the active implementation; when it is non-null and Shape.AutoRegister is true, every shape constructor calls Register(this) — which is why shapes appear without any explicit call. Members: Register(shape), Unregister(shape) (what Shape.Remove() calls), MoveAbove(shape, reference) and MoveBehind(shape, reference) (what BringAbove/SendBehind call). DoodleSharp supplies CanvasRenderer as the implementation. You rarely implement this yourself — it exists so C2VGeometry stays free of any UI dependency." },
                 { "IGlyphOutlineProvider", "Supplies vector outlines for the characters of a VText. C2VGeometry has no font engine of its own, so the host application implements this and assigns it to VText.GlyphOutlineProvider at startup (the same injection pattern as Shape.DefaultRegistry). Single member: GetCharContours(text, charIndex) returning List<List<VXYZ>>? — one inner list per closed contour, in world coordinates that match where the character is rendered (honouring font, height, anchor and rotation), or null for whitespace. With no provider set, VText.ToCharShape/LiftChar/LiftChars all return null." },
                 { "ControlPoint", "One draggable handle exposed by a shape for interactive editing on the canvas. Returned by Shape.GetControlPoints() and consumed by Shape.MoveControlPoint(index, newPosition). Read-only Type (ControlPointType) and Label; settable X and Y; ToVXYZ() converts the position to a VXYZ. Constructor: new ControlPoint(type, x, y, label = \"\"). Index 0 is by convention the whole-shape Move handle." },
@@ -1619,6 +1620,27 @@ foreach (var item in items)
 
 // Place() is only for shapes that did not come from a plain `new`." },
 
+                { "Canvas", @"// Canvas.Clear() is for when the SET of shapes changes, not merely their positions.
+// Here the number of rings depends on the cursor, so the scene has to be rebuilt.
+Mouse.OnMove(e =>
+{
+    Canvas.Clear();
+
+    var rings = (int)(e.X / 40);
+    for (var i = 1; i <= rings; i++)
+        new VCircle(new VXYZ(0, 0), i * 20) { Color = ""Cyan"" };
+});
+
+// When only POSITIONS change, do not clear. Build once and assign - it allocates
+// nothing per event and is much faster:
+//
+//   var dot = new VCircle(new VXYZ(0, 0), 10);
+//   Mouse.OnMove(e => dot.Center = e.Position);
+
+// Remove named shapes instead of everything:
+var a = new VCircle(new VXYZ(0, 0), 5);
+var b = new VText(new VXYZ(0, 20), ""label"");
+Canvas.Remove(a, b);" },
                 { "IShapeRegistry", @"// IShapeRegistry is the seam between the geometry library and a canvas.
 // Shape.DefaultRegistry holds the live implementation, which is why a shape
 // appears the moment you construct it — no placement call involved.
@@ -4370,6 +4392,8 @@ if (lifted != null) { lifted.Move(new VXYZ(0, -80)); lifted.Color = ""Magenta"";
                 { "VSpatialGrid.ApplyStyle", "Pushes the grid's Color, FillColor and LineWeight onto every cell." },
 
                 // IShapeRegistry
+                { "Canvas.Clear", "Removes every shape from the canvas. Geometry only: it does not rewind shape ids, stop a running timeline or reset the view - those belong to the host's between-runs reset. Safe with no canvas attached (it becomes a no-op), so it works in a unit test. Reach for it when the SET of shapes changes; if only positions change, build the shapes once and assign to them instead, which allocates nothing per event." },
+                { "Canvas.Remove", "Takes the named shapes off the canvas: Remove(a, b, c) or Remove(someList). Nulls are skipped and a shape that is not on the canvas is ignored, so it is safe to call with a list you are also rebuilding. The list overload materialises its argument first, so you can pass a live view of the registry - CanvasRenderer.Instance.GetShapes() - without it throwing mid-iteration. Equivalent to calling shape.Remove() on each." },
                 { "IShapeRegistry.Register", "Called by every Shape constructor when Shape.AutoRegister is true and Shape.DefaultRegistry is set — this is why shapes appear without an explicit call. Also called by Shape.Place() (and its alias Draw())." },
                 { "IShapeRegistry.Unregister", "Removes a shape from the canvas. Called by Shape.Remove()." },
                 { "IShapeRegistry.MoveAbove", "Reorders a shape so it renders after (on top of) a reference shape. Called by Shape.BringAbove()." },

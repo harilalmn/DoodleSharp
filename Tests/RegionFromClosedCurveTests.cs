@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
@@ -19,6 +19,7 @@ public class RegionFromClosedCurveTests : IDisposable
         public readonly List<Shape> Shapes = new();
         public void Register(Shape s) => Shapes.Add(s);
         public void Unregister(Shape s) => Shapes.Remove(s);
+        public void Clear() => Shapes.Clear();
         public void MoveAbove(Shape s, Shape r) { }
         public void MoveBehind(Shape s, Shape r) { }
     }

@@ -1702,6 +1702,36 @@ Every callback receives a `MouseInfo`: where the pointer is in **world coordinat
 the canvas centre), which button and which modifier keys are involved, how far the wheel turned, and —
 only if you ask for it — which shape is underneath.
 
+#### Redrawing from a handler
+
+A handler that *creates* shapes creates them again on every event, and shapes register themselves as
+they are constructed — so a mouse-move handler that builds a circle leaves one behind per pixel of
+travel. `Canvas.Clear()` takes everything back off:
+
+```csharp
+Mouse.OnMove(e =>
+{
+    Canvas.Clear();                       // the whole canvas, geometry only
+
+    var rings = (int)(e.X / 40);
+    for (var i = 1; i <= rings; i++)
+        new VCircle(new VXYZ(0, 0), i * 20) { Color = "Cyan" };
+});
+```
+
+`Canvas.Remove(a, b)` — or `Canvas.Remove(someList)` — takes off only what you name, skipping nulls
+and shapes that are not on the canvas, so it is safe to call with a list you are also rebuilding.
+Both are geometry only: neither rewinds shape IDs, stops a running timeline, nor resets the view.
+
+> **`Frame.Clear()` is not this.** It drops queued `Frame.Request` callbacks and leaves the drawing
+> exactly as it was. If you have been calling it expecting a blank canvas, that is why the shapes
+> kept piling up.
+
+**Most handlers should not clear anything.** Clearing and rebuilding allocates a whole scene per
+event. When only *positions* change — which is the common case — build the shapes once and assign to
+them, as the example at the top of this section does. Reach for `Canvas.Clear()` when the **set** of
+shapes changes, not merely where they are.
+
 **Registering replaces; it does not add.** Calling `Mouse.OnMove` twice leaves one handler, the
 second. That is deliberate, and it is *not* how `Frame.Request` behaves: `Main()` is re-invoked on
 every tick of a Global Parameters slider drag, so an additive API would silently stack hundreds of

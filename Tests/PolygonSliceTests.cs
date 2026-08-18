@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using C2VGeometry;
 
@@ -259,6 +259,8 @@ public class PolygonSliceTests
         public void Register(Shape shape) => Registered.Add(shape);
 
         public void Unregister(Shape shape) => Registered.Remove(shape);
+
+        public void Clear() => Registered.Clear();
 
         public void MoveAbove(Shape shape, Shape referenceShape) { }
 

@@ -1,4 +1,4 @@
-namespace C2VGeometry;
+﻿namespace C2VGeometry;
 
 /// <summary>
 /// Interface for optional shape registration with a canvas or rendering system.
@@ -17,6 +17,19 @@ public interface IShapeRegistry
     /// </summary>
     /// <param name="shape">The shape to unregister.</param>
     void Unregister(Shape shape);
+
+    /// <summary>
+    /// Removes every registered shape.
+    ///
+    /// <para>
+    /// <b>Geometry only.</b> This is what <c>Canvas.Clear()</c> calls, and it means exactly "take
+    /// everything off the canvas" — it must not reset shape ids, stop a running timeline, or touch
+    /// anything else belonging to the host's run lifecycle. A host that also needs those has its own
+    /// entry point for them; <c>CanvasRenderer</c> keeps a separate public <c>Clear()</c> for the
+    /// between-runs reset and implements this one explicitly.
+    /// </para>
+    /// </summary>
+    void Clear();
 
     /// <summary>
     /// Moves a shape so it renders above (after) another shape in the draw order.

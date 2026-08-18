@@ -1,4 +1,4 @@
-using C2VGeometry;
+﻿using C2VGeometry;
 using DoodleSharp.Animation;
 using DoodleSharp.Services;
 
@@ -67,6 +67,12 @@ public class CanvasRenderer : ICanvasRenderer, C2VGeometry.IShapeRegistry
     void C2VGeometry.IShapeRegistry.Register(Shape shape) => AddShape(shape);
 
     void C2VGeometry.IShapeRegistry.Unregister(Shape shape) => RemoveShape(shape);
+
+    // Explicit, because the public Clear() on this class means something larger — the between-runs
+    // reset, which also rewinds shape ids and stops the timeline. User code reaching this through
+    // Canvas.Clear() wants the geometry gone and nothing else. Same pattern as note 33's
+    // VLine.ICurve.StartPoint: one name, two audiences.
+    void C2VGeometry.IShapeRegistry.Clear() => ClearShapes();
 
     void C2VGeometry.IShapeRegistry.MoveAbove(Shape shape, Shape referenceShape)
         => MoveShapeAbove(shape, referenceShape);
@@ -147,9 +153,33 @@ public class CanvasRenderer : ICanvasRenderer, C2VGeometry.IShapeRegistry
 
     public IReadOnlyList<IDrawable> GetShapes() => _shapes.AsReadOnly();
 
+    /// <summary>
+    /// The between-runs reset: removes every shape, rewinds the shape id counter and stops any
+    /// running timeline. This is the host's lifecycle clear and is called before each execution.
+    ///
+    /// <para>
+    /// <b>Not what user code gets.</b> <c>Canvas.Clear()</c> routes to
+    /// <see cref="ClearShapes"/> through the interface, because rewinding ids and killing a timeline
+    /// are not implied by "clear the canvas" and would be a nasty surprise inside a mouse handler.
+    /// </para>
+    /// </summary>
     public void Clear()
     {
-        // Reset IsPlaced for all shapes so they can be re-added in next run
+        ClearShapes();
+        Shape.ResetIdCounter();
+        ActiveTimeline?.Stop();
+        ActiveTimeline = null;
+    }
+
+    /// <summary>
+    /// Removes every shape and nothing else. The geometry half of <see cref="Clear"/>, and what
+    /// <c>Canvas.Clear()</c> calls.
+    /// </summary>
+    public void ClearShapes()
+    {
+        // IsPlaced is cleared so a shape held by user code can be Place()d again afterwards;
+        // AddShape early-returns on an already-placed shape, so without this a re-added shape would
+        // silently do nothing.
         foreach (var shape in _shapes)
         {
             if (shape is Shape s)
@@ -157,11 +187,13 @@ public class CanvasRenderer : ICanvasRenderer, C2VGeometry.IShapeRegistry
                 s.IsPlaced = false;
             }
         }
+
         _shapes.Clear();
+
+        // Bumped so the host notices the set changed and re-snapshots rather than re-indexing —
+        // RenderCanvas keeps its own list, so without this the display would keep the old shapes
+        // (note 96).
         RegistryVersion++;
-        Shape.ResetIdCounter();
-        ActiveTimeline?.Stop();
-        ActiveTimeline = null;
     }
 
     public void RenderTo(RenderCanvas canvas)

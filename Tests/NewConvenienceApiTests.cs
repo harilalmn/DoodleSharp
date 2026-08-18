@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using C2VGeometry;
 
 namespace DoodleSharp.Tests;
@@ -17,6 +17,7 @@ public class NewConvenienceApiTests : IDisposable
         public readonly System.Collections.Generic.List<Shape> Shapes = new();
         public void Register(Shape s) { if (!Shapes.Contains(s)) Shapes.Add(s); }
         public void Unregister(Shape s) => Shapes.Remove(s);
+        public void Clear() => Shapes.Clear();
         public void MoveAbove(Shape s, Shape r) { }
         public void MoveBehind(Shape s, Shape r) { }
     }
