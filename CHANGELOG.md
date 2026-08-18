@@ -35,6 +35,13 @@ tags; this file is the curated, human-friendly summary.
   They are now solved exactly, in well under a microsecond; that loop finishes in about 1 ms. A ray
   still reaches only as far as its `RenderExtent` (10000 by default) — raise it for obstacles
   further out.
+- **`RayCaster` returned bogus hits for construction lines.** `VRay` and `VXLine` were documented as
+  excluded from the index, and were not: both report a *finite* bounding box derived from
+  `RenderExtent`, so the non-finite-bounds filter never caught them. Neither has exact ray math, so
+  a hit on one was a hit on its bounding box — a diagonal construction line could answer with a
+  point nowhere near itself, and being nearest it beat the real geometry behind it. They are now
+  excluded by type, as the documentation always claimed. To find where a ray crosses a construction
+  line, intersect them directly with `ray.Intersect(other)`.
 
 
 ## [2026.8.4] - 2026-08-18

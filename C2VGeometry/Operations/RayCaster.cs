@@ -39,8 +39,11 @@ public readonly record struct RayQuery(VXYZ Origin, VXYZ Direction);
 ///    <see cref="FindIntersections"/> exploits this with <see cref="Parallel.For"/>.
 ///
 /// All queries operate in the XY plane — the Z components of the ray origin
-/// and direction are ignored. Shapes with non-finite bounds (e.g. <see cref="VRay"/>,
-/// <see cref="VXLine"/>) are silently excluded from the index.
+/// and direction are ignored. <see cref="VPoint"/> markers, the construction
+/// guides <see cref="VRay"/> and <see cref="VXLine"/>, and any shape whose bounds
+/// are null or non-finite are excluded from the index. Note that VRay and VXLine
+/// are excluded by an explicit type test, not by the bounds check: both report a
+/// finite box derived from their RenderExtent.
 /// </summary>
 public class RayCaster
 {
@@ -80,7 +83,10 @@ public class RayCaster
     /// Only <see cref="Shape.IsVisible"/> shapes are indexed. <see cref="VPoint"/>
     /// markers are always excluded from the index: they have zero area, ray hits
     /// on them are degenerate, and they exist primarily as visual labels rather
-    /// than hit targets. Shapes with null or non-finite bounds are also skipped.
+    /// than hit targets. <see cref="VRay"/> and <see cref="VXLine"/> are excluded
+    /// too: they are construction guides, and without exact ray-vs-shape math a hit
+    /// on them would be reported at their bounding box rather than at the geometry.
+    /// Shapes with null or non-finite bounds are also skipped.
     /// The collection is snapshotted at construction: shapes added or removed
     /// afterwards are not reflected. Use <see cref="Refit"/> when indexed shapes
     /// move; build a new <see cref="RayCaster"/> when the scene changes
@@ -109,6 +115,22 @@ public class RayCaster
             // VPoint markers are zero-area visual labels — never a useful
             // ray-cast target. Always skip them.
             if (s is VPoint) continue;
+
+            // VRay and VXLine are construction guides, and excluding them is not
+            // optional bookkeeping — it is a correctness fix. The exclusion was
+            // documented (and recorded in CLAUDE.md note 9) as falling out of the
+            // non-finite-bounds check below, but it never did: both override
+            // GetBounds() to return a FINITE box derived from RenderExtent, so
+            // IsFiniteBox happily accepts them. They were therefore indexed, and
+            // because neither is in the inline exact-math set they fell back to the
+            // raw AABB test — which reports the hit at the box the ray entered, not
+            // where the geometry actually is. A 45-degree VXLine probed horizontally
+            // at y = 10 returned the hit at the query ray's own origin, (-50, 10),
+            // where the true crossing is (10, 10). A silently wrong hit is worse than
+            // no hit, and worse still it wins the nearest-hit race against the real
+            // geometry behind it. Add exact ray-vs-ray/xline math before re-admitting
+            // them.
+            if (s is VRay || s is VXLine) continue;
 
             BoundingBox? bb;
             try { bb = s.GetBounds(); }

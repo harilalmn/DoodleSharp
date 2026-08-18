@@ -142,6 +142,42 @@ public class C2VRayCasterTests : IDisposable
     }
 
     [Fact]
+    public void Constructor_ExcludesConstructionGuides()
+    {
+        // VRay and VXLine are excluded by an explicit type test, NOT by the
+        // non-finite-bounds check the documentation used to credit: both override
+        // GetBounds() to return a finite box derived from RenderExtent, so they
+        // sailed straight through it and were indexed.
+        var ray = new VRay(new VXYZ(0, 0), new VXYZ(1, 1)) { RenderExtent = 100 };
+        var xline = new VXLine(new VXYZ(0, 0), new VXYZ(1, 1));
+
+        var rc = new RayCaster(new Shape[] { ray, xline });
+        Assert.Equal(0, rc.Count);
+        Assert.Null(rc.FindIntersection(new VXYZ(-50, 10, 0), new VXYZ(1, 0, 0)));
+    }
+
+    [Fact]
+    public void Constructor_ExcludesConstructionGuidesMixedWithRealShapes()
+    {
+        // The real defect this closes: with no exact ray-vs-guide math, a guide fell
+        // back to the raw AABB test and reported its hit where the query ray ENTERED
+        // the box — so it won the nearest-hit race against the geometry behind it and
+        // returned a point nowhere near itself. Probed at y = 10, the 45-degree guide
+        // answered (-50, 10) — the query's own origin — where the true crossing is
+        // (10, 10).
+        var xline = new VXLine(new VXYZ(0, 0), new VXYZ(1, 1));
+        var circle = new VCircle(10, 10, 1);
+
+        var rc = new RayCaster(new Shape[] { xline, circle });
+        Assert.Equal(1, rc.Count);
+
+        var hit = rc.FindIntersection(new VXYZ(-50, 10, 0), new VXYZ(1, 0, 0));
+        Assert.NotNull(hit);
+        Assert.Same(circle, hit!.Value.Shape);
+        Assert.Equal(9.0, hit.Value.Point.X, 6);
+    }
+
+    [Fact]
     public void FindIntersection_PrunesToCorrectShapeAmongMany()
     {
         var shapes = new List<Shape>();
