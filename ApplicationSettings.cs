@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 
 namespace DoodleSharp;
@@ -88,15 +88,25 @@ public class AppSettingsData
 
     // Line Style Rendering Settings
     /// <summary>
-    /// True (default) = line weight is measured in world units, so strokes get thicker as you zoom in.
-    /// False = line weight is measured in screen pixels and stays constant at any zoom.
+    /// Whether a shape's <c>LineWeight</c> is drawn at true scale.
+    ///
+    /// <para>
+    /// <b>False (the default)</b>: line weight is device pixels, so a stroke looks the same at any
+    /// zoom. <b>True</b>: it is world units, so strokes thicken as you zoom in, the way a CAD
+    /// package shows true widths.
+    /// </para>
+    ///
+    /// <para>
+    /// This replaced a pair of Absolute / "Relative to zoom level" dropdowns — one for line weight,
+    /// one for line type scale — which exposed four combinations when only two were ever wanted.
+    /// <b>Line type scale is now always absolute</b> and has no setting: dash lengths are fixed on
+    /// screen. The old keys are simply absent from this class; <c>ApplicationSettings.Load</c> uses
+    /// default <c>JsonSerializerOptions</c>, which ignore unknown members, so an existing
+    /// appsettings.json carrying them still deserializes and drops them on the next save (the same
+    /// reasoning as the retired <c>ShowToolbar</c>, note 98).
+    /// </para>
     /// </summary>
-    public bool LineWeightRelativeToZoom { get; set; } = true;
-    /// <summary>
-    /// True (default) = dash/gap lengths are measured in world units, so the pattern stretches as you zoom in.
-    /// False = the pattern keeps a constant on-screen size at any zoom.
-    /// </summary>
-    public bool LineTypeScaleRelativeToZoom { get; set; } = true;
+    public bool DisplayLineWeight { get; set; } = false;
 
     // Default Shape Settings (Application-level defaults, used when project settings are empty)
     public string? AppDefaultColor { get; set; }

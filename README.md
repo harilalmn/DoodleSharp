@@ -1442,22 +1442,23 @@ line2.LineType = LineType.DashDot;
 line2.LineTypeScale = 0.5;   // half-length dashes and gaps
 ```
 
-### Line Weight & Line Type Scale Rendering Mode
+### Display Line Weight
 
-`LineWeight` (stroke thickness) and `LineTypeScale` (dash/gap length multiplier) can each be
-interpreted in one of two ways, set in **Settings > Application Settings > Line Style Rendering**:
+One checkbox, in **Settings > Application Settings > Line Style Rendering**, decides how
+`LineWeight` (stroke thickness) is measured:
 
-| Mode | Meaning | Behaviour when you zoom |
-|------|---------|-------------------------|
-| **Relative to zoom level (world units)** *(default)* | The value is a world-space measurement | Strokes and dashes grow as you zoom in and shrink as you zoom out, like the geometry itself |
-| **Absolute (screen pixels)** | The value is a screen-pixel measurement | Strokes and dashes keep the same on-screen size at any zoom |
+| Display Line Weight | `LineWeight` means | Behaviour when you zoom |
+|---------------------|--------------------|-------------------------|
+| **Off** *(default)* | Screen pixels | Strokes keep the same on-screen size at any zoom, so hairlines stay readable zoomed far out |
+| **On** | World units | Strokes thicken as you zoom in and thin as you zoom out, the way a CAD package shows true widths |
 
-Relative is the default for both, so a `LineWeight = 3` stroke is 3 world units wide and a dashed
-line shows the same number of dashes along its length however far you zoom — the drawing scales as
-a whole. The two settings are independent, so you can switch line weight to absolute (hairlines
-stay readable when zoomed far out) while keeping the dash pattern relative, or any other
-combination. Both are application-level and saved globally; changing either redraws the canvas
-immediately.
+`LineTypeScale` is **always absolute** — dash and gap lengths keep a constant on-screen size
+whatever the zoom, and there is no setting for it. This is a change: line weight and line type
+scale used to be separate Absolute/Relative dropdowns defaulting to relative, which offered four
+combinations when two were wanted. If you had either set to relative, it now behaves as absolute
+until you tick Display Line Weight.
+
+The setting is application-level and saved globally; changing it redraws the canvas immediately.
 
 ### Color Formats
 - **Named colors**: `"Red"`, `"Blue"`, `"Cyan"`, `"LimeGreen"`, etc.

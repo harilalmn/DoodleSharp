@@ -123,6 +123,24 @@ public class SettingsRoundTripTests
     }
 
     [Fact]
+    public void LineTypeScaleHasNoZoomMode()
+    {
+        // Line weight and line type scale used to be two Absolute/Relative dropdowns, which exposed
+        // four combinations when two were wanted — and the pair interacted, because WPF dash lengths
+        // are multiples of pen thickness, so scaling the thickness stretched the dashes as a side
+        // effect that had to be divided back out. Line type scale is now always absolute, with no
+        // setting at all; only the thickness compensation survives in GetShapePen.
+        Assert.DoesNotContain("LineTypeScaleRelativeToZoom", Code());
+        Assert.DoesNotContain("LineTypeScaleRelativeToZoom", Xaml());
+        Assert.DoesNotContain("LineTypeScaleRelativeToZoom",
+            File.ReadAllText(Path.Combine(ArrowheadConsistencyTests.RepoRoot(), "ApplicationSettings.cs")));
+
+        // The one switch that remains, off by default.
+        var settings = File.ReadAllText(Path.Combine(ArrowheadConsistencyTests.RepoRoot(), "ApplicationSettings.cs"));
+        Assert.Contains("public bool DisplayLineWeight { get; set; } = false;", settings);
+    }
+
+    [Fact]
     public void ApplicationSettingsLoadIsNotGatedOnAProject()
     {
         // Application settings are global. They used to sit behind the same early return as the

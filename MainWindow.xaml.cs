@@ -4204,8 +4204,7 @@ public partial class MainWindow : Window
         SettingsAutoSaveIntervalBox.Text = appSettings.AutoSaveIntervalSeconds.ToString();
 
         // Line Style Rendering Settings
-        SettingsLineWeightModeCombo.SelectedIndex = appSettings.LineWeightRelativeToZoom ? 1 : 0;
-        SettingsLineTypeScaleModeCombo.SelectedIndex = appSettings.LineTypeScaleRelativeToZoom ? 1 : 0;
+        SettingsDisplayLineWeightCheck.IsChecked = appSettings.DisplayLineWeight;
 
         // Render backend. An unrecognised value in the settings file behaves as Auto, matching
         // ShouldUseRasterBackend, rather than leaving the combo blank.
@@ -4440,18 +4439,16 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Switches line weight / line type scale between Absolute (screen pixels, constant at any
-    /// zoom) and Relative to zoom level (world units, scales with the viewport).
+    /// Off (the default): a shape's LineWeight is device pixels and a stroke looks the same at any
+    /// zoom. On: it is world units, so strokes grow and shrink with the drawing. Replaced a pair of
+    /// Absolute/Relative dropdowns — line weight and line type scale — that offered four
+    /// combinations where two were wanted; line type scale is now always absolute.
     /// </summary>
-    private void LineStyleModeCombo_Changed(object sender, SelectionChangedEventArgs e)
+    private void SettingsDisplayLineWeightCheck_Changed(object sender, RoutedEventArgs e)
     {
-        // Fires during InitializeComponent, before the sibling combo exists.
-        if (SettingsUiBusy || SettingsLineWeightModeCombo == null || SettingsLineTypeScaleModeCombo == null)
-            return;
+        if (SettingsUiBusy) return;
 
-        var settings = ApplicationSettings.Instance;
-        settings.LineWeightRelativeToZoom = SettingsLineWeightModeCombo.SelectedIndex == 1;
-        settings.LineTypeScaleRelativeToZoom = SettingsLineTypeScaleModeCombo.SelectedIndex == 1;
+        ApplicationSettings.Instance.DisplayLineWeight = SettingsDisplayLineWeightCheck.IsChecked == true;
         ApplicationSettings.Save();
         RenderCanvas.Refresh();
     }

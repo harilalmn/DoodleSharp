@@ -9,6 +9,30 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+### Changed
+- **Line weight rendering is now one checkbox, "Display Line Weight", and it is off by default.**
+  It replaces the pair of Absolute / "Relative to zoom level" dropdowns for line weight and line
+  type scale, which between them offered four combinations when two were wanted. Off, a shape's
+  `LineWeight` is screen pixels and a stroke looks the same at any zoom; on, it is world units and
+  strokes thicken as you zoom in, the way a CAD package shows true widths.
+
+  **`LineTypeScale` is now always absolute** — dash and gap lengths keep a constant on-screen size
+  and there is no setting for them. If you had either option set to "relative to zoom level", it
+  now behaves as absolute until you tick Display Line Weight. Existing settings files are read
+  without complaint; the retired keys are dropped on the next save.
+
+### Fixed
+- **Seven help pages you could not open.** `SvgExporter`, `SnapEngine`, `SnapType`, `SnapResult`,
+  `DrawingTool`, `DrawingInputMode` and `GlyphOutlineProvider` had written documentation that was
+  unreachable in F1 Help and invisible to its search. Their pages now exist, with examples and a
+  description for every member. `DrawingMode` was added alongside them.
+- **`Ctrl+Shift+F` opens Find in Files.** The Search menu has advertised that shortcut all along,
+  but nothing ever handled it.
+- The F1 **Drawing Tools** page said Arc is "click center, start, end". It is start, a point on the
+  arc, then end — the centre is derived. Four shape types missing from that table were added.
+- Snapping: passing no scene index to `SnapEngine.FindSnapPoint` silently reported "no snap"
+  forever instead of failing; it now throws with a message naming the overload to use.
+
 ## [2026.8.3] - 2026-08-18
 
 ### Added

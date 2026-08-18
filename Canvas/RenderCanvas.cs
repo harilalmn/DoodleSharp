@@ -945,31 +945,39 @@ public class RenderCanvas : FrameworkElement
     }
 
     /// <summary>
-    /// Builds the pen for a shape, honoring the Absolute vs "Relative to zoom level" render modes
-    /// for line weight and line type scale (Settings &gt; Application Settings &gt; Line Style Rendering).
-    /// Absolute (the default) means the value is in screen pixels and looks the same at any zoom;
-    /// relative means it is in world units and grows/shrinks with the viewport.
+    /// Builds the pen for a shape.
+    ///
+    /// <para>
+    /// <b>Display Line Weight</b> (Settings &gt; Application Settings, off by default) is the single
+    /// switch: off, a shape's <c>LineWeight</c> is device pixels and a stroke looks the same at any
+    /// zoom; on, it is world units, so strokes thicken as you zoom in the way a CAD package shows
+    /// true widths. It replaced a pair of Absolute/Relative dropdowns — one for line weight and one
+    /// for line type scale — which offered four combinations where only two were ever wanted.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Line type scale is now always absolute</b>: dash lengths are fixed on screen. That is the
+    /// only behaviour anyone asked for, and it removes the interaction that made the old pair hard
+    /// to reason about. The compensation below still matters, though — WPF dash lengths are
+    /// multiples of the pen thickness, so scaling the *thickness* with zoom stretches the dashes as
+    /// a side effect, and it has to be divided back out to keep them absolute.
+    /// </para>
     /// </summary>
     private Pen GetShapePen(string colorName, double lineWeight, LineType style, double lineTypeScale)
     {
         var settings = DoodleSharp.ApplicationSettings.Instance;
-        var weightRelative = settings.LineWeightRelativeToZoom;
-        var dashRelative = settings.LineTypeScaleRelativeToZoom;
 
         var zoom = _viewport.Scale;
-        if ((!weightRelative && !dashRelative) || zoom <= 0 || double.IsNaN(zoom) || double.IsInfinity(zoom))
+        if (!settings.DisplayLineWeight || zoom <= 0 || double.IsNaN(zoom) || double.IsInfinity(zoom))
             return GetCachedPen(colorName, lineWeight, style, lineTypeScale);
 
-        var thickness = weightRelative
-            ? Math.Clamp(lineWeight * zoom, MinRelativeLineWeight, MaxRelativeLineWeight)
-            : lineWeight;
+        // Clamped, or a world-unit stroke vanishes zoomed out and swallows the canvas zoomed in.
+        var thickness = Math.Clamp(lineWeight * zoom, MinRelativeLineWeight, MaxRelativeLineWeight);
 
-        // WPF dash pattern lengths are multiples of the pen thickness, so a zoom-relative
-        // thickness already stretches the dashes. Divide that back out (using the clamped
-        // thickness, so clamping doesn't distort the pattern) to apply each mode exactly once.
+        // Divide the thickness scaling back out of the dash pattern, using the CLAMPED thickness so
+        // clamping does not distort the pattern either.
         var dashScale = lineTypeScale;
-        if (dashRelative) dashScale *= zoom;
-        if (weightRelative && lineWeight > 0 && thickness > 0) dashScale *= lineWeight / thickness;
+        if (lineWeight > 0 && thickness > 0) dashScale *= lineWeight / thickness;
 
         return GetCachedPen(colorName, thickness, style, Math.Clamp(dashScale, MinDashScale, MaxDashScale));
     }
