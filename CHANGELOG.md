@@ -9,6 +9,33 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+### Fixed
+- **A project named after part of the API could not use it.** The project name becomes the namespace
+  of the generated code, and a namespace declaration is searched before any `using` — so in a project
+  called *Mouse*, `Mouse.OnMove(...)` resolved against the user's own namespace and failed to compile
+  with *"the type or namespace name 'OnMove' does not exist in the namespace 'Mouse'"*. The same trap
+  applied to any project named after a type the templates import (`Frame`, `Canvas`, `VCircle`,
+  `Console`, `Math`, `List`, …) or after a C# keyword. New projects now get a non-shadowing namespace
+  (*Mouse* → `MouseProject`).
+
+  An existing project already carrying the shadowing namespace is fixed by renaming the namespace in
+  `StartViz.cs` — which is now safe to do, because the entry point is found by scanning for the `Viz`
+  class when the namespace no longer matches the project name. Fully qualifying the call
+  (`DoodleSharp.Animation.Mouse.OnMove(...)`) works too.
+- **A new module file (Ctrl+N) was created with an invalid class name.** The default file name
+  `Untitled-1` was written straight into the template as `public class Untitled-1`, so the file failed
+  to compile the moment it was created; a project name containing a space produced an equally invalid
+  namespace. Both names are now sanitized.
+
+### Changed
+- **A name that collides with the DoodleSharp API is now reported where you can fix it.** The compiler
+  blames the token it failed to look up, so shadowing `Mouse` underlined `OnMove` — the one part of
+  the line that was correct — and said nothing about the declaration that caused it. The error now
+  appears on the declaration itself, reading **"Mouse is a keyword. try another name"**, once however
+  many uses it broke. This covers namespaces, classes, locals, fields, properties, parameters and
+  `foreach` variables, and applies to the console, the editor squiggles and the error count alike.
+  Ordinary mistakes are untouched: a typo against the real API still reports as a typo.
+
 ## [2026.8.5] - 2026-08-18
 
 ### Fixed

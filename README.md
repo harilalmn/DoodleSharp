@@ -47,12 +47,13 @@ Existing projects open from the welcome screen, from File > Open Project (Ctrl+O
 DoodleSharp opens straight into that project with its entry-point file loaded.
 
 ### 2. Write Your Code
-The entry point is `StartViz.Viz.Main()` in `StartViz.cs`:
+The entry point is `Main()` on a class called `Viz`, in `StartViz.cs`. The namespace is your
+project's name:
 
 ```csharp
 using C2VGeometry;
 
-namespace StartViz
+namespace MyProject          // your project's name
 {
     public class Viz
     {
@@ -2094,7 +2095,7 @@ Every animation type inherits these:
 using C2VGeometry;
 using DoodleSharp.Animation;
 
-namespace StartViz
+namespace MyProject
 {
     public class Viz
     {
@@ -3726,10 +3727,11 @@ When enabled, identifiers are colored based on their meaning:
 DoodleSharp projects use `.cs` files. All files in the same directory (and subdirectories) are compiled together.
 
 ### Entry Point
-The entry point must be `StartViz.Viz.Main()` in `StartViz.cs`:
+Running a project calls `Main()` on a class called `Viz`. A new project puts it in `StartViz.cs`,
+inside a namespace named after the project:
 
 ```csharp
-namespace StartViz
+namespace MyProject          // your project's name
 {
     public class Viz
     {
@@ -3740,6 +3742,14 @@ namespace StartViz
     }
 }
 ```
+
+`Main()` has to be `public static` and take no arguments. The **namespace does not have to match the
+project name**: if nothing is found under it, DoodleSharp looks for any class called `Viz` with a
+public static `Main()`, then for any class with one at all, and prints in the console which it used.
+So renaming the namespace, or renaming the project folder, no longer stops Run from working.
+
+If the project contains a class deriving from `Sketch` it runs in sketch mode instead and `Viz` is
+never looked for.
 
 ### Project Explorer
 The **Explorer** panel (**Windows ▸ Project Browser**, docked to the right by default) shows all
@@ -3763,6 +3773,31 @@ using C2VGeometry;          // Shapes: VPoint, VLine, VCircle, etc. and the VXYZ
 using DoodleSharp.Animation;   // Animator, Frame, Mouse, DrawAnimation, MoveAnimation, etc.
 using DoodleSharp.Console;     // VizConsole.Log()
 ```
+
+### Names that would hide the API
+
+Those namespaces are imported into every file, and **C# searches your own declarations before it
+looks at any `using`**. So a name of yours that matches an imported type hides that type for the
+whole of its scope. A project named `Mouse` would generate `namespace Mouse`, and `Mouse.OnMove(…)`
+written inside it would resolve against your own namespace instead of `DoodleSharp.Animation.Mouse`.
+
+**New projects handle this for you.** A project name that would shadow an imported type is adjusted
+for the namespace only — `Mouse` becomes `namespace MouseProject` — while the folder, the `.vizproj`
+and the name shown in the app stay exactly what you typed. The match is exact and case-sensitive, so
+a project called `mouse` shadows nothing and is left alone.
+
+Names you write yourself are checked but never rewritten. A class, property, field, local, parameter
+or `foreach` variable called after an imported type gets you:
+
+```
+Mouse is a keyword. try another name
+```
+
+reported **on the declaration itself** — not on the line that failed to compile — and once per name,
+however many uses it broke. Rename the declaration and the uses resolve again. The names to steer
+around are the type names in the namespaces above: `Mouse`, `Frame`, `Canvas`, `Shape`, `Console`,
+`Math`, `List`, and every `V*` shape type. An ordinary typo against the real API still reports as an
+ordinary typo.
 
 ### Auto Save
 Enable **Settings > Application Settings > Auto Save** to have every modified file in the project
@@ -3800,7 +3835,7 @@ After installing a package, add its namespace to your code:
 ```csharp
 using Newtonsoft.Json;  // Example: after installing Newtonsoft.Json
 
-namespace StartViz
+namespace MyProject
 {
     public class Viz
     {
@@ -4479,7 +4514,7 @@ VizConsole.Log($"Polyline self-intersects: {polyline.SelfIntersecting}");  // tr
 using C2VGeometry;
 using System;
 
-namespace StartViz
+namespace MyProject
 {
     public class Viz
     {

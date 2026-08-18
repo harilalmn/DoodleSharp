@@ -58,6 +58,14 @@ public static class ShadowedNameDiagnostics
         "CS1061",   // Y does not contain a definition for X and no accessible extension method
     };
 
+    // RS1032/RS2008 are aimed at authors shipping a Roslyn analyzer package, which this is not: the
+    // descriptor exists only to carry a message DoodleSharp reports about the user's own project.
+    // RS1032 objects that the message reads as two sentences without a trailing period — that
+    // wording is the specified user-facing text, and it is quoted verbatim in README.md, F1 Help and
+    // CHANGELOG.md, so "fixing" the punctuation here silently desynchronises three documents.
+    // RS2008 wants an AnalyzerReleases.md tracking file, which only makes sense for a shipped
+    // analyzer whose rule ids form a public contract.
+#pragma warning disable RS1032, RS2008
     private static readonly DiagnosticDescriptor Descriptor = new(
         id: DiagnosticId,
         title: "Reserved DoodleSharp name",
@@ -65,6 +73,7 @@ public static class ShadowedNameDiagnostics
         category: "Naming",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
+#pragma warning restore RS1032, RS2008
 
     /// <summary>
     /// Returns <paramref name="diagnostics"/> with every shadowing consequence replaced by one
