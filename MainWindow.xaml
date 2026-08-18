@@ -1800,7 +1800,6 @@
                                                         Checked="AutoUpdateCheck_Changed"
                                                         Content="Enabled"
                                                         Foreground="{StaticResource ForegroundBrush}"
-                                                        IsChecked="True"
                                                         Unchecked="AutoUpdateCheck_Changed" />
 
                                                     <!--  Draw Point As Patch  -->

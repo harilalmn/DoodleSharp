@@ -209,11 +209,17 @@ public partial class MainWindow : Window
             // Start watching for external changes
             StartProjectWatcher(_currentProject.ProjectDirectory);
 
-            LoadSettingsToUI();
-
             // Initialize cached compilation workspace for IntelliSense
             InitializeCompletionWorkspace();
         }
+
+        // Unconditional: application settings are global, so the Settings tab must show the saved
+        // values even when no project is open. It used to run only inside the branch above.
+        LoadSettingsToUI();
+
+        // Everything the markup does to a control has happened by now, so from here a settings
+        // handler firing really is the user.
+        _settingsUiReady = true;
 
         Loaded += MainWindow_Loaded;
     }
@@ -4060,55 +4066,79 @@ public partial class MainWindow : Window
     }
 
     private bool _loadingSettings;
+
+    /// <summary>
+    /// False until the constructor has finished, so a control's XAML-declared initial value cannot
+    /// be mistaken for the user changing a setting.
+    ///
+    /// <para>
+    /// <c>InitializeComponent</c> raises Checked / SelectionChanged for any control that declares a
+    /// starting value, long before <see cref="LoadSettingsToUI"/> runs — and a settings handler that
+    /// fires there writes the markup's value into <c>ApplicationSettings.Instance</c> and saves it,
+    /// destroying what was on disk before it is ever read. <c>AutoUpdateCheck</c> carried
+    /// <c>IsChecked="True"</c> and did exactly that: Auto Draw Shapes came back on at every launch
+    /// and could not be turned off permanently. Every settings handler checks
+    /// <see cref="SettingsUiBusy"/>, which covers both this window and the load itself.
+    /// </para>
+    /// </summary>
+    private bool _settingsUiReady;
+
+    /// <summary>True while a settings handler must not write back — during construction, or a load.</summary>
+    private bool SettingsUiBusy => !_settingsUiReady || _loadingSettings;
     private void LoadSettingsToUI()
     {
         _loadingSettings = true;
         try
         {
-        if (_currentProject == null) return;
-
-        var settings = _currentProject.ProjectFile.Settings;
+        // Project settings are per-project and simply absent when no project is open; the
+        // application settings further down are global and have to load either way. The two used to
+        // share an early return, so with no project the Settings tab showed the XAML defaults for
+        // every application setting — and because Save writes all of them back from the UI, pressing
+        // it then overwrote the user's saved snap, highlight, export and default-shape values.
+        var settings = _currentProject?.ProjectFile.Settings;
         if (settings == null)
         {
-            // Should not happen as it's initialized in VizProjectFile, but just in case
             SettingsColorBox.Text = "";
             SettingsFillColorBox.Text = "";
+            SettingsCanvasColorBox.Text = "";
             SettingsThicknessBox.Text = "";
-            return;
+            SettingsLineTypeScaleBox.Text = "";
         }
-
-        SettingsColorBox.Text = settings.DefaultColor ?? "";
-        SettingsFillColorBox.Text = settings.DefaultFillColor ?? "";
-        SettingsCanvasColorBox.Text = settings.DefaultCanvasBackgroundColor ?? "";
-        SettingsThicknessBox.Text = settings.DefaultLineWeight.HasValue
-            ? settings.DefaultLineWeight.Value.ToString()
-            : "";
-        SettingsLineTypeScaleBox.Text = settings.DefaultLineTypeScale.HasValue
-            ? settings.DefaultLineTypeScale.Value.ToString()
-            : "";
-
-        // Dimension Style
-        DimStyleOffsetBox.Text = settings.DimOffset.HasValue ? settings.DimOffset.Value.ToString() : "";
-        DimStyleArrowSizeBox.Text = settings.DimArrowSize.HasValue ? settings.DimArrowSize.Value.ToString() : "";
-        DimStyleTextHeightBox.Text = settings.DimTextHeight.HasValue ? settings.DimTextHeight.Value.ToString() : "";
-        DimStyleDecimalPlacesBox.Text = settings.DimDecimalPlaces.HasValue ? settings.DimDecimalPlaces.Value.ToString() : "";
-        DimStyleExtendBeyondBox.Text = settings.DimExtendBeyondDimLines.HasValue ? settings.DimExtendBeyondDimLines.Value.ToString() : "";
-        DimStyleOffsetFromOriginBox.Text = settings.DimOffsetFromOrigin.HasValue ? settings.DimOffsetFromOrigin.Value.ToString() : "";
-        DimStylePrefixBox.Text = settings.DimPrefix ?? "";
-        DimStyleSuffixBox.Text = settings.DimSuffix ?? "";
-        DimStyleTextBgOpaqueCheck.IsChecked = settings.DimTextBgOpaque == true;
-        DimStyleExtLineColorBox.Text = settings.DimExtensionLineColor ?? "";
-        DimStyleDimLineColorBox.Text = settings.DimDimensionLineColor ?? "";
-        DimStyleTextColorBox.Text = settings.DimTextColor ?? "";
-        DimStyleSuppressDimLineCheck.IsChecked = settings.DimSuppressDimensionLine == true;
-
-        // Apply Canvas Background immediately on load (Fix for Issue 1)
-        if (!string.IsNullOrEmpty(settings.DefaultCanvasBackgroundColor))
+        else
         {
-            try {
-                var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(settings.DefaultCanvasBackgroundColor));
-                RenderCanvas.CanvasBackground = brush;
-            } catch {}
+            SettingsColorBox.Text = settings.DefaultColor ?? "";
+            SettingsFillColorBox.Text = settings.DefaultFillColor ?? "";
+            SettingsCanvasColorBox.Text = settings.DefaultCanvasBackgroundColor ?? "";
+            SettingsThicknessBox.Text = settings.DefaultLineWeight.HasValue
+                ? settings.DefaultLineWeight.Value.ToString()
+                : "";
+            SettingsLineTypeScaleBox.Text = settings.DefaultLineTypeScale.HasValue
+                ? settings.DefaultLineTypeScale.Value.ToString()
+                : "";
+
+            // Dimension Style
+            DimStyleOffsetBox.Text = settings.DimOffset.HasValue ? settings.DimOffset.Value.ToString() : "";
+            DimStyleArrowSizeBox.Text = settings.DimArrowSize.HasValue ? settings.DimArrowSize.Value.ToString() : "";
+            DimStyleTextHeightBox.Text = settings.DimTextHeight.HasValue ? settings.DimTextHeight.Value.ToString() : "";
+            DimStyleDecimalPlacesBox.Text = settings.DimDecimalPlaces.HasValue ? settings.DimDecimalPlaces.Value.ToString() : "";
+            DimStyleExtendBeyondBox.Text = settings.DimExtendBeyondDimLines.HasValue ? settings.DimExtendBeyondDimLines.Value.ToString() : "";
+            DimStyleOffsetFromOriginBox.Text = settings.DimOffsetFromOrigin.HasValue ? settings.DimOffsetFromOrigin.Value.ToString() : "";
+            DimStylePrefixBox.Text = settings.DimPrefix ?? "";
+            DimStyleSuffixBox.Text = settings.DimSuffix ?? "";
+            DimStyleTextBgOpaqueCheck.IsChecked = settings.DimTextBgOpaque == true;
+            DimStyleExtLineColorBox.Text = settings.DimExtensionLineColor ?? "";
+            DimStyleDimLineColorBox.Text = settings.DimDimensionLineColor ?? "";
+            DimStyleTextColorBox.Text = settings.DimTextColor ?? "";
+            DimStyleSuppressDimLineCheck.IsChecked = settings.DimSuppressDimensionLine == true;
+
+            // Apply Canvas Background immediately on load (Fix for Issue 1)
+            if (!string.IsNullOrEmpty(settings.DefaultCanvasBackgroundColor))
+            {
+                try {
+                    var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(settings.DefaultCanvasBackgroundColor));
+                    RenderCanvas.CanvasBackground = brush;
+                } catch {}
+            }
         }
 
         // ---------------------------------------------------------
@@ -4220,7 +4250,7 @@ public partial class MainWindow : Window
             UpdateColorButton(AppSettingsCanvasColorBtn, AppSettingsCanvasColorBox.Text);
 
         // Apply live so new shapes pick up the default immediately (no "Save Settings" click needed).
-        if (!_loadingSettings)
+        if (!SettingsUiBusy)
             PersistDefaultColor(sender as TextBox);
     }
 
@@ -4255,7 +4285,7 @@ public partial class MainWindow : Window
 
     private void DefaultNumericBox_TextChanged(object sender, TextChangedEventArgs e)
     {
-        if (_loadingSettings || sender is not TextBox box) return;
+        if (SettingsUiBusy || sender is not TextBox box) return;
         bool empty = string.IsNullOrWhiteSpace(box.Text);
         if (!empty && !double.TryParse(box.Text.Trim(), out _)) return; // ignore mid-typing
         double? val = empty ? null : double.Parse(box.Text.Trim());
@@ -4360,25 +4390,28 @@ public partial class MainWindow : Window
 
     private void SettingsZoomToFitCheck_Changed(object sender, RoutedEventArgs e)
     {
+        if (SettingsUiBusy) return;
         ApplicationSettings.Instance.ZoomToFitOnRun = SettingsZoomToFitCheck.IsChecked == true;
         ApplicationSettings.Save();
     }
 
     private void SettingsAutoUpdateCanvasCheck_Changed(object sender, RoutedEventArgs e)
     {
+        if (SettingsUiBusy) return;
         ApplicationSettings.Instance.AutoUpdateCanvas = SettingsAutoUpdateCanvasCheck.IsChecked == true;
         ApplicationSettings.Save();
     }
 
     private void AutoUpdateCheck_Changed(object sender, RoutedEventArgs e)
     {
+        if (SettingsUiBusy) return;
         ApplicationSettings.Instance.AutoDraw = AutoUpdateCheck.IsChecked == true;
         ApplicationSettings.Save();
     }
 
     private void SettingsDrawPointAsPatchCheck_Changed(object sender, RoutedEventArgs e)
     {
-        if (_loadingSettings) return;
+        if (SettingsUiBusy) return;
         ApplicationSettings.Instance.DrawPointAsPatch = SettingsDrawPointAsPatchCheck.IsChecked == true;
         ApplicationSettings.Save();
         RenderCanvas.Refresh();
@@ -4386,7 +4419,7 @@ public partial class MainWindow : Window
 
     private void SettingsAutoSaveCheck_Changed(object sender, RoutedEventArgs e)
     {
-        if (_loadingSettings) return;
+        if (SettingsUiBusy) return;
         ApplicationSettings.Instance.AutoSaveEnabled = SettingsAutoSaveCheck.IsChecked == true;
         ApplicationSettings.Save();
         _autoSavePromptSuppressed = false; // re-enabling auto-save re-arms the reminder
@@ -4395,7 +4428,7 @@ public partial class MainWindow : Window
 
     private void SettingsAutoSaveIntervalBox_TextChanged(object sender, TextChangedEventArgs e)
     {
-        if (_loadingSettings) return;
+        if (SettingsUiBusy) return;
 
         var text = SettingsAutoSaveIntervalBox.Text.Trim();
         if (!int.TryParse(text, out var seconds)) return; // ignore mid-typing
@@ -4413,7 +4446,7 @@ public partial class MainWindow : Window
     private void LineStyleModeCombo_Changed(object sender, SelectionChangedEventArgs e)
     {
         // Fires during InitializeComponent, before the sibling combo exists.
-        if (_loadingSettings || SettingsLineWeightModeCombo == null || SettingsLineTypeScaleModeCombo == null)
+        if (SettingsUiBusy || SettingsLineWeightModeCombo == null || SettingsLineTypeScaleModeCombo == null)
             return;
 
         var settings = ApplicationSettings.Instance;
@@ -4430,7 +4463,7 @@ public partial class MainWindow : Window
     private void SettingsRenderBackendCombo_Changed(object sender, SelectionChangedEventArgs e)
     {
         // Fires during InitializeComponent, before the control field is assigned.
-        if (_loadingSettings || SettingsRenderBackendCombo == null) return;
+        if (SettingsUiBusy || SettingsRenderBackendCombo == null) return;
 
         ApplicationSettings.Instance.RenderBackend = SettingsRenderBackendCombo.SelectedIndex switch
         {
