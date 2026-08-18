@@ -9,6 +9,8 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+## [2026.8.3] - 2026-08-18
+
 ### Added
 - **Dockable panels.** The Canvas, Console, Find Results, Timeline, Explorer, Outliner, Properties and
   Global Parameters are now tool windows you can drag anywhere: to another edge, into a tab group with
