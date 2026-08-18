@@ -25,29 +25,17 @@
     WindowState="Maximized"
     mc:Ignorable="d">
 
-    <Window.InputBindings>
-        <!--
-            Alt+Shift+F, as in VS Code and Visual Studio. It was Ctrl+Shift+F, which this window also
-            binds to Find in Files (Search menu) — the two clashed, and the editor's Format won.
-        -->
-        <KeyBinding
-            Key="F"
-            Command="{Binding FormatCodeCommand}"
-            Modifiers="Alt+Shift" />
-        <KeyBinding
-            Key="S"
-            Command="{Binding SaveCommand}"
-            Modifiers="Ctrl" />
-        <KeyBinding
-            Key="O"
-            Command="{Binding OpenCommand}"
-            Modifiers="Ctrl" />
-        <KeyBinding
-            Key="N"
-            Command="{Binding NewCommand}"
-            Modifiers="Ctrl" />
-        <KeyBinding Key="F5" Command="{Binding RunCommand}" />
-    </Window.InputBindings>
+    <!--
+        There is deliberately no Window.InputBindings block. It used to hold five KeyBindings — Format,
+        Save, Open, New and Run — every one of them bound to a nonexistent command such as
+        FormatCodeCommand: MainWindow declares no such property and never assigns a DataContext, so
+        each binding resolved to null and did nothing. All five gestures work, and have always worked,
+        solely because MainWindow_PreviewKeyDown handles them (Ctrl+N/O/S, Ctrl+Enter, F5, and
+        Alt+Shift+F). Markup that looks authoritative but is inert is worse than no markup: a docs pass
+        read this block as the source of truth for the Format shortcut, and a test asserting on it kept
+        passing while proving nothing. Add a shortcut in the key handler, and mirror it in the menu's
+        InputGestureText so it is discoverable.
+    -->
 
     <Grid>
         <Grid.RowDefinitions>

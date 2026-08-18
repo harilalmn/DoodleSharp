@@ -59,7 +59,6 @@ namespace DoodleSharp.Documentation
             {
                 { "DoodleSharp", "Root namespace for the DoodleSharp application." },
                 { "C2VGeometry", "Contains classes and interfaces for 2D geometric shapes and operations, plus the VXYZ coordinate type. This is the single geometry namespace used throughout DoodleSharp." },
-                { "DoodleSharp.Editor", "Contains classes related to the code editor, including formatting, completion, and snippets." },
 
                 // Base classes
                 { "Shape", "Abstract base class for all drawable shapes; implements IDrawable. Every shape auto-registers on construction (Shape.DefaultRegistry is wired to the canvas), so nothing extra is needed to make one visible. Place() is the call for everything else: it puts a shape on the canvas and keeps it there (registering it and setting IsExplicitlyDrawn, which exempts it from the post-Main() sweep that hides unnamed shapes). Reach for it on method results (booleans, ArrayOps, Chart), on the query results that deliberately do not draw their answer (GeometryHelper.IntersectLineLine and friends, VRay.ToFiniteLine, VRay.ToXLine, VXLine.ToFiniteLine), and on anything built while AutoRegister was false. It is idempotent, and Remove() is its inverse. Draw() is the historical name for Place() and is exactly equivalent; existing files that call it keep working unchanged, and there is nothing to migrate. The drawing tools and editor snippets now write Place(). Identity: Id (long, assigned automatically, reset to 1 at the start of each run) and Name (string, default \"\"). Styling: Color, FillColor (both color-name or hex strings), LineWeight, LineType, LineTypeScale. State: IsVisible, IsSelected, IsPlaced, IsExplicitlyDrawn. Animation: DrawFactor (0-1 progressive drawing), OffsetX, OffsetY, RotationAngle (virtual — VRectangle overrides it with real geometry, so RotateAnimation works on a rectangle too), RotationPivot, FlipProgress, FlipAxis, Opacity. Static configuration: DefaultRegistry, AutoRegister, DefaultColor (\"Cyan\"), DefaultFillColor (\"Transparent\"), DefaultLineWeight (2.0), DefaultLineType (Continuous), DefaultLineTypeScale (1.0), ResetDefaults(), ResetIdCounter(). Methods: Place() (and its historical alias Draw()), Remove(), Show(), Hide(), Clone() (returns the same type via covariant return), CopyStyleTo(target) (copies the five styling members onto another shape and returns it), Move(), Rotate(), Flip(), Scale(), GetBounds() (returns BoundingBox), Contains(), DistanceTo(), Intersect(), DoesIntersect(), GetControlPoints(), MoveControlPoint(), BringAbove(otherShape), SendBehind(otherShape). Contains() and DistanceTo() are bounding-box fallbacks on the base class, but every shape with a real outline overrides them with true geometry: VLine, VPolyline, VArc, VBezier, VSpline, VXLine and VRay test/measure against the stroke; VPolygon, VRectangle, VCircle, VEllipse, VGroup, VHatch and Region do a genuine interior Contains and measure to the outline, which means zero on it and positive on both sides — not a signed depth, so pair DistanceTo with Contains. Only VPoint, VText, VGrid, VSpatialGrid, VArrow, VDimension and VRadialDimension keep the bounding-box answer, because for those the box is the shape or there is no outline to test; a reflection test (ShapeOverrideConsistencyTests) fails the build if a new shape is added without both overrides. Visibility note: after Main() returns, shapes with empty Name and IsExplicitlyDrawn=false are auto-hidden. The auto-naming pass only fills Name for `var x = new VShape(...)` and field declarations — for List.Add, array-slot assignments, and helper-returned shapes, set Name explicitly in the initializer or call .Place(). The console logs a warning when shapes get hidden." },
@@ -209,6 +208,35 @@ namespace DoodleSharp.Documentation
             return "No description available.";
         }
 
+        /// <summary>
+        /// Types documented individually, from namespaces that are otherwise app internals.
+        ///
+        /// <para>
+        /// <c>DoodleSharp.Canvas</c> cannot go in <see cref="_namespacePrefixes"/>: it would drag in
+        /// a dozen genuine internals (<c>RenderCanvas</c>, <c>QuadTree</c>, <c>CodeSyncManager</c>,
+        /// <c>ViewportTransform</c>, <c>SelectionTool</c>, …) that no user calls. But seven public
+        /// types living there are part of the user-facing surface, and <c>SvgExporter</c> is named
+        /// in CLAUDE.md as explicitly in scope. All seven had hand-written summaries that no reader
+        /// could reach, because a type absent from <see cref="GetDocumentableTypes"/> has no page
+        /// and no search entry — rendering a page correctly is worth nothing if the type is not in
+        /// the tree, which is the reachability-versus-rendering split note 91 records.
+        /// </para>
+        ///
+        /// <para>
+        /// Full names, so a same-named type in a documented namespace cannot be admitted by accident.
+        /// </para>
+        /// </summary>
+        public static readonly string[] AllowedInternalTypes =
+        {
+            "DoodleSharp.Canvas.SvgExporter",
+            "DoodleSharp.Canvas.SnapEngine",
+            "DoodleSharp.Canvas.SnapType",
+            "DoodleSharp.Canvas.SnapResult",
+            "DoodleSharp.Canvas.DrawingTool",
+            "DoodleSharp.Canvas.DrawingInputMode",
+            "DoodleSharp.Canvas.GlyphOutlineProvider",
+        };
+
         public List<Type> GetDocumentableTypes()
         {
             var types = new List<Type>();
@@ -233,7 +261,8 @@ namespace DoodleSharp.Documentation
                 .Where(t => t.IsPublic && !t.IsGenericParameter &&
                     (t.IsClass || t.IsAbstract || t.IsEnum || t.IsValueType) &&
                     t.Namespace != null &&
-                    _namespacePrefixes.Any(p => t.Namespace == p || t.Namespace.StartsWith(p + ".") || t.Namespace.StartsWith(p)))
+                    (_namespacePrefixes.Any(p => t.Namespace == p || t.Namespace.StartsWith(p + ".") || t.Namespace.StartsWith(p)) ||
+                     AllowedInternalTypes.Contains(t.FullName)))
                 .OrderBy(t => t.Namespace)
                 .ThenBy(t => t.Name)
                 .ToList();

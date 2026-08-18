@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -82,6 +82,79 @@ public class DocumentationAccuracyTests
         if (memberName is "Item" or "this") return true;
 
         return false;
+    }
+
+    [Fact]
+    public void EveryDocumentedTypeExists()
+    {
+        // _summaries had NO accuracy guard, and that is exactly how 13 summaries for the retired
+        // DoodleSharp.Geometry namespace (Arc2D, Circle2D, Line2D, Point2D, …) survived every build
+        // long after the types were deleted. EveryDocumentedMemberExists could never have caught
+        // them: it reflects _memberDescriptions only, and it deliberately SKIPS any key whose type
+        // is not in GetDocumentableTypes — which is precisely the state a deleted type is in.
+        var generator = new DocGenerator();
+
+        var known = new HashSet<string>(
+            generator.GetDocumentableTypes().Select(DocGenerator.GetCleanTypeName), StringComparer.Ordinal);
+
+        // Namespace keys are legitimate: the tree has a page per namespace as well as per type.
+        var namespaces = new HashSet<string>(
+            generator.GetDocumentableTypes()
+                     .Select(t => t.Namespace)
+                     .Where(n => n != null)
+                     .SelectMany(n => Prefixes(n!)),
+            StringComparer.Ordinal);
+
+        var offenders = SummaryKeys()
+            .Where(k => !known.Contains(k) && !namespaces.Contains(k))
+            .OrderBy(k => k, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(offenders.Count == 0,
+            "Documentation/DocGenerator.cs summarises types that do not exist, or that are not "
+            + "reachable in the help tree. A summary for a deleted type is dead weight no reader "
+            + "can ever see; one for a real but unreachable type means it needs adding to "
+            + "DocGenerator.AllowedInternalTypes." + Environment.NewLine + "  "
+            + string.Join(Environment.NewLine + "  ", offenders));
+
+        // "DoodleSharp.Animation" also makes "DoodleSharp" a legitimate key.
+        static IEnumerable<string> Prefixes(string ns)
+        {
+            var parts = ns.Split('.');
+            for (var i = 1; i <= parts.Length; i++)
+                yield return string.Join(".", parts.Take(i));
+        }
+    }
+
+    [Fact]
+    public void EveryAllowlistedInternalTypeIsReachable()
+    {
+        // The allowlist is full names typed by hand, so a rename or a namespace move turns an entry
+        // into a silent no-op — the page simply disappears again, which is the failure it exists to
+        // prevent. Assert both halves: the type resolves, and it actually lands in the tree.
+        var generator = new DocGenerator();
+        var tree = generator.GetDocumentableTypes().Select(t => t.FullName).ToHashSet(StringComparer.Ordinal);
+
+        foreach (var name in DocGenerator.AllowedInternalTypes)
+        {
+            Assert.True(Type.GetType($"{name}, DoodleSharp") != null, $"{name} does not resolve");
+            Assert.Contains(name, tree);
+        }
+    }
+
+    private static IEnumerable<string> SummaryKeys()
+    {
+        var field = typeof(DocGenerator).GetField("_summaries",
+            BindingFlags.NonPublic | BindingFlags.Instance);
+
+        Assert.NotNull(field); // a renamed field would silently make this test vacuous
+
+        var value = field!.GetValue(new DocGenerator()) as Dictionary<string, string>;
+
+        Assert.NotNull(value);
+        Assert.NotEmpty(value!);
+
+        return value!.Keys;
     }
 
     private static IEnumerable<string> MemberDescriptionKeys()
