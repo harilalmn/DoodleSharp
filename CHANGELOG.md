@@ -9,6 +9,8 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+## [2026.8.6] - 2026-08-18
+
 ### Fixed
 - **A project named after part of the API could not use it.** The project name becomes the namespace
   of the generated code, and a namespace declaration is searched before any `using` — so in a project
