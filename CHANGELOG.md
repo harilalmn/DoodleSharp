@@ -43,6 +43,20 @@ tags; this file is the curated, human-friendly summary.
 - **`Mouse.X`, `Mouse.Y` and `Mouse.IsDown`** report the pointer without registering anything, so
   they can be read from a `Frame` callback or a sketch's `Draw()`.
 
+### Changed
+- **Format Code is now `Alt+Shift+F`**, matching VS Code and Visual Studio. It was `Ctrl+Shift+F`,
+  which this window also uses for **Find in Files** — the two were bound to the same keys and Format
+  always won, so Find in Files could not be reached by the shortcut its own menu advertised.
+- **Code snippets now sit at the top of the IntelliSense list and are pre-selected**, so typing `fo`
+  and pressing **Tab** writes a `for` loop. They used to be appended below every matching type, several
+  scrolls down, and a snippet lost the selection to any keyword or type it tied with — typing `for`
+  highlighted the bare `for` keyword instead of the loop. Keywords that a snippet already spells are
+  no longer listed twice.
+
+  **Tab is the only key that expands a snippet.** Enter ends the line as usual and commit characters
+  like `(` are typed as usual, so `x = null` followed by Enter, or a hand-written `for(`, are left
+  exactly as you typed them.
+
 ### Fixed
 - **A sketch's `MouseX`, `MouseY` and `MousePressed` now actually report the mouse.** All three were
   documented from the start but nothing ever wrote them, so every sketch saw `0`, `0` and `false` for
@@ -72,6 +86,18 @@ tags; this file is the curated, human-friendly summary.
 - **F1 Help now lists events.** Every public event was missing from its page and from Help search —
   including `Frame.CallbackFailed` and `GlobalParameters.Changed`, which had written descriptions no
   reader could reach.
+- **The Code and Settings tabs are no longer empty after the first run.** A saved window layout stores
+  the arrangement and each panel's identity but never the panels' contents, and the two document tabs
+  were the only ones not registered to be filled back in — so from the second launch onward they came
+  back correctly placed, correctly titled and completely blank, while every other panel restored fine.
+- **Settings you change now survive a restart.** *Auto Draw Shapes* could not be turned off: the
+  checkbox declared itself as ticked in the window's markup, and that initial value was written over
+  your saved setting and persisted while the window was still being built — before the settings file
+  had even been read. *Zoom to Fit on Run* and *Auto Update Canvas* were exposed to the same fault.
+- **Application settings no longer load only when a project is open.** With no project, the Settings
+  tab showed built-in defaults for every global setting — snap, highlight, export background, default
+  shape colours — and because **Save Settings** writes all of them back from what the tab is showing,
+  pressing it replaced your saved values with those defaults.
 
 ## [2026.8.2] - 2026-08-17
 

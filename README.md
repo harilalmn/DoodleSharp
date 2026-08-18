@@ -19,11 +19,13 @@ DoodleSharp is a visual programming environment that lets you write C# code to c
 - **Charts**: Built-in `Chart.Bar/Line/Scatter/Pie/Area` helpers produce ready-to-render chart groups (axes, ticks, labels, palette) from raw data
 - **Geometry Operations**: Clipper2-backed boolean ops and offsets on polygons and curve-bounded regions, array/pattern generators, curve intersection, and a BVH-accelerated `RayCaster` for ray queries over millions of shapes
 - **Shape Editing**: Select shapes and drag shape-specific control points (vertices, radius handles, curve controls) with live code sync
-- **Properties Panel**: Floating or dockable panel to edit geometry and style properties (color, fill, weight, opacity, visibility, name) with full code sync — changes persist as code lines
+- **Properties Panel**: A dockable (or floating) panel to edit geometry and style properties (color, fill, weight, opacity, visibility, name) with full code sync — changes persist as code lines
 - **Global Parameters**: Declare named values once with `GlobalParameters.Set(...)`, read them anywhere, and tune them live from a sidebar of sliders and checkboxes — the canvas re-runs as you drag and the new value is written back into your code
-- **Animation System**: Create timeline-based animations with draw, move, rotate, flip, and fade effects
+- **Animation System**: Create timeline-based animations with draw, move, rotate, flip, and fade effects — seekable and exportable to GIF/MP4
+- **Per-Frame Callbacks**: `Frame.Request(callback)` is the `requestAnimationFrame` model — the callback asks for the next frame to keep going, which is all open-ended or procedural motion needs
 - **Mouse Events**: Assign a callback per event — `Mouse.OnMove/OnDown/OnClick/OnDrag/OnWheel/…` — and get world coordinates, modifier keys and the shape under the cursor, in the shape JavaScript uses. Registering one hands the canvas's gestures to your code
 - **Interactive Canvas**: Zoom with mouse wheel, pan with middle-click, toggle grid display
+- **Dockable Windows**: Every panel drags, tabs and floats — put the editor on one monitor and the canvas on another; `Ctrl+R` restores the default arrangement. See [Window Layout](#window-layout)
 - **Scales to large drawings**: three renderers — WPF, a built-in software rasterizer, and a Direct3D 11 backend — with per-frame automatic selection, plus a frame-timing readout on `F10`. See [Render Backends](#render-backends)
 - **Export Options**: Save visualizations as PNG images, animated GIFs, or MP4 videos
 - **Project Management**: Organize multiple code files into projects with tabbed editing, drag-and-drop file organization, and "Go to Location" to open files in Windows Explorer
@@ -250,12 +252,6 @@ Beyond the constructors above and the `ICurve` members every curve shares.
 | **VArrow** | `Start` / `End` (settable), `MidPoint`, `HeadLength` (default 15 world units — each wing's length from the tip), `HeadAngle` (default 30 — degrees off the shaft, so the head spans `2 × HeadAngle`, 60° by default), `DoubleEnded` (default false — a head at `Start` as well), `GetStartArrowhead()` / `GetEndArrowhead()` → the two wing tips as a `(VXYZ, VXYZ)` tuple, `GetArrowheadPoints(tip, from)` for an arbitrary tip, and the static `VArrow.ArrowheadWings(tip, from, headLength, headAngleDegrees)`. Not an `ICurve` |
 | **VRay** | `Origin`, `Direction`, `RenderExtent` (default 10000 — how far it is drawn and how its bounds are computed, since it is infinite), `GetPointAtDistance(d)`, `ContainsPoint(p)`, `ToFiniteLine()` → `VLine`, `ToXLine()` → `VXLine`. Statics: `AtAngle(origin, angleDegrees)`, `HorizontalRight(origin)`, `HorizontalLeft(origin)`, `VerticalUp(origin)`, `VerticalDown(origin)` — all methods taking the origin, not properties |
 | **VXLine** | `BasePoint`, `Direction`, `RenderExtent`, `GetPointAtParameter(t)` (unclamped — negative `t` goes backwards), `GetTwoPoints()` → `(VXYZ, VXYZ)` (handy for `VPolygon.Slice`), `ToFiniteLine()` → `VLine`. Statics: `Horizontal(y)`, `Vertical(x)` |
-
-> **The conversions return an undrawn shape.** `VRay.ToFiniteLine()`, `VRay.ToXLine()` and
-> `VXLine.ToFiniteLine()` hand back a real `VLine`/`VXLine` you can measure, intersect and pass
-> around, but it is deliberately **not** placed on the canvas — converting a ray for a calculation
-> should not add a second line to your drawing. Call `.Place()` on the result if you do want to see
-> it. The same holds for `GeometryHelper`'s three `Intersect*` methods.
 | **VText** | `Content`, `Location`, `Height`, `Width`, `Font`, `FontWeight`, `Anchor`, `Angle`, `ToCharShape(i)`, `LiftChar(i)`, indexer `text[i]`, `LiftChars(start, count)`, `BlankChar(i)`, `GetAnchorOffset(w, h)` → the `(dx, dy)` the anchor applies. Static `GlyphOutlineProvider` is the font seam the host fills in |
 | **VGroup** | `Shapes`, `Count`, indexer `group[i]`, `Add`, `AddRange`, `Remove(shape)`, `RemoveAt(i)`, `Clear()`, `ContainsShape`, `Flatten()`, `ForEach`, `Where`, `GetShapesOfType<T>()`, `GetCenter()`, `SetOpacity`, `ApplyStyle` / `ApplyColor` / `ApplyFillColor` / `ApplyLineWeight` |
 | **VGrid** | `Points`, `Count`, indexers `grid[i]` and `grid[col, row]`, `GetRow` / `GetColumn`, `GetCenter()`, `Location`, `XCount` / `YCount`, `XSpacing` / `YSpacing`, `Centered`, `ApplyStyle()` |
@@ -264,6 +260,12 @@ Beyond the constructors above and the `ICurve` members every curve shares.
 | **VDimension** | `Point1` / `Point2` (settable), `Distance`, `DisplayText`, `GetDimensionGeometry()` → a 7-tuple of `VXYZ` (the extension- and dimension-line endpoints as drawn), the const `DimensionArrowAngleDegrees`, plus the style properties in [Dimensions](#dimensions-vdimension). `ExtensionLength` is `[Obsolete]` and inert |
 | **VRadialDimension** | `Center`, `Radius`, `LeaderAngle`, `ShowDiameter`, `Value`, `DisplayText`, `GetDimensionGeometry()` → a 3-tuple of `VXYZ` (the leader geometry) |
 | **VPoint** | `X`, `Y`, `AsVXYZ()`, implicit conversion to `VXYZ`, and the full `+ - * /` operator set — every one of which returns a plain `VXYZ`, so intermediates never draw |
+
+> **The conversions return an undrawn shape.** `VRay.ToFiniteLine()`, `VRay.ToXLine()` and
+> `VXLine.ToFiniteLine()` hand back a real `VLine`/`VXLine` you can measure, intersect and pass
+> around, but it is deliberately **not** placed on the canvas — converting a ray for a calculation
+> should not add a second line to your drawing. Call `.Place()` on the result if you do want to see
+> it. The same holds for `GeometryHelper`'s three `Intersect*` methods.
 
 Two conversion helpers worth knowing: `PolygonWithHoles.FromPolygonList(polygons)` sorts a flat list
 into outers and holes by winding, and `Region.SampleLoop(loop, segmentsPerCurve)` flattens one
@@ -2003,7 +2005,7 @@ Adding an animation also **places its target on the canvas** if it isn't already
 | `Stop()` | Stops playback and clears the active timeline. Shapes keep whatever state they were left in. |
 | `Duration` | Read-only total length in seconds (end of the last animation added, gaps included). |
 | `Repeat` | `false` by default. When `true` each animation loops **independently** on its own duration, so a 1s and a 3s animation drift apart rather than restarting together. |
-| `Speed` | Playback multiplier, default `1.0`. `2.0` runs twice as fast. Not clamped — the toolbar speed slider writes this same value, so dragging it overrides what you set in code. |
+| `Speed` | Playback multiplier, default `1.0`. `2.0` runs twice as fast. Not clamped — the Speed slider in the canvas's animation controls writes this same value, so dragging it overrides what you set in code. |
 | `Fps` | Target frame rate, default `60`, clamped to `1–120` on assignment. Only throttles redraws; it does not change timings. |
 
 ### Animation members (base class)
@@ -2419,9 +2421,10 @@ surgically, leaving `min:`/`max:`/`group:` and your undo history intact — and 
 
 ## Window Layout
 
-Every panel — Canvas, Console, Find Results, Timeline, Explorer, Outliner, Properties and Global
-Parameters — is a tool window you can rearrange. Drag one by its title bar and **guide diamonds**
-appear showing where it can land: against any edge, or into a tab group with another panel. Drop it
+Every panel — Canvas, Console, Find Results, Timeline, Explorer (the **Project Browser** entry in
+the Windows menu), Outliner, Properties and Global Parameters — is a tool window you can rearrange.
+Drag one by its title bar and **guide diamonds** appear showing where it can land: against any edge,
+or into a tab group with another panel. Drop it
 outside the window and it floats, so it can live on a second monitor. Code and Settings are document
 tabs in the middle.
 
@@ -2537,7 +2540,7 @@ DXF) write shapes rather than the screen, so they never saw it in the first plac
 - **Ctrl+Click** to toggle selection
 - **Drag right** on empty area for **Window Selection** (blue solid box, selects shapes fully inside)
 - **Drag left** on empty area for **Crossing Selection** (green dashed box, selects shapes that intersect)
-- **Ctrl+A** to select all shapes
+- **A** to select all shapes (a canvas shortcut, so click the canvas first — it does nothing while the editor has focus)
 - **Escape** to deselect
 
 ### Control Points
@@ -2590,16 +2593,21 @@ you drag, only the canvas redraws; when you release, the change is committed onc
 source code. Type a new value in the value box to move the slider (the range auto-expands if needed), or
 edit the min/max boxes to retarget the slider's range.
 
-The panel can be **floated** as a separate window or **docked** to the right side of the main window using the Dock/Float button in the panel header. Multi-selection shows common style properties.
+Like every other panel it can be dragged to another edge, tabbed with a neighbour, or floated onto a
+second monitor — see [Window Layout](#window-layout). Multi-selection shows common style properties.
+
+The panel is hidden and `F4` does nothing while your code has a
+[mouse handler](#mouse-and-pointer-events) registered: interactive mode has no selection to edit.
 
 ---
 
 ## Drawing Tools
 
-DoodleSharp includes an interactive drawing toolbar that lets you create shapes directly on the canvas with automatic C# code generation.
+DoodleSharp lets you create shapes directly on the canvas, with automatic C# code generation.
 
-### Toolbar Location
-The drawing toolbar appears below the menu bar with buttons for all shape types.
+### Where the tools live
+The **Draw** menu holds every shape type. The four most-used ones also have single-key shortcuts on
+the canvas — `P`, `L`, `C`, `R`. (There is no separate drawing toolbar; the menu replaced it.)
 
 ### Drawing Methods
 
@@ -2610,13 +2618,20 @@ The drawing toolbar appears below the menu bar with buttons for all shape types.
 | **Circle** | Click center, click radius point | 2 |
 | **Rectangle** | Click corner, click opposite corner | 2 |
 | **Ellipse** | Click center, drag for radii | 2 |
-| **Arc** | Click center, click start, click end | 3 |
+| **Arc** | Depends on the variant — see below | 3 |
 | **Polygon** | Click vertices, double-click to close | N + double-click |
 | **Polyline** | Click points, double-click to finish | N + double-click |
 | **Bezier** | Click start, ctrl1, ctrl2, end | 4 |
 | **Spline** | Click control points, double-click | N + double-click |
 | **Arrow** | Click start, click end | 2 |
 | **Text** | Click position | 1 |
+
+**Circle** has four entries under **Draw ▸ Circle**: *Center, Radius* (the `C` shortcut), *Center,
+Diameter*, *2 Points* (the two clicks are opposite ends of a diameter) and *3 Points* (the
+circumcircle). **Draw ▸ Arc** has ten: *3 Points*; *Start, Center, End* / *Angle* / *Length*;
+*Start, End, Angle* / *Radius*; *Center, Start, End* / *Angle* / *Length*; and *Continue*, which
+picks up tangentially from the last curve you drew. They map onto the `VArc.From*` factory methods
+listed under [Members specific to each shape](#members-specific-to-each-shape).
 
 ### Snap Support
 While drawing, the tool automatically snaps to various geometric features. Visual indicators show snap points as you move the cursor.
@@ -2881,6 +2896,8 @@ Y-up convention. `SaveToFile` forwards to `Export` and therefore always uses the
 | `SvgExporter.SaveToFile` | `DoodleSharp.Canvas` | `static void SaveToFile(string filePath, IEnumerable<IDrawable> shapes, double width = 800, double height = 600)` |
 | `PdfExporter.Export` | `DoodleSharp.Export` | `void Export(IReadOnlyList<IDrawable> shapes, string filePath)` — page auto-sized to the content |
 | `PdfExporter.Export` | `DoodleSharp.Export` | `void Export(IReadOnlyList<IDrawable> shapes, string filePath, double pageWidthMm, double pageHeightMm, double scaleMmPerUnit, double marginMm)` — `0` for either page dimension auto-sizes it; `scaleMmPerUnit` is how many millimetres one drawing unit becomes on paper |
+| `DxfExporter.Export` | `DoodleSharp.Export` | `void Export(IReadOnlyList<IDrawable> shapes, string filePath)` — writes an AutoCAD R12 ASCII DXF. Circles and arcs stay native `CIRCLE`/`ARC` entities rather than being flattened to chords; ellipses are polygonised, because R12 has no `ELLIPSE` |
+| `DxfExporter.ExportToString` | `DoodleSharp.Export` | `string ExportToString(IReadOnlyList<IDrawable> shapes)` — the same content as a string, for when you want to post-process it or write it somewhere other than a file |
 
 ```csharp
 using DoodleSharp.Export;   // PdfExporter
@@ -2897,7 +2914,15 @@ rather than a one-call exporter: `new GifEncoder(stream, width, height, frameDel
 repeat: true)`, then `AddFrame(BitmapSource)` per frame, and `Dispose()` to finalise the file. Frame
 delay and looping are **constructor arguments**, not properties, and there is no `Save()` — disposing
 is what completes the GIF. Producing `BitmapSource` frames means rendering the canvas yourself, so
-File > Export GIF Animation is the practical route.
+File > Export GIF Animation is the practical route. `VideoExporter` has the same shape for MP4 —
+`new VideoExporter(filePath, width, height, fps: 30, bitrateMbps: 5)`, `AddFrame(RenderTargetBitmap)`
+per frame, then `Dispose()` to close the file.
+
+```csharp
+using DoodleSharp.Export;   // DxfExporter
+
+new DxfExporter().Export(CanvasRenderer.Instance.GetShapes(), @"C:\temp\drawing.dxf");
+```
 
 ---
 
@@ -3382,6 +3407,7 @@ XY direction returns `null` / `false` rather than throwing.
 | `Alt+Shift+F` | Format code |
 | `Ctrl+Shift+F` | Find in files |
 | `Ctrl+/` | Toggle comment |
+| `Ctrl+Shift+K` | Insert a colour (picker writes the string literal) |
 | `Tab` / `Shift+Tab` | Indent / Unindent |
 
 ### Find and Replace
@@ -3434,7 +3460,8 @@ All cursors are visually indicated with white caret lines, and selections are hi
 | `Middle Click` | Pan |
 | `Double-click` (empty space) | Zoom to fit all shapes |
 | `Delete` | Delete selected shapes (and their code) |
-| `Ctrl+A` | Select all shapes |
+| `A` | Select all shapes (editor **not** focused — see [Drawing Tool Shortcuts](#drawing-tool-shortcuts)) |
+| `P` / `L` / `C` / `R` | Point / Line / Circle / Rectangle tool (editor **not** focused) |
 | `Ctrl+G` | Zoom to shape by ID |
 | `Ctrl+M` | Toggle Measuring Tape tool |
 | `F4` | Toggle Properties panel (inert while your code has a [mouse handler](#mouse-and-pointer-events) registered — there is no selection to edit) |
@@ -3456,6 +3483,8 @@ All cursors are visually indicated with white caret lines, and selections are hi
 | `Ctrl+Shift+H` | Call Hierarchy |
 | `Ctrl+Shift+T` | Type Hierarchy |
 | `F2` | Rename Symbol |
+| `Ctrl+Space` | Open the completion list on demand |
+| `F1` | Shape Reference (the in-app API help window) |
 
 ---
 
@@ -3472,7 +3501,7 @@ DoodleSharp includes a full-featured code editor with VSCode-like intellisense p
 - **Incremental compilation**: Uses a cached Roslyn workspace that incrementally updates only changed files, keeping completions responsive even in large projects
 - **Recently-used tracking**: Recently selected completions are boosted in future rankings
 - **Signature Help**: Parameter info displayed when typing method calls
-- **Snippets**: Code snippets for common C# patterns (`if`, `for`, `foreach`, `try`, `class`, …) and for the geometry types — `circle`, `vline`, `vlinea`, `vrect`, `vellipse`, `varc`, `vpoint`, `vpoly`, `vbezier`, `vspline`, `varrow`, `vtext`, `vdim`, `vgroup`, plus the composite `shapegrid`, `radial`, `spiral`, `star` and `wave`. Every shape template ends with `.Place()`, so a snippet-inserted shape survives the post-run cleanup
+- **Snippets**: Code snippets for common C# patterns (`if`, `for`, `foreach`, `try`, `class`, …) and for the geometry types — `circle`, `vline`, `vlinea`, `vrect`, `vellipse`, `varc`, `vpoint`, `vpoly`, `vbezier`, `vspline`, `varrow`, `vtext`, `vdim`, `vgroup`, plus the composite `shapegrid`, `radial`, `spiral`, `star` and `wave`, and `frame` and `mouse` for the two interaction seams. Every shape template ends with `.Place()`, so a snippet-inserted shape survives the post-run cleanup. **A matching snippet sorts to the top of the completion list and is the selected item, so `Tab` expands it** — see below
 
 ### Code Navigation
 | Feature | Shortcut | Description |
@@ -3494,6 +3523,17 @@ DoodleSharp includes a full-featured code editor with VSCode-like intellisense p
 The list opens by itself as you type an identifier (from the second character), immediately after
 `new`, `is` or `as`, and after a `.`. It commits the highlighted item on `(` `[` `{` `;` `,` `)`, as
 well as on Enter and Tab.
+
+**Snippets sort above symbols and start out selected**, so typing `for` and pressing `Tab` writes the
+whole loop — the snippet is one keystroke away rather than something you have to scroll to. Because
+of that, **a commit character never expands a snippet**: typing `for(` closes the list and leaves the
+`for(` you typed, instead of wrapping an entire loop around the parenthesis you were in the middle of
+writing. **`Tab` is the only key that expands a snippet** — `Enter` ends the line as usual, so
+`x = null` followed by `Enter` stays exactly what you typed rather than becoming a null-check block.
+Once a snippet is in, `Tab` walks its placeholders (`Shift+Tab` goes back, `Esc` leaves the session).
+
+A keyword whose spelling a snippet already occupies is not listed twice — `for` offers the snippet,
+not the snippet *and* the bare keyword.
 
 **Space never commits.** It closes the list instead, because the list is usually open on a keyword it
 cannot contain: committing on the space after `new` would replace the keyword with whatever happened
@@ -3601,7 +3641,9 @@ namespace StartViz
 ```
 
 ### Project Explorer
-The Project Explorer panel (right side) shows all files and folders in your project.
+The **Explorer** panel (**Windows ▸ Project Browser**, docked to the right by default) shows all
+files and folders in your project. Like every panel it can be moved, tabbed or floated — see
+[Window Layout](#window-layout).
 
 **Drag and Drop**: Move files and folders between directories by dragging them in the tree view. The entry point file (`StartViz.cs`) and the root project node cannot be moved. Open file tabs and references update automatically after a move.
 
@@ -3643,7 +3685,7 @@ Auto Save never replaces `Ctrl+S`; it just means a crash costs you at most one i
 DoodleSharp includes a built-in NuGet Package Manager to add external libraries to your projects.
 
 ### Opening the Package Manager
-Tools > NuGet Package Manager (or use the toolbar button)
+**Project ▸ Manage NuGet Packages…**
 
 ### Features
 - **Search**: Search the NuGet repository for packages by name
@@ -4390,7 +4432,8 @@ Full reference, including how to read a journal and how to add instrumentation:
 
 ## Getting Help
 
-- **Built-in Help**: Help > API Reference (F1) opens comprehensive documentation
+- **Built-in Help**: **Help ▸ Shape Reference** (`F1`) opens the API reference — every public type
+  with its members and a runnable sample, searchable
 - **Welcome Page**: The Help window shows a getting-started guide by default
 - **Console Output**: Use `VizConsole.Log()` for debugging
 - **Diagnostic Journals**: Help > Open Diagnostic Journals (`%TEMP%\DoodleSharp`) — send the journal file when reporting a crash

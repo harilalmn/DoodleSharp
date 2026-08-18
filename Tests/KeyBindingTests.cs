@@ -22,11 +22,18 @@ public class KeyBindingTests
         => File.ReadAllText(Path.Combine(ArrowheadConsistencyTests.RepoRoot(), Path.Combine(parts)));
 
     [Fact]
-    public void FormatCodeIsBoundToAltShiftF()
+    public void FormatCodeMarkupAgreesWithTheLiveHandler()
     {
         // Alt+Shift+F is the VS Code / Visual Studio spelling. It was Ctrl+Shift+F, which this same
         // window binds to Find in Files — the two clashed and Format won, so Find in Files could not
         // be reached by its advertised key at all.
+        //
+        // NOTE: this KeyBinding is INERT. It binds to {Binding FormatCodeCommand}, and MainWindow
+        // has no such property and never assigns a DataContext — as do the other four bindings in
+        // that block. The gesture works solely because MainWindow_PreviewKeyDown also handles it,
+        // which is what BothKeyHandlersRouteFormatUnderAltShift asserts. This test only keeps the
+        // markup from advertising a gesture the live handler no longer implements; on its own it
+        // proves nothing about the shortcut working.
         var xaml = Read("MainWindow.xaml");
 
         var at = xaml.IndexOf("Command=\"{Binding FormatCodeCommand}\"", StringComparison.Ordinal);

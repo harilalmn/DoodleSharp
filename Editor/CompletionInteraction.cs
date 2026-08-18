@@ -36,8 +36,16 @@ public static class CompletionInteraction
     /// identifier into a multi-line construct with placeholders, so the cost of getting it wrong is
     /// far higher than for a symbol — and snippets now sort first and win the selection, which means
     /// <c>for(</c> would expand an entire loop around a parenthesis the user was typing by hand.
-    /// Tab and Enter are unambiguous requests for the highlighted item and remain available; a
-    /// bracket is not. The caller closes the list instead, leaving what was typed intact.
+    /// The caller closes the list instead, leaving what was typed intact.
+    ///
+    /// <para>
+    /// <b>Tab is the only key that expands a snippet.</b> Enter is excluded too, but not here — it
+    /// reaches AvalonEdit's own accept path, so the exclusion lives in
+    /// <c>SnippetCompletionData.Complete</c>, which returns early for <c>Key.Enter</c> and clears
+    /// <c>Handled</c> so the editor performs its normal newline. Reading this file alone therefore
+    /// suggests Enter still expands one; it does not. (A documentation pass drew exactly that wrong
+    /// conclusion from the earlier wording.)
+    /// </para>
     /// </para>
     /// </summary>
     public static bool Commits(char c, bool selectedItemIsSnippet)

@@ -102,21 +102,6 @@ namespace DoodleSharp.Documentation
                 { "VDimension", "Represents a dimension line showing the distance between two points with text annotation. AutoCAD-style properties: Offset, ArrowSize, TextHeight, DecimalPlaces, ExtendBeyondDimLines, OffsetFromOrigin, SuppressExtLine1/2, SuppressDimensionLine, Prefix, Suffix, TextBackgroundOpaque. Per-element colors: ExtensionLineColor, DimensionLineColor, TextColor (null = use base Color). The dimension line is always split around the text for readability. Renders arrowheads at both ends of the dimension line." },
                 { "VRadialDimension", "Represents a radial or diameter dimension for circles and arcs. Draws a leader line from center to circumference with an arrowhead and text label (R for radius, \u2300 for diameter). Constructors: VRadialDimension(circle), VRadialDimension(arc), VRadialDimension(center, radius). Properties: LeaderAngle (direction of leader), ShowDiameter (diameter mode), ArrowSize, TextHeight, DecimalPlaces, Prefix, Suffix, CustomText, TextBackgroundOpaque. Per-element colors: DimensionLineColor, TextColor." },
 
-                // Legacy aliases (for backward compatibility)
-                { "Arc2D", "Represents a 2D arc defined by a center, radius, start angle, and end angle." },
-                { "Circle2D", "Represents a 2D circle defined by a center point and a radius." },
-                { "Rectangle2D", "Represents a 2D axis-aligned rectangle defined by a corner, width, and height." },
-                { "Polygon2D", "Represents a closed 2D polygon defined by a list of vertices." },
-                { "Polyline2D", "Represents an open sequence of connected line segments." },
-                { "Line2D", "Represents a straight line segment between two points." },
-                { "Ellipse2D", "Represents a 2D ellipse defined by a center, X radius, and Y radius." },
-                { "Point2D", "Represents a visible point marker on the canvas. For coordinate storage, use VXYZ." },
-                { "Bezier2D", "Represents a 2D cubic Bezier curve." },
-                { "Spline2D", "Represents a smooth spline curve passing through a series of points." },
-                { "Text2D", "Represents text drawn at a specific position." },
-                { "Group2D", "Represents a collection of shapes treated as a single unit." },
-                { "Grid2D", "Represents a rectangular grid of points." },
-
                 // Support classes
                 { "VXYZ", "3D coordinate type (X, Y, Z) used for every position, vector and direction parameter in the library — the counterpart to Revit's XYZ. Its components are read-only: every operation returns a new instance, so a VXYZ can be shared without aliasing bugs. Constructors: (x, y, z), (x, y) with Z = 0, and () for the origin. Never registers on the canvas — use it freely for intermediate maths, and reach for VPoint only when you want a dot drawn. Vector operations: Add, Subtract, Multiply, Divide, Negate, Normalize (returns Zero for a zero-length vector rather than throwing), GetLength, DistanceTo, DotProduct, CrossProduct, TripleProduct, AngleTo (radians, 0 to π), Rotate(degrees) about the Z axis, Clone, AsVPoint. Tests: IsZeroLength, IsUnitLength, IsAlmostEqualTo(other, tolerance = 1e-9), static IsWithinLengthLimits. Indexer [0]/[1]/[2] reads X/Y/Z and throws IndexOutOfRangeException otherwise. Operators +, -, * and / work with scalars and with VPoint (mixed operations return a plain VXYZ, never a drawable point); == and != are fuzzy comparisons using IsAlmostEqualTo, so GetHashCode rounds to 8 decimals to match. Static properties: Zero, BasisX, BasisY, BasisZ." },
                 { "VFont", "Font family for VText. Values: Arial (default), TimesNewRoman, CourierNew, Verdana, Georgia, Tahoma, TrebuchetMS, Consolas, Calibri, Cambria, SegoeUI, ComicSansMS, Impact, LucidaConsole." },
@@ -135,7 +120,7 @@ namespace DoodleSharp.Documentation
                 { "DoodleSharp.Animation", "Contains the classes that make a drawing move and respond. Two motion models: Frame for per-frame callbacks that reschedule themselves (the requestAnimationFrame pattern), and Animator for a finite timeline that can be scrubbed and exported to GIF or video. Alongside them, Mouse is the input seam — JavaScript-style mouse callbacks (Mouse.OnMove, OnDown, OnClick, OnDrag, OnWheel and friends) that hand your code a MouseInfo for every gesture on the canvas, so a drawing can be interactive rather than only animated." },
                 { "Frame", "Per-frame callbacks, in the shape JavaScript uses: a function that asks for the next frame. Frame.Request(callback) queues it and returns a handle; call Frame.Request again from inside the callback to keep going, and simply stop asking to end. The callback receives elapsed seconds since the loop started - write motion as a function of that rather than accumulating state and it stays frame-rate independent. Frame.Cancel(handle) removes a queued callback. Requesting during a callback runs on the NEXT frame, never the current one. Use this for open-ended, interactive or procedural motion; use Animator when you need a finite sequence you can scrub or export, which a self-rescheduling callback cannot provide." },
                 { "Mouse", "Static class holding the mouse callbacks for the canvas, in the shape JavaScript uses: assign one function per event — Mouse.OnMove(e => cursor.Center = e.Position). The methods are OnMove, OnDown, OnUp, OnClick, OnDoubleClick, OnDrag, OnWheel, OnEnter and OnLeave, each taking an Action<MouseInfo> and each handing your code a MouseInfo describing the gesture. ASSIGNING REPLACES; IT DOES NOT ADD — calling OnMove twice leaves one handler, the second, and passing null detaches it. That is deliberately unlike Frame.Request, which queues each request separately: Main() is re-invoked on every tick of a Global Parameters slider drag, so an additive API would silently stack hundreds of live handlers during one drag. HANDLERS ARE DROPPED AT THE START OF EVERY RUN and by the Stop button, so register them from Main() (or a sketch's Setup()) and let them be re-registered each time you press Run; a handler is a delegate into the collectible assembly your code was compiled into and cannot outlive the run that created it. REGISTERING ANY HANDLER PUTS THE CANVAS INTO INTERACTIVE MODE: it stops competing for the mouse, so click-to-select, wheel zoom and double-click-zoom-to-fit are all suppressed and your handlers see every gesture; floating zoom controls appear over the top-right of the canvas in their place, middle-button drag still pans, and the F4 properties panel is hidden while interactive mode lasts (it edits the selected shape, and there is no selection). The drawing tools (P/L/C/R) and the measuring tape keep priority while armed — your handlers do not fire until you leave the tool with Esc. A project that registers nothing behaves exactly as it always has. Synthesis rules worth knowing: OnClick is manufactured from a down/up pair on the same button within about 3 pixels, so a drag produces no click; OnDoubleClick fires INSTEAD OF OnDown on the second click; and OnDrag fires INSTEAD OF OnMove while a button is held, with no fallback to OnMove. Handlers run on the UI thread, one at a time, so they can freely create and modify shapes, and the canvas repaints once per frame rather than once per event. A handler that throws detaches ALL handlers and is reported once through CallbackFailed (the console shows it tagged \"Mouse\") rather than throwing a hundred times a second. Polled state: X, Y and IsDown are tracked even with no handler registered, so a Frame callback or a sketch's Draw() can read them without registering anything. HasHandlers says whether interactive mode is on, and Clear() detaches everything." },
-                { "MouseInfo", "The event object handed to every Mouse callback — the equivalent of the e in a JavaScript onmousemove(e) handler. A fresh instance is created for each dispatched event, so it is safe to keep one, stash it in a field or compare it with the next; it is deliberately not pooled or reused. Position and geometry: Position (VXYZ in world coordinates, grid-snapped while Snap to Grid (F9) is on), RawPosition (the same point never snapped), X and Y (shorthand for Position.X/Y), ScreenX and ScreenY (device-independent pixels from the canvas's top-left, Y increasing downwards), Scale (canvas zoom, screen pixels per world unit — use 8 / e.Scale for \"within 8 pixels\"). Remember the world is Y-UP with (0, 0) at the centre of the canvas, so e.Position drops straight into a shape constructor with no conversion. Buttons and modifiers: Kind (MouseEventKind — which event this is), Button (MouseButtonKind — the button this event is ABOUT, None for a move, wheel, enter or leave), LeftDown, RightDown, MiddleDown (what is held right now, which is what you want during a drag), Shift, Ctrl, Alt, ClickCount (1 single, 2 double, 0 when not a button event), WheelDelta (raw WPF units, 120 per notch) and WheelNotches (the friendly form, 1.0 per detent). Target is the topmost shape under the cursor or null over empty space, computed on first read and cached, so a handler that never asks pays nothing. There is NO Handled property — the canvas's own gestures are already suppressed in interactive mode, so there is nothing to cancel. No WPF type appears anywhere on this class: coordinates are VXYZ and double, buttons and modifiers are its own enums and bools." },
+                { "MouseInfo", "The event object handed to every Mouse callback — the equivalent of the e in a JavaScript onmousemove(e) handler. A fresh instance is created for each dispatched event, so it is safe to keep one, stash it in a field or compare it with the next; it is deliberately not pooled or reused. Position and geometry: Position (VXYZ in world coordinates, grid-snapped while Snap to Grid (F9) is on), RawPosition (the same point never snapped), X and Y (shorthand for Position.X/Y), ScreenX and ScreenY (device-independent pixels from the canvas's top-left, Y increasing downwards), Scale (canvas zoom, screen pixels per world unit — use 8 / e.Scale for \"within 8 pixels\"). Remember the world is Y-UP with (0, 0) at the centre of the canvas, so e.Position drops straight into a shape constructor with no conversion. Buttons and modifiers: Kind (MouseEventKind — which event this is), Button (MouseButtonKind — the button this event is ABOUT, None for a move, wheel, enter or leave), LeftDown, RightDown, MiddleDown (what is held right now, which is what you want during a drag), Shift, Ctrl, Alt, ClickCount (1 single, 2 double, 0 when not a button event), WheelDelta (raw WPF units, 120 per notch) and WheelNotches (the friendly form, 1.0 per detent). Target is the topmost shape under the cursor or null over empty space, computed on first read and cached, so a handler that never asks pays nothing. There is NO Handled property — the canvas's own gestures are already suppressed in interactive mode, so there is nothing to cancel. No WPF type appears anywhere on this class: coordinates are VXYZ and double, buttons and modifiers are its own enums and bools. The constructor is public — MouseInfo(kind, position, rawPosition, screenX, screenY, button = None, leftDown = false, rightDown = false, middleDown = false, shift = false, ctrl = false, alt = false, clickCount = 0, wheelDelta = 0, scale = 1, hitTest = null), where hitTest is the Func<VXYZ, Shape> that Target is computed from — but the canvas is what calls it, so you only need it to drive a handler yourself from a test." },
                 { "MouseButtonKind", "Which mouse button a MouseInfo is about: None (a plain move, a wheel turn, or an enter/leave), Left, Right, Middle (the wheel pressed as a button), XButton1 or XButton2 (the extra side buttons, if the mouse has them). Read it from MouseInfo.Button on a down, up or click event. To ask what is HELD rather than what this event is about — during a drag, say — use MouseInfo.LeftDown / RightDown / MiddleDown instead. Note Middle is reported to your handlers, but a middle-button DRAG stays the canvas's own pan gesture." },
                 { "MouseEventKind", "What kind of event a MouseInfo describes, so one method can serve several callbacks and switch on MouseInfo.Kind. Values: Move (pointer moved with no button held), Down, Up, Click (synthesised from a down/up pair in the same place — see Mouse.OnClick), DoubleClick (a second click inside the system double-click time, delivered instead of Down), Drag (pointer moved with a button held, delivered instead of Move), Wheel, Enter and Leave. The kind always matches the callback the event arrived through, so it is informational rather than something you have to test." },
                 { "Animator", "Main class for creating animations. Manages sequencing automatically - animations added with AddToAnimations() play sequentially; pass a List<Animation> for parallel playback. Use Pause(seconds) to insert a time gap between animations. Call Animate() to start, Stop() to end. Properties: Duration (read-only total in seconds), Repeat (default false; when true each animation loops independently on its own duration), Speed (playback multiplier, default 1.0, shared with the toolbar speed slider), Fps (target frame rate, default 60, clamped to 1-120). Adding an animation also places its target on the canvas if it is not already there. Only one Animator plays at a time - Animate() replaces the active timeline, so put every animation into a single Animator." },
@@ -2146,15 +2131,42 @@ anim.Animate();
 // The selector must be a plain property access on T (T : Shape).
 // c => c.Radius * 2, a method call, or a field all throw ArgumentException." },
 
-                { "ObjectPropertyAnimation", @"// Animates any numeric property on an arbitrary object
-// Useful for animating user-defined classes, not just shapes
-var wheel = new Wheel();
-var anim = new Animator();
+                { "ObjectPropertyAnimation", @"// Animates a numeric property on an ARBITRARY object - T : class, not just Shape.
+// Nothing is auto-drawn, because Animation.Target is null here: your property
+// setter is what actually moves the geometry.
 
-// Animate rotation from 0 to 360 over 1 second
+// Declare the class at file scope - C# has no local classes, so this goes
+// outside Main() (in StartViz.cs or any other .cs file in the project).
+class Wheel
+{
+    public VCircle Hub   = new VCircle(new VXYZ(0, 0), 40);
+    public VLine   Spoke = new VLine(0, 0, 40, 0);
+
+    private double _rotation;
+    public double Rotation                     // must be a writable double
+    {
+        get => _rotation;
+        set                                    // the setter is what redraws
+        {
+            _rotation = value;
+            Spoke.End = new VXYZ(40 * Math.Cos(value.ToRadians()),
+                                 40 * Math.Sin(value.ToRadians()));
+        }
+    }
+}
+
+// ... and in Main():
+var wheel = new Wheel();
+var anim  = new Animator();
+
+// Rotation runs 0 -> 360 over one second, looping. The start value is applied
+// immediately at construction, so the wheel is already at 0 before playback.
 anim.AddToAnimations(new ObjectPropertyAnimation<Wheel>(wheel, w => w.Rotation, 0.0, 360.0, 1.0));
 anim.Repeat = true;
-anim.Animate();" },
+anim.Animate();
+
+// The selector must be a plain property access on T: w => w.Rotation.
+// A field, a method call, or w => w.Rotation * 2 all throw ArgumentException." },
 
                 { "EasingFunctions", @"// Apply easing to any animation for smooth motion
 var circle = new VCircle(0, 0, 30);
@@ -4017,6 +4029,7 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "Parameter.AsBool", "The value as a bool, or false when it is not a boolean." },
                 { "Parameter.AsText", "The value as a string — the raw string for text parameters, ToString() otherwise." },
                 { "Parameter.AsDate", "The value as a DateTime, or default when it is not a date." },
+                { "Parameter.ToString", "Returns \"Name = literal\", where the right-hand side is ToLiteral() — the value formatted as it would be written in C# source, so a string comes back quoted and escaped, a bool as true/false, and a date as DateTime.Parse(\"...\"). It is the parameter as the panel would write it back into your code, not a plain value dump." },
                 { "ParamValue.Name", "The parameter name this value was read from." },
                 { "ParamValue.ToString", "The value as a display string — never throws, and returns an empty string for an undeclared parameter." },
 
@@ -4091,6 +4104,7 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "BoundingBox.Union", "Returns the smallest box that contains both this box and the other." },
                 { "BoundingBox.Expand", "Returns a copy grown by the given distance on all four sides. A negative distance contracts, and can invert the box if it exceeds half the width or height." },
                 { "BoundingBox.Deconstruct", "Allows tuple deconstruction: var (min, max) = shape.GetBounds();" },
+                { "BoundingBox.ToString", "Returns \"BoundingBox(Min: (x, y, z), Max: (x, y, z))\" — the two corners, in world coordinates. Remember the world is Y-up, so Min is the BOTTOM-left corner." },
 
                 // VCell
                 { "VCell.UniqueId", "The cell's index within its parent VSpatialGrid, assigned in row-major order starting at 0. Read-only." },
@@ -4175,6 +4189,7 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "VCoordinateSystem.ToWorld", "Converts a point expressed in this frame back to world coordinates. Overloads take a VXYZ or three doubles." },
                 { "VCoordinateSystem.Translate", "Returns a NEW coordinate system with its origin moved by the vector and the same axes. This instance is unchanged." },
                 { "VCoordinateSystem.Rotate", "Returns a NEW coordinate system with its axes rotated about the given axis; the origin stays put and this instance is unchanged. The angle is in DEGREES, like every other rotation in the library: Rotate(VXYZ.BasisZ, 90) is a quarter turn, and turns the X axis onto Y exactly as VXYZ.Rotate(90) does." },
+                { "VCoordinateSystem.ToString", "Returns \"CoordinateSystem(Origin=..., X=..., Y=..., Z=...)\" — note the text says CoordinateSystem without the V. Prints the origin and all three axis vectors, which is what you want when checking that a factory produced the frame you expected." },
 
                 // VPlane
                 { "VPlane.Origin", "A point on the plane. Read-only — a VPlane is immutable once built." },
@@ -4381,6 +4396,7 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "PolygonWithHoles.Contains", "Returns true if a point is inside the outer boundary and not inside any hole." },
                 { "PolygonWithHoles.Clone", "Creates a deep copy of this PolygonWithHoles including outer and all holes." },
                 { "PolygonWithHoles.FromPolygonList", "Static method that analyzes a list of polygons and builds PolygonWithHoles structures by detecting containment." },
+                { "PolygonWithHoles.ToString", "Returns \"PolygonWithHoles(Outer: N pts, Holes: M)\" — the outer boundary's vertex count and the number of holes. The quickest way to check what a *WithHoles boolean operation actually produced." },
 
                 // Region Properties
                 { "Region.OuterLoop", "Gets the outer boundary of the region as an ordered list of ICurve forming a closed loop. Curves are stored in traversal order: the end of each curve connects to the start of the next." },
@@ -4455,6 +4471,7 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "HatchType.Parse", "Static method: parses a hatch pattern from an AutoCAD .pat format string. First line should be '*NAME, Description', subsequent lines define line families." },
                 { "HatchType.GetBuiltIn", "Static method: retrieves a built-in hatch pattern by name (string, case-insensitive) or by BuiltInHatch enum value. Forwards to BuiltInHatches.Get, so it hands back a fresh copy you are free to modify." },
                 { "HatchType.Clone", "Returns a deep copy of this pattern, cloning every line family (and each family's Dashes array) rather than sharing them. Use it before adapting a pattern you did not build yourself, so the original keeps its settings." },
+                { "HatchType.ToString", "Returns \"HatchType(Name: N lines)\" — the pattern name and how many line families it is built from. A family is one direction of the pattern, so ANSI31 reports 1 and a cross-hatch reports 2." },
 
                 // HatchPatternLine Properties
                 { "HatchPatternLine.Angle", "Angle of the line family in degrees." },
@@ -4689,6 +4706,7 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "VHatch.Flip", "Mirrors every boundary point across the given line. PatternAngle is NOT mirrored, so the hatch lines keep their original direction while the boundary reverses — if you want the hatching mirrored too, negate PatternAngle yourself." },
                 { "VHatch.GetBounds", "The bounding box of the boundary points. An empty boundary returns a degenerate box at the origin. This measures the boundary, not the generated lines, which is the same thing since the lines are clipped to it." },
                 { "VHatch.GetControlPoints", "A single Move handle at the centre of the boundary's bounding box. Editing individual boundary vertices interactively is not supported; rebuild the hatch from a new boundary instead." },
+                { "VHatch.ToString", "Returns \"VHatch(pattern, Scale:..., Angle:...)\" — the pattern name plus the two properties that most often need checking when a fill comes out too dense or turned the wrong way." },
 
                 // Region caching
                 { "Region.GetCachedOutline", "Gives you the region's boundary as plain vertices — out List<VXYZ> outer and out List<List<VXYZ>> holes — sampling each curved edge into segmentsPerCurve pieces, and memoising the result against Shape.Revision and the segment count. THE RETURNED LISTS ARE SHARED and must not be modified; copy them if you need to. This exists because sampling a region is not cheap — every non-line edge goes through ICurve.Divide, and a bézier or spline internally walks itself a few hundred times to get arc-length parameterisation — so doing it per frame per region was one of the most expensive things a drawing could contain. Prefer it over Region.SampleLoop when you are reading the same region repeatedly; use SampleLoop when you want a list you own, or want to sample one loop only." },
@@ -4700,7 +4718,13 @@ double area = regionA.GetArea();                        // outer minus holes
 
                 // RayHit / RayQuery
                 { "RayHit.Deconstruct", "Lets a hit be destructured in one line, because RayHit is a record struct: if (caster.FindIntersection(origin, dir) is RayHit h) { var (shape, point, distance) = h; ... }. Equivalent to reading Shape, Point and Distance separately. Note FindIntersection returns RayHit? — pattern-match or check HasValue before destructuring." },
+                { "RayHit.Equals", "Value equality generated for the record struct: two hits are equal when their Shape, Point and Distance all match. Shape is compared by REFERENCE (shapes have no value equality), Point fuzzily via VXYZ's 1e-9 tolerance, and Distance as an exact double — so comparing whole hits is rarely what you want. Compare hit.Shape, or compare distances with a tolerance of your own." },
+                { "RayHit.GetHashCode", "Hash generated for the record struct, combining Shape (reference hash), Point (VXYZ rounds to 8 decimals) and Distance. Usable as a dictionary key, subject to the exact-double caveat on Equals." },
+                { "RayHit.ToString", "The record struct's generated form: \"RayHit { Shape = ..., Point = (x, y, z), Distance = ... }\", where the Shape part is whatever that shape's own ToString returns." },
                 { "RayQuery.Deconstruct", "Lets a query be destructured as var (origin, direction) = query, because RayQuery is a record struct. Mostly useful when reading back the list you passed to RayCaster.FindIntersections, whose results come back in the same order as the queries." },
+                { "RayQuery.Equals", "Value equality generated for the record struct: two queries are equal when their Origin and Direction are. VXYZ compares fuzzily (IsAlmostEqualTo, 1e-9), so coordinates that differ only in floating-point noise still match. Note the direction is compared as given — it is not normalised first, so (1, 0, 0) and (2, 0, 0) describe the same ray but are NOT equal." },
+                { "RayQuery.GetHashCode", "Hash generated for the record struct, combining Origin and Direction. VXYZ rounds to 8 decimals when hashing so that its fuzzy equality still groups correctly in a Dictionary or HashSet." },
+                { "RayQuery.ToString", "The record struct's generated form: \"RayQuery { Origin = (x, y, z), Direction = (x, y, z) }\"." },
 
                 // IDrawable
                 { "IDrawable.Place", "Puts the drawable on the canvas and keeps it there. Declared as a DEFAULT interface implementation, forwarding to Draw(), specifically so that the recommended name works through an IDrawable reference — CanvasRenderer.GetShapes() hands back IDrawable, and without this \"prefer Place()\" would fail to compile in exactly the place the documentation sends you. Shape implements it outright, so every real shape reaches the same method. Exactly equivalent to Draw()." },
@@ -4813,6 +4837,7 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "VRadialDimension.MoveControlPoint", "Index 0 recentres the dimension on newPosition; 1 sets LeaderAngle from the direction of newPosition relative to Center, swinging the leader around without changing Radius." },
                 { "VRadialDimension.GetBounds", "The bounding box covering the dimensioned circle's extent and the leader and text — the bounding-box answer, since a dimension has no outline of its own. Contains and DistanceTo are likewise box-based on this shape." },
                 { "VRadialDimension.Flip", "Mirrors Center across the given line and mirrors the leader direction with it, so the annotation stays on the same side of the geometry it belongs to. Radius is unchanged — a mirror does not resize." },
+                { "VRadialDimension.ToString", "Returns \"VRadialDimension(Center: ..., R: ..., text)\", where the last part is the DisplayText actually drawn — so it already reflects ShowDiameter, Prefix, Suffix, DecimalPlaces and any CustomText." },
                 { "VGroup.GetControlPoints", "Five handles: [0] Move at the group centre, then four Vertex handles at the corners of the group's bounding box (Min, Max, top-left, bottom-right). Only the Move handle does anything today; the corner handles are placeholders for a future box scale, so dragging one has no effect." },
                 { "VGroup.MoveControlPoint", "Index 0 translates the whole group so its centre lands on newPosition, which moves every child. The corner indices are accepted and ignored." },
                 { "VGroup.Move", "Translates every child by the displacement vector; the group holds no geometry of its own. Distinct from setting OffsetX/OffsetY, which the renderer applies as a transform around the whole group without touching the children — that is what animations use, and it is why an animated group snaps back if you clear the offsets." },
@@ -4825,11 +4850,13 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "VGroup.DistanceTo", "The smallest DistanceTo across every child, so it measures to whichever child is nearest — zero when the point sits on any child's outline. An EMPTY GROUP RETURNS double.MaxValue." },
                 { "VGroup.DoesIntersect", "True when any child intersects the other shape. When the other shape is itself a VGroup, every pair of children is tested, so it is O(n × m) — fine for tens of shapes, worth avoiding in a loop over thousands." },
                 { "VGroup.Intersect", "Returns the FIRST intersection found between any child and the other shape, as a Shape, or null if none intersects. \"First\" is in child order, which is creation order — so it is a hit test, not a complete answer. Iterate Shapes yourself if you need every intersection." },
+                { "VGroup.ToString", "Returns \"VGroup(N shapes)\", with the group's Name appended in quotes when one is set — for example VGroup(4 shapes, \"wheel\"). N is the direct child count, so a nested group counts as one child rather than as its contents." },
                 { "VCell.Clone", "An independent copy of the cell keeping the same UniqueId, Column and Row as the original — deliberately, since those identify its position in the grid, so a cloned cell is a copy of a specific cell rather than a new one. Neighbours are NOT cloned: the copy is detached from the grid, so pathfinding across a clone will not work." },
                 { "VCell.Move", "Translates the cell's four corners and its Center together. Moving a single cell out of its grid leaves the grid's own Location and cell layout unchanged, so the grid will no longer agree with where the cell is — move the VSpatialGrid instead if you want the whole grid to travel." },
                 { "VCell.Rotate", "Rotates the cell's corners and its Center about the pivot, in degrees counter-clockwise. The cell stops being axis-aligned, which is fine for drawing but means GetCellAt/GetClosestCell lookups on the parent grid become unreliable." },
                 { "VCell.Scale", "Scales the corners and Center about the given centre point and multiplies CellSize by |factor|, so the cell's recorded size stays consistent with its drawn size." },
                 { "VCell.Flip", "Mirrors the cell's corners and its Center across the given line." },
+                { "VCell.ToString", "Returns \"VCell(Id=..., Col=..., Row=..., Center=...)\" — the cell's UniqueId, its column and row within the owning VSpatialGrid, and its centre point. Useful when logging a path returned by VSpatialGrid.FindPath, which is a list of cells." },
                 { "VSpatialGrid.Clone", "A new grid with the same Location, XCount, YCount and CellSize, and the styling copied — the cells are REBUILT rather than copied, so per-cell state does not come across: Blocked flags are cleared and any styling you applied to individual cells is lost. Set them again after cloning." },
                 { "VSpatialGrid.Move", "Translates the grid Location and every cell together, and drops the internal nearest-cell index so subsequent GetClosestCell lookups are correct. Prefer this over moving cells individually." },
                 { "VSpatialGrid.Rotate", "Rotates the Location and every cell about the pivot, in degrees counter-clockwise. The cells stop being axis-aligned, so GetCellAt — which relies on an axis-aligned layout — becomes unreliable; GetClosestCell still works, since it measures distance." },
@@ -4837,6 +4864,7 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "VSpatialGrid.Flip", "Mirrors the Location and every cell across the given line. Row and column numbering is unchanged, so after a mirror the cell at column 0 is on the opposite side." },
                 { "VSpatialGrid.GetBounds", "The union of every cell's bounding box — the drawn extent of the grid, which is slightly larger than XCount × CellSize by the outer cell walls. A grid with no cells returns a degenerate box at Location." },
                 { "VSpatialGrid.DistanceTo", "The smallest distance from the point to any cell's outline, so it is zero on any cell edge and positive inside a cell as well as outside the grid. A grid with no cells falls back to the distance to Location. There is deliberately no Contains override: a grid is a diagram, not an area." },
+                { "VSpatialGrid.ToString", "Returns \"VSpatialGrid(XCountxYCount, CellSize=..., Location=...)\" — the grid's dimensions, cell size and the centre of its bottom-left cell. Handy in a VizConsole.Log while working out whether a grid covers the area you meant." },
 
                 // Curve members whose behaviour is specific to the shape
                 { "VEllipse.Divide", "Returns numberOfSegments + 1 points spaced by EQUAL ARC LENGTH along the ellipse. This matters on an eccentric ellipse: equal SWEEP ANGLE would bunch points near the flat ends, and everything sampling the curve — dashes, animation paths, morph targets — would inherit the distortion. Use EvaluateByAngle if you specifically want equal angles. Zero or fewer segments returns an empty list." },
