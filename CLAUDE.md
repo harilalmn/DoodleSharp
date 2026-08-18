@@ -108,6 +108,30 @@ The IntelliSense system uses incremental Roslyn compilation for responsive compl
 ### WPF type aliases (in RenderCanvas.cs)
 `RenderCanvas.cs` uses `C2VGeometry` types **directly** — there are no `*2D` geometry aliases anymore (no name clash). It only aliases the **WPF** types it also needs, to avoid clashing with geometry: `Point` = `System.Windows.Point`, plus `Brush`/`Pen`/`Color`/`Size`/`Rect` etc. from `System.Windows[.Media]`. World coordinates are `C2VGeometry.VXYZ`; screen coordinates are `System.Windows.Point`.
 
+## User Projects Are Not a Compatibility Surface (STANDING INSTRUCTION)
+
+**Never spend design effort, code, or prose on user projects that already exist on disk.** DoodleSharp
+projects are small, disposable sketch files, not documents with a long life to protect — treating them
+as a compatibility surface buys nothing and taxes every change with migration logic and hedged
+documentation.
+
+Concretely, do not: auto-migrate or rewrite project files on open; prompt the user to update them; add
+a fallback whose only justification is "otherwise projects created before this release break"; write
+README/CHANGELOG caveats explaining what an existing project must do by hand; raise "but existing
+projects would break" as an objection to a change; or log it as an open follow-up.
+
+Design for freshly created projects. If a change alters what generated code looks like, change the
+generator and stop there.
+
+**A mechanism with an independent, present-tense justification is still fine** — the entry-point scan
+(`ModuleCompiler.FindEntryTypeByScan`, note 111) earns its place because renaming a namespace or a
+project folder by hand should work *today*, not because it rescues old projects. Keep such things;
+just do not propose or defend them on backward-compatibility grounds.
+
+This is about **user projects only**. The app's own persisted state is unaffected and keeps its
+established handling: unknown keys in `appsettings.json` are ignored (notes 98, 106), and a docking
+layout whose schema does not match is discarded whole (note 100).
+
 ## Key Implementation Notes
 
 **Note numbers are stable IDs, not positions.** Notes cross-reference each other by number, so a
