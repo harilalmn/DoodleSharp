@@ -537,10 +537,54 @@ public abstract class Shape : IDrawable
     /// <summary>
     /// Calculates the intersection of this shape with another shape.
     /// Returns the resulting Shape (VPoint, VLine, VRectangle, etc.) or null if no intersection.
+    ///
+    /// <para>
+    /// When both shapes are curves this defers to <see cref="CurveIntersection"/> — the same engine
+    /// <c>ICurve.Intersect(ICurve)</c> uses. Before that it returned null for every pair the four
+    /// overrides did not name (line/line, line/rectangle, rectangle/rectangle, point, group), so
+    /// ray-vs-circle, circle-vs-circle and polyline-vs-anything all reported "no intersection"
+    /// while <c>ICurve.Intersect</c> on the very same pair returned real points.
+    /// </para>
+    ///
+    /// <para>
+    /// <b><see cref="Intersect(ICurve)"/> on the curve types is the richer API</b> and is what to
+    /// reach for: it returns an <see cref="IntersectionResult"/> carrying every point and every
+    /// overlapping curve, where this can only hand back one shape. A single point comes back as a
+    /// <c>VPoint</c>, anything else as a <c>VGroup</c>. Nothing built here is registered — a query
+    /// must not draw its own answer — so call <c>Place()</c> on the result to see it.
+    /// </para>
     /// </summary>
     public virtual Shape? Intersect(Shape other)
     {
-        return null; // Default implementation returns null (no intersection supported by default)
+        if (this is ICurve self && other is ICurve otherCurve)
+            return ToShape(CurveIntersection.Intersect(self, otherCurve));
+
+        return null;
+    }
+
+    /// <summary>
+    /// Materialises an <see cref="IntersectionResult"/> as a single shape, without registering
+    /// anything: <c>GeometryHelper</c>'s query methods follow the same rule (see the
+    /// <c>SuspendAutoRegistration</c> uses there) because asking a question should not litter the
+    /// canvas with its answer.
+    /// </summary>
+    private static Shape? ToShape(IntersectionResult result)
+    {
+        if (!result.HasIntersection) return null;
+
+        using var _ = SuspendAutoRegistration();
+
+        if (result.IsSinglePoint)
+            return new VPoint(result.Points[0]);
+
+        var parts = new List<Shape>(result.Count);
+        foreach (var point in result.Points) parts.Add(new VPoint(point));
+        foreach (var curve in result.Curves) if (curve is Shape s) parts.Add(s);
+
+        if (parts.Count == 0) return null;
+        if (parts.Count == 1) return parts[0];
+
+        return new VGroup(parts);
     }
 
     /// <summary>
@@ -548,6 +592,12 @@ public abstract class Shape : IDrawable
     /// </summary>
     public virtual bool DoesIntersect(Shape other)
     {
+        // Asked of the curve engine directly rather than through Intersect(Shape): the answer is a
+        // boolean, and this is written inside loops over every shape in a scene, so materialising
+        // VPoint/VGroup results only to throw them away would be pure waste.
+        if (this is ICurve self && other is ICurve otherCurve)
+            return CurveIntersection.Intersect(self, otherCurve).HasIntersection;
+
         if (Intersect(other) != null) return true;
         // VText has a custom DoesIntersect (OBB-vs-AABB SAT); delegate so the check is symmetric.
         if (other is VText) return other.DoesIntersect(this);

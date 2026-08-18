@@ -17,6 +17,24 @@ tags; this file is the curated, human-friendly summary.
   their real values in the Properties panel; they just were not painted. Anything that triggers a
   full redraw (pan, zoom, select, run, an animation frame) made them vanish. The same bug left the
   undrawn segments in memory frame after frame.
+- **`DoesIntersect` reported no intersection for almost every pair of shapes.** Only line/line,
+  line/rectangle, rectangle/rectangle, point and group were ever answered; ray/circle,
+  circle/circle, arc, polyline and polygon pairs all came back false — while `Intersect()` on the
+  very same pair returned real points. Both `DoesIntersect` and `Intersect` now use the same
+  engine, so the guard and the answer agree:
+
+  ```csharp
+  foreach (var obstacle in obstacles)
+      if (ray.DoesIntersect(obstacle))
+          VizConsole.Log(ray.Intersect(obstacle).Points);
+  ```
+
+- **Intersections involving `VRay` or `VXLine` were thousands of times slower than they needed to
+  be** — and approximate. Each was chopped into a thousand chords and tested against a thousand
+  more, so one ray against one circle cost ~65 ms and a 359-ray casting loop took over two minutes.
+  They are now solved exactly, in well under a microsecond; that loop finishes in about 1 ms. A ray
+  still reaches only as far as its `RenderExtent` (10000 by default) — raise it for obstacles
+  further out.
 
 
 ## [2026.8.4] - 2026-08-18

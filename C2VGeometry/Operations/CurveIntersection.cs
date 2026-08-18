@@ -32,6 +32,20 @@ public static class CurveIntersection
             (VCircle c, VArc a) => IntersectCircleArc(c, a),
             (VArc a, VCircle c) => IntersectCircleArc(c, a),
             (VArc a1, VArc a2) => IntersectArcArc(a1, a2),
+
+            // Semi-infinite (VRay) and infinite (VXLine) construction lines are finite over their
+            // RenderExtent — exactly the span Evaluate/Divide map [0, 1] onto — so converting once
+            // and re-entering costs nothing in coverage and gains the exact analytic routines
+            // above. Falling through to IntersectGeneric instead sampled BOTH curves into their
+            // 1000-segment cap and ran a million segment-pair tests: 65 ms for one ray against one
+            // circle, which makes the obvious ray-casting loop (a few hundred rays over a handful
+            // of obstacles) take minutes, and approximated by chords an answer that has a closed
+            // form. A ray against a ray converts one side, re-enters, and converts the other.
+            (VRay ray, _) => Intersect(ray.ToFiniteLine(), curve2),
+            (_, VRay ray) => Intersect(curve1, ray.ToFiniteLine()),
+            (VXLine xline, _) => Intersect(xline.ToFiniteLine(), curve2),
+            (_, VXLine xline) => Intersect(curve1, xline.ToFiniteLine()),
+
             // For polylines and other complex curves, decompose into segments
             _ => IntersectGeneric(curve1, curve2)
         };
