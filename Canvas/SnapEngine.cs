@@ -1,4 +1,4 @@
-using DoodleSharp.Rendering;
+﻿using DoodleSharp.Rendering;
 using C2VGeometry;
 
 namespace DoodleSharp.Canvas;
@@ -8,7 +8,19 @@ namespace DoodleSharp.Canvas;
 /// </summary>
 public enum SnapType
 {
-    None,
+    /// <summary>
+    /// No snap type. Never returned by <see cref="SnapEngine.FindSnapPoint(VXYZ, SceneIndex, double)"/>,
+    /// which reports "nothing to snap to" as a null <see cref="SnapResult"/>.
+    ///
+    /// <para>
+    /// It is not dead weight, and must stay first: it pins the zero value, so an unassigned
+    /// <c>SnapType</c> field reads as <c>None</c> rather than as a real snap kind. Reordering the
+    /// enum — or removing this member — would silently make <c>default(SnapType)</c> mean
+    /// <c>Endpoint</c>, which is far worse than an unused name. Pinned by
+    /// <c>Tests/SnapEngineTests.NoneIsTheZeroValue</c>.
+    /// </para>
+    /// </summary>
+    None = 0,
     Endpoint,
     Midpoint,
     Center,
@@ -46,7 +58,18 @@ public class SnapResult
     /// <summary>
     /// For Perpendicular snaps: the point on the shape where perpendicular meets.
     /// For Tangent snaps: the tangent point on the circle/arc.
+    ///
+    /// <para>
+    /// <b>Always exactly <see cref="Point"/>, and inherently so.</b> The point at which the
+    /// perpendicular meets the shape *is* the perpendicular snap point, and the tangent point *is*
+    /// the tangent snap point — there is no configuration in which the two differ, so this carries
+    /// no information <see cref="Point"/> does not. Deprecated rather than deleted, the same call as
+    /// <c>VDimension.ExtensionLength</c> (note 92): a build warning naming the replacement beats
+    /// breaking every existing read.
+    /// </para>
     /// </summary>
+    [Obsolete("ConstraintPoint is always exactly Point - the perpendicular's foot and the tangent's "
+            + "touch point are the snap point itself. Use Point instead. Nothing reads this.")]
     public VXYZ? ConstraintPoint { get; set; }
 
     /// <summary>
@@ -129,20 +152,32 @@ public class SnapEngine
     /// Finds the best snap point using spatial index for efficient culling (O(log n + k) instead of O(n)).
     /// </summary>
     /// <param name="cursorWorld">Cursor position in world coordinates.</param>
-    /// <param name="spatialIndex">Scene index for efficient shape lookup.</param>
+    /// <param name="spatialIndex">
+    /// Scene index for efficient shape lookup. Must not be null — this overload has no shapes of its
+    /// own to fall back to; pass the collection to the
+    /// <see cref="FindSnapPoint(VXYZ, IReadOnlyList{IDrawable}, double)"/> overload instead.
+    /// </param>
     /// <param name="scale">Current canvas scale (zoom level).</param>
     /// <returns>The best snap result, or null if no snap found.</returns>
-    public SnapResult? FindSnapPoint(VXYZ cursorWorld, SceneIndex? spatialIndex, double scale)
+    /// <exception cref="ArgumentNullException"><paramref name="spatialIndex"/> is null.</exception>
+    public SnapResult? FindSnapPoint(VXYZ cursorWorld, SceneIndex spatialIndex, double scale)
     {
+        // A null index used to return null — indistinguishable from "nothing near the cursor", so
+        // snapping simply appeared not to work, on every mouse move, with nothing to notice. This
+        // method has no shape source of its own, so it cannot fall back to a full scan; the caller
+        // has the shapes and the other overload takes them. Every caller in this repo already
+        // null-checks before choosing an overload, so this is unreachable from the app and exists to
+        // stop an outside caller losing snapping silently.
+        if (spatialIndex == null)
+            throw new ArgumentNullException(nameof(spatialIndex),
+                "FindSnapPoint has no shapes to fall back to without a scene index. Use the "
+                + "IReadOnlyList<IDrawable> overload when no index is available.");
+
         // Store scale for extension reach calculations
         _currentScale = scale;
 
         // Convert screen tolerance to world tolerance
         var worldTolerance = DefaultSnapTolerance / scale;
-
-        // If no spatial index, return null (caller should use the other overload)
-        if (spatialIndex == null)
-            return null;
 
         // Query shapes within an expanded area for extension snaps
         // Extensions can reach further than normal snaps
@@ -672,11 +707,15 @@ public class SnapEngine
         var distance = cursor.DistanceTo(snapPoint);
         if (distance <= tolerance)
         {
+            // Still populated so an existing reader keeps working; see the property's own note for
+            // why it is deprecated rather than dropped.
+#pragma warning disable CS0618
             var result = new SnapResult(snapPoint, SnapType.Perpendicular, distance)
             {
                 ReferenceSource = referencePoint,
                 ConstraintPoint = snapPoint
             };
+#pragma warning restore CS0618
             candidates.Add(result);
         }
     }
@@ -773,12 +812,14 @@ public class SnapEngine
         var distance = cursor.DistanceTo(tangentPoint);
         if (distance <= tolerance)
         {
+#pragma warning disable CS0618
             var result = new SnapResult(tangentPoint, SnapType.Tangent, distance)
             {
                 ReferenceSource = referencePoint,
                 ConstraintPoint = tangentPoint,
                 TangentCenter = center
             };
+#pragma warning restore CS0618
             candidates.Add(result);
         }
     }
