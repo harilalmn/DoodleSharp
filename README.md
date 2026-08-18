@@ -251,8 +251,8 @@ Beyond the constructors above and the `ICurve` members every curve shares.
 | **VBezier** | `P0`, `P1`, `P2`, `P3` (settable), `MidPoint`, `Segments` (tessellation, default 32), `Evaluate(t)` (Bernstein, **not** arc-length), `GetRenderPoints()` |
 | **VSpline** | `ControlPoints`, `SegmentsPerSpan` (default 16), `Tension` (default 0.5 — 0 is angular, 1 is loose), `Evaluate(t)`, `GetRenderPoints()` |
 | **VArrow** | `Start` / `End` (settable), `MidPoint`, `HeadLength` (default 15 world units — each wing's length from the tip), `HeadAngle` (default 30 — degrees off the shaft, so the head spans `2 × HeadAngle`, 60° by default), `DoubleEnded` (default false — a head at `Start` as well), `GetStartArrowhead()` / `GetEndArrowhead()` → the two wing tips as a `(VXYZ, VXYZ)` tuple, `GetArrowheadPoints(tip, from)` for an arbitrary tip, and the static `VArrow.ArrowheadWings(tip, from, headLength, headAngleDegrees)`. Not an `ICurve` |
-| **VRay** | `Origin`, `Direction`, `RenderExtent` (default 10000 — how far it is drawn and how its bounds are computed, since it is infinite), `GetPointAtDistance(d)`, `ContainsPoint(p)`, `ToFiniteLine()` → `VLine`, `ToXLine()` → `VXLine`. Statics: `AtAngle(origin, angleDegrees)`, `HorizontalRight(origin)`, `HorizontalLeft(origin)`, `VerticalUp(origin)`, `VerticalDown(origin)` — all methods taking the origin, not properties |
-| **VXLine** | `BasePoint`, `Direction`, `RenderExtent`, `GetPointAtParameter(t)` (unclamped — negative `t` goes backwards), `GetTwoPoints()` → `(VXYZ, VXYZ)` (handy for `VPolygon.Slice`), `ToFiniteLine()` → `VLine`. Statics: `Horizontal(y)`, `Vertical(x)` |
+| **VRay** | `Origin`, `Direction`, `RenderExtent` (default 10000 — how far it is drawn, how its bounds are computed and how far `Intersect` reaches, since it is infinite), `GetPointAtDistance(d)`, `ContainsPoint(p)`, `ToFiniteLine()` → `VLine`, `ToXLine()` → `VXLine`. Statics: `AtAngle(origin, angleDegrees)`, `HorizontalRight(origin)`, `HorizontalLeft(origin)`, `VerticalUp(origin)`, `VerticalDown(origin)` — all methods taking the origin, not properties |
+| **VXLine** | `BasePoint`, `Direction`, `RenderExtent` (default 10000, applied each way from `BasePoint`; it bounds `Intersect` as well as the drawing), `GetPointAtParameter(t)` (unclamped — negative `t` goes backwards), `GetTwoPoints()` → `(VXYZ, VXYZ)` (handy for `VPolygon.Slice`), `ToFiniteLine()` → `VLine`. Statics: `Horizontal(y)`, `Vertical(x)` |
 | **VText** | `Content`, `Location`, `Height`, `Width`, `Font`, `FontWeight`, `Anchor`, `Angle`, `ToCharShape(i)`, `LiftChar(i)`, indexer `text[i]`, `LiftChars(start, count)`, `BlankChar(i)`, `GetAnchorOffset(w, h)` → the `(dx, dy)` the anchor applies. Static `GlyphOutlineProvider` is the font seam the host fills in |
 | **VGroup** | `Shapes`, `Count`, indexer `group[i]`, `Add`, `AddRange`, `Remove(shape)`, `RemoveAt(i)`, `Clear()`, `ContainsShape`, `Flatten()`, `ForEach`, `Where`, `GetShapesOfType<T>()`, `GetCenter()`, `SetOpacity`, `ApplyStyle` / `ApplyColor` / `ApplyFillColor` / `ApplyLineWeight` |
 | **VGrid** | `Points`, `Count`, indexers `grid[i]` and `grid[col, row]`, `GetRow` / `GetColumn`, `GetCenter()`, `Location`, `XCount` / `YCount`, `XSpacing` / `YSpacing`, `Centered`, `ApplyStyle()` |
@@ -3408,7 +3408,9 @@ What gets left out of the index:
 
 - shapes with `IsVisible == false`
 - **every `VPoint`** — zero-area markers are never useful ray targets, so they are always excluded
-- shapes whose bounds are null or non-finite, which means `VRay` and `VXLine` are never hit
+- **every `VRay` and `VXLine`** — construction guides, excluded by type (see the note below; their
+  bounds are finite, so the filter below would *not* catch them)
+- shapes whose bounds are null or non-finite
 - `null` entries in the collection
 
 `Count` tells you how many shapes actually made it in, which can be fewer than you passed.
@@ -3468,6 +3470,14 @@ caster.Refit();     // O(N) AABB refresh, tree topology untouched
 Hit geometry is exact for `VLine`, `VCircle`, `VArc`, `VEllipse`, `VPolygon` (so also `VRectangle`)
 and `VPolyline`; every other shape type falls back to a hit against its bounding box. A zero-length
 XY direction returns `null` / `false` rather than throwing.
+
+> **`VRay` and `VXLine` are excluded, by an explicit type test.** It would be natural to assume the
+> finite-bounds filter takes care of them, and it does not: both report a *finite* box derived from
+> `RenderExtent`, so they used to sail through it and be indexed. Because neither is among the exact
+> shape types, a hit on one was a hit on its **bounding box** — for a diagonal guide the reported
+> point could be nowhere near the line, and it still won the nearest-hit race against the real
+> geometry behind it. Construction guides are not ray targets, so they are simply left out. To find
+> where a ray truly crosses one, intersect them pairwise: `ray.Intersect(other)`.
 
 ---
 
@@ -3884,7 +3894,9 @@ shape.Flip(new VLine(0, 0, 0, 100));     // Mirror across a line
 bool hit = shape.Contains(point);// Point containment test
 double d = shape.DistanceTo(pt); // Distance to point
 bool touching = shape.DoesIntersect(other);  // Overlap test
-Shape? piece = shape.Intersect(other);       // Intersection geometry, or null
+Shape piece = shape.Intersect(other);
+// ^ intersection geometry, or null. For two curves: a VPoint for one crossing,
+//   a VGroup for several. Not registered — call piece.Place() to see it.
 shape.Hide();                    // Hide shape from canvas
 shape.Show();                    // Show hidden shape
 shape.Remove();                  // Take it off the canvas entirely
@@ -4165,8 +4177,9 @@ var (minPt, maxPt) = shape.GetBounds();
 
 `Contains` and `Intersects` include the boundary and ignore Z. `Expand` with a negative
 distance contracts, and can invert the box if it exceeds half the width or height.
-`VRay` and `VXLine` are infinite, so their bounds have non-finite corners — guard with
-`double.IsFinite(bounds.Width)` before using them.
+`VRay` and `VXLine` have no far end, so their bounds are taken from `RenderExtent` (default
+`10000`) rather than from the geometry: the box is finite, but it describes the drawn stretch, not
+the line. `GetLength()` on either really does return `double.PositiveInfinity`.
 
 ### ICurve Interface
 Shapes that represent curves implement the `ICurve` interface: **VLine, VCircle, VArc, VEllipse,
@@ -4298,6 +4311,113 @@ segments), `HasIntersection`, `IsSinglePoint`, `HasOverlap`, `Count`, plus `Merg
 `RemoveDuplicatePoints(tolerance = 1e-6)`. Static builders: `IntersectionResult.None`,
 `FromPoint`, `FromPoints`, `FromCurve`, `FromCurves`.
 
+#### `Shape.Intersect` / `Shape.DoesIntersect` — the same answer, one level up
+
+`Intersect(ICurve)` above is the call to reach for. The `Shape`-typed pair exists for code that
+holds shapes generically, and for **any two curves** it defers to the same engine, so the two can no
+longer disagree:
+
+```csharp
+Shape beam = new VRay(new VXYZ(0, 0), new VXYZ(1, 1));
+Shape rock = new VCircle(60, 60, 25);
+
+bool touching = beam.DoesIntersect(rock);   // true
+Shape where   = beam.Intersect(rock);       // VGroup of two VPoints
+where.Place();                              // queries do not draw their own answer
+```
+
+- **`DoesIntersect`** asks the engine for the boolean directly, so it does not build shapes only to
+  throw them away. It is cheap enough for the loop it is usually written in.
+- **`Intersect`** materialises the answer: one crossing comes back as a `VPoint`, several as a
+  `VGroup` of `VPoint`s, and a collinear overlap as the overlapping curve. `null` means they do not
+  meet. Nothing it builds is registered — call `Place()` on the result if you want it drawn.
+- The shapes that override these keep their own behaviour: `VLine` and `VRectangle` answer
+  line/line, line/rectangle and rectangle/rectangle in closed form, `VPoint` returns a copy of
+  itself when it lies inside the other shape, `VGroup` returns the first child that hits, and
+  `VText` uses a rotated-quad SAT test. Anything with no curve to test — `Region`, `VHatch`,
+  `VGrid`, `VSpatialGrid`, `VArrow`, the dimensions — still returns `null` / `false`.
+
+> **Which overload you get is decided by the argument's static type.** On a concrete curve,
+> `line.Intersect(circle)` binds to `Intersect(ICurve)` and gives you an `IntersectionResult`; the
+> `Shape.Intersect(Shape)` override never wins there, because an `override` counts as declared on
+> `Shape` and loses to a method declared further down. You reach the `Shape`-typed one by passing
+> something that is not an `ICurve` (`VText`, `VGroup`, `Region`, `VHatch`), or by holding the
+> argument in a `Shape`-typed variable.
+
+#### Rays and construction lines
+
+`VRay` and `VXLine` are `ICurve`s, so they intersect like everything else. Each is converted once to
+the finite segment spanning its `RenderExtent` and re-dispatched, which means a ray against a circle
+takes the **exact** circle routine instead of being sampled into chords.
+
+**The reach is `RenderExtent`, not infinity.** A `VRay` is tested from `Origin` out to
+`RenderExtent` (default `10000`); a `VXLine` from `−RenderExtent` to `+RenderExtent` about its
+`BasePoint`. That is the same span `Evaluate`, `Divide` and `Measure` cover, and it is what the
+shape is drawn over. An obstacle further out than that is simply missed — raise `RenderExtent`
+before intersecting if your drawing is bigger than the default.
+
+```csharp
+var far = new VCircle(30000, 0, 100);
+var ray = new VRay(new VXYZ(0, 0), new VXYZ(1, 0));
+
+bool seen = ray.DoesIntersect(far);        // false — beyond the default reach
+ray.RenderExtent = 40000;
+bool nowSeen = ray.DoesIntersect(far);     // true
+```
+
+##### Worked example: casting light at circular obstacles
+
+```csharp
+using C2VGeometry;
+using System.Collections.Generic;
+
+// Origin (0,0) is the canvas centre and Y points up.
+var light = new VXYZ(0, 0);
+new VPoint(light) { Name = "light", Color = "Yellow" };
+
+var obstacles = new List<VCircle>
+{
+    new VCircle(150,   60, 40) { Name = "rock1", Color = "SlateGray" },
+    new VCircle( 40, -120, 30) { Name = "rock2", Color = "SlateGray" },
+    new VCircle(-160,  30, 50) { Name = "rock3", Color = "SlateGray" }
+};
+
+const double reach = 320;          // how far an unobstructed beam is drawn
+
+for (int i = 0; i < 90; i++)
+{
+    var probe = VRay.AtAngle(light, i * 4);   // degrees, CCW from +X
+    probe.Remove();                           // a query, not part of the drawing
+
+    double best = reach;
+    VXYZ end = probe.GetPointAtDistance(reach);
+
+    foreach (var obstacle in obstacles)
+        foreach (var hit in probe.Intersect(obstacle).Points)
+        {
+            double d = light.DistanceTo(hit);
+            if (d < best) { best = d; end = hit; }
+        }
+
+    new VLine(light, end) { Name = $"beam{i}", Color = "Gold", LineWeight = 1 };
+}
+```
+
+Three things worth copying out of that loop:
+
+- **`probe.Remove()`.** A `VRay` registers on construction like every other shape, so ninety probes
+  would paint ninety full-length rays straight over the answer. `Remove()` takes it back off; for a
+  bulk sweep, setting `Shape.AutoRegister = false` around the loop (and restoring it afterwards) is
+  cheaper still.
+- **Compare the distances yourself.** `Intersect` returns every crossing it finds — a ray entering
+  and leaving a circle gives two points — and nothing orders them across a set of obstacles.
+- **`Intersect` here is `Intersect(ICurve)`**, because `probe` is a `VRay` and `obstacle` is a
+  `VCircle`. That is the overload with the points on it.
+
+For many rays against a large, *static* scene, `RayCaster` is the better tool: it builds a BVH once
+and answers "what does this hit first?" in O(log N) with the nearest-hit sorting already done.
+Pairwise `Intersect` is the right call when the obstacle set is small, or changes every frame.
+
 #### The CurveIntersection static class
 
 `curve.Intersect(other)` forwards to `CurveIntersection.Intersect(a, b)`, which dispatches on the
@@ -4306,7 +4426,7 @@ dispatch and documents the intent:
 
 | Method | Result |
 |--------|--------|
-| `CurveIntersection.Intersect(ICurve, ICurve)` | Picks the right algorithm below; anything with no closed form falls through to `IntersectGeneric`. Argument order does not matter |
+| `CurveIntersection.Intersect(ICurve, ICurve)` | Picks the right algorithm below; anything with no closed form falls through to `IntersectGeneric`. Argument order does not matter. A `VRay` or `VXLine` operand is converted to the finite segment spanning its `RenderExtent` and re-dispatched, so it reaches the exact routines too |
 | `IntersectLineLine(VLine, VLine)` | One point, or — for collinear overlapping segments — the shared segment in `Curves` (`HasOverlap` is true). Parallel non-collinear: empty |
 | `IntersectLineCircle(VLine, VCircle)` | 0, 1 (tangent) or 2 points, limited to the segment's extent |
 | `IntersectLineArc(VLine, VArc)` | As above, then filtered to the arc's angular sweep |
@@ -4314,8 +4434,8 @@ dispatch and documents the intent:
 | `IntersectCircleCircle(VCircle, VCircle)` | 0, 1 (tangent) or 2 points. Two coincident circles return the circle itself in `Curves`, not points |
 | `IntersectCircleArc(VCircle, VArc)` | Circle/circle roots filtered to the arc's sweep |
 | `IntersectArcArc(VArc, VArc)` | Circle/circle roots filtered to *both* sweeps |
-| `IntersectGeneric(ICurve, ICurve)` | Samples both curves into segments, tests every pair, then de-duplicates. Works for anything, at sampling accuracy |
-| `GetSegments(ICurve, segmentsPerUnit = 10)` | `List<VLine>` approximating the curve. `VLine` returns itself; polygons/polylines return their edges; other curves get `length × segmentsPerUnit` pieces, at least 2, capped at 1000. The synthesised lines are non-registering, so they never appear on the canvas |
+| `IntersectGeneric(ICurve, ICurve)` | Samples both curves into segments, tests every pair, then de-duplicates. Works for anything, at sampling accuracy — though a `VLine`, `VPolyline` or `VPolygon` operand contributes its real edges, so only genuinely curved operands are approximated. `Intersect` no longer routes rays and construction lines here, but calling this directly with one still samples it |
+| `GetSegments(ICurve, segmentsPerUnit = 10)` | `List<VLine>` approximating the curve. `VLine` returns itself; polygons/polylines return their edges; other curves get `length × segmentsPerUnit` pieces, at least 2, capped at 1000 — and since `VRay` and `VXLine` report an infinite length, they always hit that cap, spread over their `RenderExtent`. The synthesised lines are non-registering, so they never appear on the canvas |
 | `IsSelfIntersecting(ICurve)` | `bool`. `VLine`/`VCircle`/`VArc`/`VEllipse`/`VRectangle` are always false; polyline, polygon, bezier and spline are actually tested |
 | `IsPolylineSelfIntersecting(List<VXYZ>)` | `bool` on a raw vertex chain, allocation-free. Adjacent segments are exempt, as is the closing pair when the first and last vertex coincide; fewer than 4 points is always false |
 
