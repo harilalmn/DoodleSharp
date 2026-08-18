@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -557,7 +557,11 @@ namespace DoodleSharp.Editor
 
             var activeFile = GetActiveFilePath() ?? DefaultFileId;
             var compilation = workspace.GetCompilation();
-            var diagnostics = compilation.GetDiagnostics();
+            // Same remap as ModuleCompiler's two paths: a shadowed DoodleSharp name is squiggled at
+            // the declaration, not at the use site. This controller is a parallel implementation of
+            // the main window's editor wiring (note 43), so the fix belongs in both.
+            var diagnostics = DoodleSharp.Execution.ShadowedNameDiagnostics.Remap(
+                compilation.GetDiagnostics(), compilation);
 
             var markers = new List<DiagnosticMarkerInfo>();
             foreach (var diag in diagnostics)

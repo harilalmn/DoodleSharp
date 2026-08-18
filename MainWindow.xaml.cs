@@ -3938,7 +3938,7 @@ public partial class MainWindow : Window
         var className = Path.GetFileNameWithoutExtension(fileName);
         string content = createSketch
             ? Templates.GetStartSketchTemplate(projectName)
-            : string.Format(Templates.EmptyModuleTemplate, projectName, className);
+            : Templates.GetEmptyModuleTemplate(projectName, className);
 
         var newFile = new VizCodeFile
         {
@@ -8789,7 +8789,7 @@ public partial class MainWindow : Window
             // Create file with template
             var projectName = _currentProject.ProjectFile.Name;
             var className = Path.GetFileNameWithoutExtension(fileName);
-            var content = string.Format(Templates.EmptyModuleTemplate, projectName, className);
+            var content = Templates.GetEmptyModuleTemplate(projectName, className);
 
             File.WriteAllText(fullPath, content);
 

@@ -153,7 +153,13 @@ public class ModuleCompiler
 
             if (!emitResult.Success)
             {
-                var errors = emitResult.Diagnostics
+                // Report a shadowed DoodleSharp name at the declaration that caused it rather than
+                // at the use site the compiler blamed. Remapping the Diagnostic objects themselves
+                // — not the formatted string — is what makes the console message, the error count
+                // and the editor squiggles agree, since all three read this same collection.
+                var reported = ShadowedNameDiagnostics.Remap(emitResult.Diagnostics, compilation).ToList();
+
+                var errors = reported
                     .Where(d => d.Severity == DiagnosticSeverity.Error)
                     .Select(FormatDiagnostic)
                     .ToList();
@@ -165,7 +171,7 @@ public class ModuleCompiler
                 {
                     Success = false,
                     Error = "Compilation Error:\n" + string.Join(Environment.NewLine, errors),
-                    Diagnostics = emitResult.Diagnostics
+                    Diagnostics = reported
                 };
             }
 
@@ -210,7 +216,7 @@ public class ModuleCompiler
             var (compilation, _) = await CreateCompilationAsync(project);
 
             // Get diagnostics without emitting
-            var diagnostics = compilation.GetDiagnostics();
+            var diagnostics = ShadowedNameDiagnostics.Remap(compilation.GetDiagnostics(), compilation).ToList();
             var errors = diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
 
             return new CompilationResult
@@ -447,6 +453,20 @@ public class ModuleCompiler
 
                 if (entryType == null)
                 {
+                    // The namespace in the file belongs to the user — they can rename it, rename the
+                    // project directory, or (note 111) have been given a renamed namespace because the
+                    // project name shadowed an imported type. None of that is a reason to refuse to run,
+                    // so fall back to a scan before reporting failure.
+                    entryType = FindEntryTypeByScan(assembly);
+                    if (entryType != null)
+                    {
+                        ConsoleOutput.Instance.WriteLine("Compiler", 0,
+                            $"Entry point '{entryTypeName}' not found; using '{entryType.FullName}' instead.");
+                    }
+                }
+
+                if (entryType == null)
+                {
                     var allTypes = assembly.GetTypes().Select(t => t.FullName).ToList();
                     return new CompilationResult
                     {
@@ -508,6 +528,29 @@ public class ModuleCompiler
                 Error = $"Runtime Error: {FormatRuntimeError(ex)}"
             };
         }
+    }
+
+    /// <summary>
+    /// Last-resort entry point lookup for when the project namespace and the namespace in the file
+    /// disagree. Prefers a class literally named <c>Viz</c>, then any class exposing a static Main().
+    /// </summary>
+    internal static Type? FindEntryTypeByScan(Assembly assembly)
+    {
+        Type[] types;
+        try
+        {
+            types = assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            types = ex.Types.Where(t => t != null).ToArray()!;
+        }
+
+        static bool HasMain(Type t) =>
+            t.GetMethod("Main", BindingFlags.Public | BindingFlags.Static) != null;
+
+        return types.FirstOrDefault(t => t.Name == "Viz" && HasMain(t))
+               ?? types.FirstOrDefault(HasMain);
     }
 
     /// <summary>

@@ -1,3 +1,8 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Microsoft.CodeAnalysis.CSharp;
+
 namespace DoodleSharp.Project;
 
 public static class Templates
@@ -59,7 +64,46 @@ public static class Templates
         if (identifier.Length > 0 && char.IsDigit(identifier[0]))
             identifier = "_" + identifier;
 
-        return string.IsNullOrEmpty(identifier) ? "MyProject" : identifier;
+        if (string.IsNullOrEmpty(identifier))
+            return "MyProject";
+
+        return AvoidShadowing(identifier);
+    }
+
+    /// <summary>
+    /// Names the sanitizer must avoid on top of <see cref="ReservedNames"/>: the classes the
+    /// templates themselves declare inside the generated namespace.
+    /// </summary>
+    private static readonly HashSet<string> TemplateLocalNames = new(StringComparer.Ordinal)
+    {
+        "Viz",       // the entry-point class the Main() template declares
+        "MySketch",  // the class the sketch template declares
+    };
+
+    /// <summary>
+    /// Renames an identifier that would shadow an imported type or collide with a C# keyword.
+    /// "Mouse" becomes "MouseProject"; underscores are appended after that, which terminates.
+    /// </summary>
+    private static string AvoidShadowing(string identifier)
+    {
+        if (!IsReserved(identifier))
+            return identifier;
+
+        var candidate = identifier + "Project";
+        while (IsReserved(candidate))
+            candidate += "_";
+
+        return candidate;
+    }
+
+    private static bool IsReserved(string identifier)
+    {
+        // Reserved keywords only — a contextual keyword ("value", "record") is a legal identifier
+        // and renaming it would be a gratuitous surprise.
+        if (SyntaxFacts.GetKeywordKind(identifier) != SyntaxKind.None)
+            return true;
+
+        return TemplateLocalNames.Contains(identifier) || ReservedNames.IsApiName(identifier);
     }
 
     public const string EmptyModuleTemplate = """
@@ -79,6 +123,13 @@ public static class Templates
             }}
         }}
         """;
+
+    /// <summary>
+    /// Fills <see cref="EmptyModuleTemplate"/>, sanitizing both names. The file name a new module
+    /// is created under ("Untitled-1") is not a valid class name on its own.
+    /// </summary>
+    public static string GetEmptyModuleTemplate(string projectName, string className) =>
+        string.Format(EmptyModuleTemplate, SanitizeIdentifier(projectName), SanitizeIdentifier(className));
 
     /// <summary>
     /// Generates a p5.js-style sketch template with Setup() + Draw() blocks.
