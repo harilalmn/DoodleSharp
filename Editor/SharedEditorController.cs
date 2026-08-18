@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -1273,10 +1273,6 @@ namespace DoodleSharp.Editor
                         SelectAllOccurrences();
                         e.Handled = true;
                         return;
-                    case Key.F: // Ctrl+Shift+F
-                        FormatAll();
-                        e.Handled = true;
-                        return;
                 }
             }
             else if (mods == (ModifierKeys.Shift | ModifierKeys.Alt))
@@ -1284,6 +1280,10 @@ namespace DoodleSharp.Editor
                 var actualKey = e.Key == Key.System ? e.SystemKey : e.Key;
                 switch (actualKey)
                 {
+                    case Key.F: // Alt+Shift+F, as in VS Code / Visual Studio
+                        FormatAll();
+                        e.Handled = true;
+                        return;
                     case Key.Right:
                         ExpandSelection();
                         e.Handled = true;

@@ -1,4 +1,4 @@
-# Product Requirements Document (PRD)
+﻿# Product Requirements Document (PRD)
 ## DoodleSharp - 2D Geometry Visualizer
 
 ### Document Information
@@ -84,7 +84,7 @@ DoodleSharp is a desktop application that enables users to visualize 2D geometri
 |----|---------|--------|-------------|
 | FR-040 | Syntax Highlighting | Done | C# syntax colors |
 | FR-041 | Line Numbers | Done | Visible line numbers |
-| FR-042 | Code Formatting | Done | Auto-format with Ctrl+Shift+F |
+| FR-042 | Code Formatting | Done | Auto-format with Alt+Shift+F |
 | FR-043 | Error Display | Done | Errors shown in footer |
 | FR-044 | Autocomplete | Done | IntelliSense for geometry |
 | FR-045 | Error Highlighting | Done | Inline error markers |

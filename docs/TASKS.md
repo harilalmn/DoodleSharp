@@ -1,4 +1,4 @@
-# Task History - DoodleSharp Development
+﻿# Task History - DoodleSharp Development
 
 ## Completed Tasks
 
@@ -80,7 +80,7 @@
 - [x] Ctrl+N - New file
 - [x] Ctrl+O - Open file
 - [x] Ctrl+S - Save file
-- [x] Ctrl+Shift+F - Format code
+- [x] Alt+Shift+F - Format code
 
 ### Phase 11: Dark Theme
 - [x] Define color resources in App.xaml

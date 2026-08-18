@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -5133,7 +5133,7 @@ namespace StartViz
             AddShortcutRow(rowGroup, "Ctrl+Shift+N", "New project", false);
             AddShortcutRow(rowGroup, "Ctrl+O", "Open project", true);
             // Editor operations
-            AddShortcutRow(rowGroup, "Ctrl+Shift+F", "Format code", false);
+            AddShortcutRow(rowGroup, "Alt+Shift+F", "Format code", false);
             AddShortcutRow(rowGroup, "Ctrl+/", "Toggle comment", true);
             // Find and Replace
             AddShortcutRow(rowGroup, "Ctrl+F", "Find", false);

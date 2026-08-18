@@ -1,4 +1,4 @@
-<p align="center">
+﻿<p align="center">
   <img src="img/logo.png" alt="DoodleSharp Logo" width="200">
 </p>
 
@@ -3379,7 +3379,8 @@ XY direction returns `null` / `false` rather than throwing.
 ### Editor Operations
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+Shift+F` | Format code |
+| `Alt+Shift+F` | Format code |
+| `Ctrl+Shift+F` | Find in files |
 | `Ctrl+/` | Toggle comment |
 | `Tab` / `Shift+Tab` | Indent / Unindent |
 
@@ -3536,7 +3537,7 @@ writing the method into the wrong class.
 | Feature | Shortcut | Description |
 |---------|----------|-------------|
 | **Rename** | `F2` | Rename symbol across all usages |
-| **Format Document** | `Ctrl+Shift+F` | Auto-format entire document |
+| **Format Document** | `Alt+Shift+F` | Auto-format entire document |
 | **Format on Type** | Automatic | Formats line when typing `;` or `}` |
 
 ### Find and Replace

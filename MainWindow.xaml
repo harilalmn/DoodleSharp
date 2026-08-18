@@ -26,10 +26,14 @@
     mc:Ignorable="d">
 
     <Window.InputBindings>
+        <!--
+            Alt+Shift+F, as in VS Code and Visual Studio. It was Ctrl+Shift+F, which this window also
+            binds to Find in Files (Search menu) — the two clashed, and the editor's Format won.
+        -->
         <KeyBinding
             Key="F"
             Command="{Binding FormatCodeCommand}"
-            Modifiers="Ctrl+Shift" />
+            Modifiers="Alt+Shift" />
         <KeyBinding
             Key="S"
             Command="{Binding SaveCommand}"
@@ -188,7 +192,7 @@
                         <MenuItem
                             Click="FormatButton_Click"
                             Header="_Format Code"
-                            InputGestureText="Ctrl+Shift+F"
+                            InputGestureText="Alt+Shift+F"
                             Style="{StaticResource MenuItemStyle}" />
                         <Separator />
                         <MenuItem

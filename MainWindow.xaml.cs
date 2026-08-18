@@ -6977,10 +6977,6 @@ public partial class MainWindow : Window
         {
             switch (e.Key)
             {
-                case Key.F:
-                    FormatButton_Click(sender, e);
-                    e.Handled = true;
-                    break;
                 case Key.D:
                     DeleteLine();
                     e.Handled = true;
@@ -7024,6 +7020,10 @@ public partial class MainWindow : Window
             // When Alt is pressed, actual key is in e.SystemKey, not e.Key
             switch (e.SystemKey)
             {
+                case Key.F:
+                    FormatButton_Click(sender, e);
+                    e.Handled = true;
+                    break;
                 case Key.Down:
                     CopyLineDown();
                     e.Handled = true;
