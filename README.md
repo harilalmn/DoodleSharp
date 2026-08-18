@@ -2667,6 +2667,19 @@ When picking the second point near a circle or arc, the **Tangent** snap shows t
 - **Visual**: A violet dotted line from your first point to the tangent point on the circle/arc
 - **Use Case**: Drawing lines that touch circles at exactly one point
 
+#### Which snap wins
+When more than one snap point is within tolerance, the **type** decides, not the distance:
+
+> Endpoint > Midpoint > Center > Intersection > Perpendicular > Tangent > Extension > Nearest
+
+Distance only breaks ties *within* one type. That is why a slightly further-off endpoint still
+beats the point on the curve directly under the cursor — and why **Nearest** is ranked last, since
+it can always produce a candidate and would otherwise answer every time. Turn off the types you do
+not want in Settings (see [Snap Settings](#snap-settings)).
+
+The tolerance is a fixed **15 screen pixels**, converted to world units using the current zoom, so
+snapping feels the same however far in or out you are.
+
 ### Precise Distance and Angle Input
 
 While drawing (after placing the first point), you can type precise values for distance and angle instead of clicking.
@@ -2886,9 +2899,13 @@ SvgExporter.SaveToFile(@"C:\temp\drawing.svg", shapes);        // same defaults,
 VizConsole.Log($"{svg.Length} characters of SVG for {shapes.Count} shapes");
 ```
 
-`width` and `height` become the SVG element's size; the `viewBox` is computed from the shapes' own
-bounds plus `padding`, and a `scale(1, -1)` group flips the Y axis so the output matches the canvas's
-Y-up convention. `SaveToFile` forwards to `Export` and therefore always uses the default padding.
+`width` and `height` become the SVG element's size **in pixels**; the `viewBox` is computed from the
+shapes' own bounds plus `padding`, and a `scale(1, -1)` group flips the Y axis so the output matches
+the canvas's Y-up convention. Note `padding` is in **world units**, not pixels — it widens the
+bounding box before the `viewBox` is written, so it is not a fixed on-screen margin. `SaveToFile`
+forwards to `Export` and therefore always uses the default padding. A shape type with no native SVG
+element (a hatch, a region, a grid) is flattened to `<path>` polylines rather than being dropped, and
+an empty shape list still produces a valid document sized from `width` and `height`.
 
 | Exporter | Namespace | Signature |
 |----------|-----------|-----------|

@@ -62,6 +62,29 @@ public class KeyBindingTests
     }
 
     [Fact]
+    public void CtrlShiftFActuallyOpensFindInFiles()
+    {
+        // The menu advertised this gesture for a long time while nothing handled it — Format
+        // occupied Ctrl+Shift+F, so the InputGestureText was aspirational. Moving Format to
+        // Alt+Shift+F freed the keys and left the arm empty, so the gesture went from doing the
+        // wrong thing to doing nothing, which is worse and is not what a shortcut table claiming
+        // it works should mean.
+        //
+        // The markup assertion above cannot catch that: a gesture is only real when the key
+        // handler implements it. Every "X is bound to Y" test needs this second half.
+        var code = Read("MainWindow.xaml.cs");
+
+        var branch = code.IndexOf("ModifierKeys.Control | ModifierKeys.Shift", StringComparison.Ordinal);
+        Assert.True(branch > 0, "the Ctrl+Shift branch must exist");
+
+        var call = code.IndexOf("FindInFilesMenuItem_Click(sender, e);", branch, StringComparison.Ordinal);
+        Assert.True(call > 0, "Ctrl+Shift+F must open Find in Files from the Ctrl+Shift branch");
+
+        // Nothing between may open a different modifier branch.
+        Assert.DoesNotContain("ModifierKeys.Shift | ModifierKeys.Alt", code[branch..call]);
+    }
+
+    [Fact]
     public void BothKeyHandlersRouteFormatUnderAltShift()
     {
         // The two switches are separate live implementations (note 43). Alt makes WPF report

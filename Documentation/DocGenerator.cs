@@ -170,17 +170,18 @@ namespace DoodleSharp.Documentation
                 { "DoodleSharp.Export", "Contains classes for exporting shapes and animations to various file formats." },
                 { "DxfExporter", "Exports shapes to AutoCAD DXF (R12 ASCII). Construct one with new DxfExporter(), then Export(shapes, filePath) to write a file or ExportToString(shapes) to get the text. Shapes with a native DXF equivalent keep it — a VCircle becomes a CIRCLE entity, not sixty-four chords — and everything else (dimensions, hatches, splines, groups) is decomposed into polylines rather than being silently dropped. Coordinates are passed straight through: one drawing unit is one DXF unit, Y up." },
                 { "PdfExporter", "Exports shapes to vector PDF (via PdfSharp), preserving colours, line weights and dash patterns — real vector output, suitable for printing rather than a screenshot. Construct one with new PdfExporter() and call Export: the short overload Export(shapes, filePath) auto-sizes the page to the drawing, and Export(shapes, filePath, pageWidthMm, pageHeightMm, scaleMmPerUnit, marginMm) gives you the sheet — page size in millimetres (0 for either dimension auto-sizes to content), the plot scale as millimetres of paper per drawing unit, and the margin. Everything is an argument; there are no PageSize or Margin properties to set." },
-                { "SvgExporter", "STATIC class (namespace DoodleSharp.Canvas) that turns shapes into SVG — a web-compatible vector format that opens in any browser or vector editor. Two methods, and both take everything as arguments; there is nothing to construct and no Width/Height properties: Export(shapes, width = 800, height = 600, padding = 20) returns the SVG document as a string, and SaveToFile(filePath, shapes, width = 800, height = 600) writes it to disk (path first). The drawing is fitted to the given viewport with the requested padding, and world Y-up is flipped to SVG Y-down for you." },
+                { "SvgExporter", "STATIC class (namespace DoodleSharp.Canvas) that turns shapes into SVG — a web-compatible vector format that opens in any browser or vector editor. Two methods, and both take everything as arguments; there is nothing to construct and no Width/Height properties: Export(shapes, width = 800, height = 600, padding = 20) returns the SVG document as a string, and SaveToFile(filePath, shapes, width = 800, height = 600) writes it to disk (path first). width and height become the <svg> element's size in PIXELS; padding is in WORLD units and is added around the shapes' own bounds before the viewBox is computed, so it is not a pixel margin and does not scale with width/height. World Y-up is flipped to SVG Y-down by a scale(1, -1) group, so the output matches the canvas. A shape type with a native SVG element gets one (VLine to <line>, VCircle to <circle>, VText to <text>, and so on); anything else — a hatch, a region, a grid — is flattened to <path> polylines rather than being dropped. An empty shape list still produces a valid document, sized from width and height." },
                 { "VideoExporter", "Exports an animation to MP4 using the Windows Media Foundation H.264 encoder — no external tools to install. Construct it with the output path and frame size (new VideoExporter(path, width, height, fps = 30, bitrateMbps = 5)), call AddFrame(RenderTargetBitmap) once per frame in order, then Dispose() to finalise the file. Implements IDisposable, so a using statement is the safe form. In practice you reach this through File > Export > Video, which offers resolution presets (Canvas Size, 720p, 1080p, 4K, Custom), 15-60 FPS and 1-20 Mbps." },
                 { "GifEncoder", "Writes an animated GIF, one frame at a time, to any Stream. Construct it as new GifEncoder(stream, width, height, frameDelayMs = 100, repeat = true) — frame delay and looping are CONSTRUCTOR ARGUMENTS, not properties — then call AddFrame(BitmapSource) per frame and Dispose() to write the trailer. There is no Save(): the file only becomes a valid GIF when Dispose runs, so wrap it in a using statement. Every frame must match the width and height given to the constructor. Good for short loops and web sharing; use VideoExporter when you want quality or length." },
 
                 // Canvas and Snap System
                 { "DoodleSharp.Canvas", "Contains classes for the interactive canvas, drawing tools, and snap detection system." },
-                { "SnapType", "Enumeration of snap point types: Endpoint (line/arc ends), Midpoint (center of segments), Center (circle/ellipse/arc centers), Intersection (where curves cross), Nearest (closest point on curve), Perpendicular (90° from reference point), Extension (line extended beyond endpoint), Tangent (tangent point on circles/arcs)." },
-                { "SnapResult", "Represents a detected snap point with its type, position, and distance from cursor. For Extension snaps, includes ExtensionSource (the endpoint the extension originates from) and ExtensionAngle (direction in degrees). For Perpendicular/Tangent snaps, includes ReferenceSource (your first click) and ConstraintPoint (the perpendicular/tangent point on the shape)." },
-                { "SnapEngine", "Engine for detecting snap points on shapes. Supports 8 snap types (Endpoint, Midpoint, Center, Intersection, Nearest, Perpendicular, Extension, Tangent). Each snap type can be individually enabled/disabled via Settings. Uses spatial indexing for efficient detection even with many shapes." },
-                { "DrawingInputMode", "Enumeration for precise input modes while drawing: None (mouse-controlled), Distance (typing distance value), Angle (typing angle value). Press Tab to cycle between modes when drawing. Type numbers to enter precise values, Enter to confirm." },
-                { "DrawingTool", "Manages interactive drawing state and shape creation. Supports all shape types with visual preview. Features: snap detection with 8 snap types, orthogonal constraint (Shift key), precise distance/angle input (Tab to cycle, type value, Enter to confirm). The InputMode property indicates current input state; InputBuffer holds the typed value." },
+                { "SnapType", "Which kind of geometry a snap point was found on. It is what SnapResult.Type carries, and what each of SnapEngine's eight toggles switches. Nine values: None (the \"no snap\" value — SnapEngine never returns a result carrying it, it returns null instead), Endpoint (the start or end of a line, arc, polyline or polygon edge), Midpoint (the middle of a segment or curve), Center (the centre of a circle, ellipse or arc), Intersection (where two shapes cross), Nearest (the closest point anywhere on a curve), Perpendicular (the point that makes a right angle back to SnapEngine.ReferencePoint — your first click), Extension (a point on the invisible continuation of an existing edge, past its endpoint), and Tangent (the point on a circle or arc where a line from ReferencePoint would just touch it). When several candidates are within tolerance the TYPE decides which wins, in exactly this order — Endpoint, Midpoint, Center, Intersection, Perpendicular, Tangent, Extension, Nearest — and distance only breaks ties within one type. So a slightly more distant endpoint beats a nearer point-on-curve, which is what makes snapping feel deliberate rather than twitchy." },
+                { "SnapResult", "One snap candidate: a world position, the SnapType it came from, and how far it was from the cursor. You normally get one back from SnapEngine.FindSnapPoint rather than building one, but it is plain data with a public constructor — new SnapResult(point, type, distance) — and every property is settable. Always populated: Point (VXYZ, the snapped position, and the point a drawing tool actually places), Type, and Distance (world units from the cursor). The rest are filled in only for the types that need them and are null otherwise: ExtensionSource and ExtensionAngle for Extension (the endpoint the continuation runs from, and its direction in DEGREES); ReferenceSource for Perpendicular and Tangent (the first-click point the relationship was measured from, i.e. whatever SnapEngine.ReferencePoint held); ConstraintPoint for Perpendicular and Tangent (where the perpendicular lands, or where the tangent touches); and TangentCenter for Tangent (the centre of the circle or arc being touched, which is what lets an overlay draw the radius). Coordinates are world coordinates — Y up, origin at the canvas centre." },
+                { "SnapEngine", "Finds the snap point nearest the cursor over a set of shapes — the engine behind the drawing tools and the measuring tape. Construct one with new SnapEngine() and call FindSnapPoint(cursorWorld, shapes, scale); it returns the winning SnapResult, or null when nothing is within tolerance. Two overloads: one takes an IReadOnlyList<IDrawable> and considers every shape, the other takes a Rendering.SceneIndex so the cull index narrows the search first (that is what the canvas uses on large drawings, and passing null to it simply returns null). scale is the canvas zoom: the tolerance is a fixed 15 SCREEN pixels internally, divided by scale to get a world tolerance, so snapping feels the same at every zoom level. Each of the eight types has its own settable toggle — EndpointSnapEnabled, MidpointSnapEnabled, CenterSnapEnabled, IntersectionSnapEnabled, NearestSnapEnabled, PerpendicularSnapEnabled, ExtensionSnapEnabled, TangentSnapEnabled — all true by default. They are plain properties you can set directly; SyncFromSettings() is the separate call that overwrites all eight from the application's Snap Settings, and nothing calls it for you except DrawingTool's constructor and RefreshSnapSettings(). ReferencePoint (VXYZ?, null by default) is the first-click point that Perpendicular and Tangent measure from — leave it null and neither type can produce a candidate at all. When several candidates are in range, SnapType decides before distance does (see SnapType for the order)." },
+                { "DrawingInputMode", "Which value the drawing tool is currently accepting from the keyboard; read it from DrawingTool.InputMode. Three values: None (the next point follows the mouse and its snaps — the default), Distance (typed digits set the distance from the last placed point) and Angle (typed digits set the direction, in DEGREES, counter-clockwise from +X). Tab cycles None to Distance to Angle to None via DrawingTool.CycleInputMode(), typing a digit while drawing jumps straight into Distance, Enter commits, and Escape leaves without committing. None of it engages until at least one point has been clicked. The characters typed so far are in DrawingTool.InputBuffer; the committed values land in DrawingTool.OverrideDistance and OverrideAngle, and GetEffectiveEndPoint() is where they are turned back into a position." },
+                { "DrawingMode", "Which shape DrawingTool is drawing: set with SetMode, reported by Mode, and announced by the ModeChanged event. Sixteen values — None (idle, nothing in progress) plus Point, Line, Circle, CircleDiameter, CircleTwoPoints, CircleThreePoints, Rectangle, Ellipse, Arc, Polygon, Polyline, Bezier, Spline, Arrow and Text. Click counts: Point takes one; Line, Circle, CircleDiameter, CircleTwoPoints, Rectangle, Ellipse and Arrow take two; Arc and CircleThreePoints take three; Bezier takes four; Polygon, Polyline and Spline collect clicks until a double-click finishes them (OnDoubleClick, not OnLeftClick); Text collects one click and then raises TextPlacementRequested so the host can ask for the string, which comes back through CompleteText. The three circle variants differ only in what the second click means — see the individual values below." },
+                { "DrawingTool", "The interactive drawing tool's state machine: which shape is being drawn, the points clicked so far, the live snap, and any distance or angle typed at the keyboard. This is the object behind the Draw menu and the P/L/C/R canvas shortcuts. The canvas owns one (RenderCanvas.DrawingTool) and feeds it mouse and key events, so project code does not normally drive it — it is documented because everything the drawing tools do is defined here, and because it is public and self-contained enough to drive directly if you want to. new DrawingTool() also builds its SnapEngine and syncs the snap toggles from application settings. The flow: SetMode(DrawingMode.Line) arms it and clears any points; OnMouseMove(worldPos, shapes, scale) updates CurrentPoint and CurrentSnap; OnLeftClick(worldPos) appends to Points and, once enough have been collected, constructs the real shape (which auto-registers on the canvas like any other) and raises ShapeCompleted. Polygon, Polyline and Spline are finished by OnDoubleClick instead. OnRightClick() discards the points in progress, or leaves the mode if there are none; Cancel() (Esc) does both. Read-only state: Mode, Points, CurrentPoint, CurrentSnap, InputMode, InputBuffer, IsBufferSelected, OverrideDistance, OverrideAngle, StatusMessage, and GetPreviewShape() for the grey rubber-band shape. Settable: IsOrthoMode, which is what holding Shift does. Events: ShapeCompleted, ModeChanged, InputChanged, TextPlacementRequested. Keyboard entry: CycleInputMode() (Tab), StartDistanceInput(), HandleCharInput(c), HandleBackspace(), HandleEnterInput(), HandleEscapeInput(), ResetInputMode() — each Handle* returns false when no input mode is active, so a host can fall through to its own shortcut handling. RefreshSnapSettings() re-reads the snap toggles after the user changes them in Settings." },
 
                 // Console
                 { "DoodleSharp.Console", "Console output for project code. VizConsole.Log(...) writes to the console panel below the canvas." },
@@ -233,6 +234,7 @@ namespace DoodleSharp.Documentation
             "DoodleSharp.Canvas.SnapType",
             "DoodleSharp.Canvas.SnapResult",
             "DoodleSharp.Canvas.DrawingTool",
+            "DoodleSharp.Canvas.DrawingMode",
             "DoodleSharp.Canvas.DrawingInputMode",
             "DoodleSharp.Canvas.GlyphOutlineProvider",
         };
@@ -3094,7 +3096,214 @@ bool inside = regionA.ContainsPoint(new VXYZ(-30, 0));  // holes excluded
 double area = regionA.GetArea();                        // outer minus holes
 
 // For more than two regions, or for the params form, call RegionBooleanOps:
-//   RegionBooleanOps.Union(r1, r2, r3)" }
+//   RegionBooleanOps.Union(r1, r2, r3)" },
+                // ---- DoodleSharp.Canvas types that are reachable in this tree via
+                // DocGenerator.AllowedInternalTypes.
+
+                { "SvgExporter", @"// SvgExporter turns whatever is on the canvas into an SVG document.
+// It is a STATIC class in DoodleSharp.Canvas -- nothing to construct, and no
+// Width/Height properties; everything is an argument.
+// Add `using DoodleSharp.Canvas;` at the top of the file.
+
+new VCircle(0, 0, 60) { Name = ""disc"", FillColor = ""#4000FFFF"" };
+new VRectangle(-90, -70, 180, 140) { Name = ""frame"" };
+new VText(new VXYZ(0, 90), ""hello"") { Name = ""label"" };
+
+// GetShapes() hands back IReadOnlyList<IDrawable>, which is exactly what it takes.
+var shapes = CanvasRenderer.Instance.GetShapes();
+
+// width and height are the <svg> element's size in PIXELS.
+// padding is in WORLD units: it widens the shapes' own bounds before the viewBox
+// is computed, so it does not scale with width/height.
+string svg  = SvgExporter.Export(shapes);                          // 800 x 600, padding 20
+string wide = SvgExporter.Export(shapes, 1600, 1200, padding: 40);
+
+VizConsole.Log($""{svg.Length} characters of SVG for {shapes.Count} shapes"");
+
+// SaveToFile takes the PATH FIRST, and always uses the default padding.
+SvgExporter.SaveToFile(@""C:\temp\drawing.svg"", shapes, 1200, 900);" },
+
+                { "SnapEngine", @"// SnapEngine answers 'what would the cursor snap to here?' over a set of shapes.
+// Add `using DoodleSharp.Canvas;` at the top of the file.
+
+new VLine(new VXYZ(-100, 0), new VXYZ(100, 0)) { Name = ""baseline"" };
+new VCircle(new VXYZ(60, 40), 30) { Name = ""hole"" };
+
+var engine = new SnapEngine();
+
+// All eight toggles start true. They are plain properties -- SyncFromSettings()
+// is the separate call that overwrites them from the app's Snap Settings.
+engine.NearestSnapEnabled = false;   // stop 'anywhere on the curve' winning ties
+
+// Perpendicular and Tangent measure from here. Leave it null and neither can fire.
+engine.ReferencePoint = new VXYZ(-100, 80);
+
+// The third argument is the canvas zoom. Tolerance is a fixed 15 SCREEN pixels
+// internally, divided by scale, so snapping feels the same at any zoom.
+var hit = engine.FindSnapPoint(
+    new VXYZ(98, 3), CanvasRenderer.Instance.GetShapes(), 1.0);
+
+if (hit != null)
+    VizConsole.Log($""{hit.Type} at {hit.Point}, {hit.Distance:F2} away"");
+else
+    VizConsole.Log(""nothing within tolerance"");" },
+
+                { "SnapType", @"// SnapType names the kind of geometry a snap point sits on.
+// Add `using DoodleSharp.Canvas;` at the top of the file.
+
+// The eight real types, listed in the order SnapEngine prefers them when more
+// than one candidate is in range. None is the 'no snap' value and is never
+// returned -- FindSnapPoint returns null instead.
+var order = new[]
+{
+    SnapType.Endpoint, SnapType.Midpoint, SnapType.Center, SnapType.Intersection,
+    SnapType.Perpendicular, SnapType.Tangent, SnapType.Extension, SnapType.Nearest
+};
+
+foreach (var t in order)
+    VizConsole.Log(t.ToString());
+
+// Each type has its own toggle on the engine.
+var engine = new SnapEngine();
+engine.IntersectionSnapEnabled = false;
+engine.ExtensionSnapEnabled = false;
+
+new VLine(new VXYZ(-50, -50), new VXYZ(50, 50)) { Name = ""diagonal"" };
+
+var hit = engine.FindSnapPoint(new VXYZ(49, 51), CanvasRenderer.Instance.GetShapes(), 1.0);
+VizConsole.Log(hit?.Type.ToString() ?? ""no snap"");   // Endpoint" },
+
+                { "SnapResult", @"// A SnapResult is one snap candidate: where, what kind, and how far from the cursor.
+// Add `using DoodleSharp.Canvas;` at the top of the file.
+
+// It is plain data with a public constructor, though you normally get one back
+// from SnapEngine.FindSnapPoint rather than building it.
+var manual = new SnapResult(new VXYZ(10, 20), SnapType.Endpoint, 0.0);
+VizConsole.Log($""{manual.Type} at {manual.Point}"");
+
+new VLine(new VXYZ(0, 0), new VXYZ(100, 0)) { Name = ""edge"" };
+new VCircle(new VXYZ(0, 80), 25) { Name = ""boss"" };
+
+var engine = new SnapEngine { ReferencePoint = new VXYZ(120, 80) };
+var hit = engine.FindSnapPoint(new VXYZ(99, 1), CanvasRenderer.Instance.GetShapes(), 1.0);
+
+if (hit != null)
+{
+    // Always populated.
+    VizConsole.Log($""{hit.Type} at {hit.Point} ({hit.Distance:F2} away)"");
+
+    // The rest are filled in only for the types that need them, null otherwise.
+    if (hit.Type == SnapType.Extension)
+        VizConsole.Log($""continues from {hit.ExtensionSource} at {hit.ExtensionAngle:F0} deg"");
+
+    if (hit.Type == SnapType.Perpendicular || hit.Type == SnapType.Tangent)
+        VizConsole.Log($""measured from {hit.ReferenceSource}, meets at {hit.ConstraintPoint}"");
+
+    if (hit.Type == SnapType.Tangent)
+        VizConsole.Log($""circle centre {hit.TangentCenter}"");
+}" },
+
+                { "DrawingTool", @"// DrawingTool is the state machine behind the Draw menu and the P/L/C/R keys.
+// The canvas owns one and feeds it real mouse and key events, so project code
+// rarely touches it -- but it is public and self-contained, so it can be driven
+// directly, which is the clearest way to see what the tool actually does.
+// Add `using DoodleSharp.Canvas;` at the top of the file.
+
+var tool = new DrawingTool();
+tool.ShapeCompleted += (sender, shape) => VizConsole.Log($""finished a {shape.GetType().Name}"");
+
+tool.SetMode(DrawingMode.Line);        // arms it and clears any points in progress
+tool.IsOrthoMode = true;               // what holding Shift does
+
+tool.OnLeftClick(new VXYZ(-80, -40));  // first point
+tool.OnLeftClick(new VXYZ(80, -40));   // second completes the VLine and raises ShapeCompleted
+                                       // (the shape auto-registers, so it is on the canvas)
+
+// Polygon, Polyline and Spline collect clicks until a DOUBLE-click ends them.
+tool.IsOrthoMode = false;
+tool.SetMode(DrawingMode.Polyline);
+tool.OnLeftClick(new VXYZ(-60, 20));
+tool.OnLeftClick(new VXYZ(0, 60));
+tool.OnLeftClick(new VXYZ(60, 20));
+tool.OnDoubleClick(new VXYZ(60, 20));
+
+VizConsole.Log(tool.StatusMessage);    // ""Polyline: Click point 1"" -- the points were consumed
+tool.Cancel();                         // what Esc does
+VizConsole.Log(tool.StatusMessage);    // ""Ready""" },
+
+                { "DrawingMode", @"// DrawingMode says which shape DrawingTool is building.
+// Add `using DoodleSharp.Canvas;` at the top of the file.
+
+var tool = new DrawingTool();
+tool.ShapeCompleted += (sender, shape) => VizConsole.Log($""drew {shape.GetType().Name}"");
+
+// Centre, then a point at the RADIUS distance.
+tool.SetMode(DrawingMode.Circle);
+tool.OnLeftClick(new VXYZ(0, 0));
+tool.OnLeftClick(new VXYZ(50, 0));
+
+// Same two clicks, but the distance is read as the DIAMETER.
+tool.SetMode(DrawingMode.CircleDiameter);
+tool.OnLeftClick(new VXYZ(140, 0));
+tool.OnLeftClick(new VXYZ(190, 0));
+
+// Here the two clicks are opposite ENDS of a diameter.
+tool.SetMode(DrawingMode.CircleTwoPoints);
+tool.OnLeftClick(new VXYZ(-160, 0));
+tool.OnLeftClick(new VXYZ(-60, 0));
+
+// Three points on the circumference.
+tool.SetMode(DrawingMode.CircleThreePoints);
+tool.OnLeftClick(new VXYZ(0, 120));
+tool.OnLeftClick(new VXYZ(40, 160));
+tool.OnLeftClick(new VXYZ(-40, 160));
+
+tool.SetMode(DrawingMode.None);        // idle again" },
+
+                { "DrawingInputMode", @"// DrawingInputMode is the keyboard side of drawing: type an exact distance or
+// angle instead of clicking a position.
+// Add `using DoodleSharp.Canvas;` at the top of the file.
+
+var tool = new DrawingTool();
+tool.SetMode(DrawingMode.Line);
+tool.OnLeftClick(new VXYZ(0, 0));   // nothing engages until a point is down
+
+tool.CycleInputMode();              // Tab: None -> Distance
+VizConsole.Log(tool.InputMode.ToString());        // Distance
+
+tool.HandleCharInput('1');          // digits, one '.', and a leading '-' are accepted
+tool.HandleCharInput('2');
+tool.HandleCharInput('0');
+VizConsole.Log(tool.GetInputDisplayText());       // ""Distance: 120_""
+
+tool.HandleEnterInput();            // commits, and leaves input mode
+VizConsole.Log($""{tool.OverrideDistance}"");       // 120
+
+// The override survives Enter and is consumed by the next click, which lands
+// exactly 120 units from the first point along the cursor direction.
+tool.HandleEscapeInput();           // ...or throw it away: Esc clears the overrides
+tool.Cancel();" },
+
+                { "GlyphOutlineProvider", @"// GlyphOutlineProvider is the app's WPF implementation of IGlyphOutlineProvider.
+// C2VGeometry has no font engine, so the host installs one at startup and every
+// glyph-to-shape call routes through it. You do not call it directly.
+
+var word = new VText(new VXYZ(-120, 0), ""GEO"") { Height = 60, Name = ""word"" };
+
+// Installed? (null means ToCharShape/LiftChar/LiftChars all return null.)
+VizConsole.Log(VText.GlyphOutlineProvider == null ? ""no provider"" : ""provider ready"");
+
+// Non-mutating: a copy of character 0 as a shape, leaving the text alone.
+var g = word.ToCharShape(0);
+if (g != null) { g.Color = ""Yellow""; g.Place(); }
+
+// LiftChar extracts the glyph AND blanks it in the text, so the character moves
+// out of the string and becomes independent geometry you can animate.
+var lifted = word.LiftChar(2);
+if (lifted != null) { lifted.Move(new VXYZ(0, -80)); lifted.Color = ""Magenta""; }
+
+// A glyph with holes (O, A, 8) comes back as a VGroup of contour polylines;
+// a simple glyph comes back as a single closed VPolyline." },
             };
         }
 
@@ -4250,8 +4459,99 @@ double area = regionA.GetArea();                        // outer minus holes
                 { "PdfExporter.Export", "Two overloads. Export(shapes, filePath) auto-sizes the page to the drawing's bounds and picks a sensible scale. Export(shapes, filePath, pageWidthMm, pageHeightMm, scaleMmPerUnit, marginMm) gives you the sheet: page size in millimetres (pass 0 for either dimension to auto-size to content), scaleMmPerUnit is how many millimetres on paper one drawing unit becomes, and marginMm is the border. Output is real vector PDF — colours, line weights and dash patterns are preserved. An empty shape list writes nothing. There are no PageSize or Margin properties; everything is an argument to this call." },
 
                 // SvgExporter (static class, namespace DoodleSharp.Canvas)
-                { "SvgExporter.Export", "Export(IEnumerable<IDrawable> shapes, double width = 800, double height = 600, double padding = 20) — returns the complete SVG document as a string. width and height are the SVG viewport in pixels; the drawing is fitted into it with padding pixels of clear space on every side. The Y flip from world coordinates (Y up) to SVG coordinates (Y down) is handled for you. Static — there is nothing to construct, and no Width/Height properties to set." },
+                { "SvgExporter.Export", "Export(IEnumerable<IDrawable> shapes, double width = 800, double height = 600, double padding = 20) — returns the complete SVG document as a string. width and height become the <svg> element's size in PIXELS. padding is in WORLD units, not pixels: it widens the shapes' own bounding box before that box is written out as the viewBox, so the same padding value covers more of the picture the more you zoom the drawing out. The Y flip from world coordinates (Y up) to SVG coordinates (Y down) is handled for you by a scale(1, -1) group. Shape types with a native SVG element get one; anything else is flattened to <path> polylines rather than dropped. An empty shape list still returns a valid document, sized from width and height. Static — there is nothing to construct, and no Width/Height properties to set." },
                 { "SvgExporter.SaveToFile", "SaveToFile(string filePath, IEnumerable<IDrawable> shapes, double width = 800, double height = 600) — the same document as Export, written straight to filePath (padding fixed at its default). Note the argument order: the path comes first. Example: SvgExporter.SaveToFile(@\"C:\\\\temp\\\\drawing.svg\", CanvasRenderer.Instance.GetShapes(), 1200, 900);" },
+
+                // SnapType (enum, namespace DoodleSharp.Canvas)
+                { "SnapType.None", "No snap. This is the default value of the enum and what a hand-built SnapResult carries if you do not set Type; SnapEngine never RETURNS a result of this type — when nothing is in range FindSnapPoint returns null." },
+                { "SnapType.Endpoint", "The start or end of an open curve, or a vertex of a polyline, polygon or rectangle. Highest priority of all eight, so a slightly more distant endpoint still beats a nearer Nearest or Extension candidate." },
+                { "SnapType.Midpoint", "The middle of a segment or curve — half way along a line, or the mid-parameter point of an arc. Second priority." },
+                { "SnapType.Center", "The centre of a circle, ellipse or arc. Note this is the centre POINT, which for an arc is not on the curve at all. Third priority." },
+                { "SnapType.Intersection", "A point where two shapes cross. Found by testing shapes against each other, so it is the one snap type whose cost grows with the number of shapes in range — IntersectionSnapEnabled turns it off. Fourth priority." },
+                { "SnapType.Nearest", "The closest point anywhere on a curve. LOWEST priority of the eight, deliberately: it can always produce a candidate, so ranking it above anything else would mean you could never reach an endpoint or a midpoint." },
+                { "SnapType.Perpendicular", "The point on a shape at which a line from SnapEngine.ReferencePoint meets it at a right angle. Needs ReferencePoint to be set (the drawing tool sets it to your first click); with it null this type produces nothing. ReferenceSource and ConstraintPoint on the result carry the two ends of the relationship. Fifth priority." },
+                { "SnapType.Extension", "A point on the invisible continuation of an existing edge, beyond its endpoint — what lets you line a new point up with a wall that stops short. The result carries ExtensionSource (the endpoint it runs from) and ExtensionAngle (its direction in DEGREES). Seventh priority, above Nearest only." },
+                { "SnapType.Tangent", "The point on a circle or arc where a line from SnapEngine.ReferencePoint would just touch it. Like Perpendicular it needs ReferencePoint; the result also carries TangentCenter, the centre of the circle being touched. Sixth priority." },
+
+                // SnapResult (namespace DoodleSharp.Canvas)
+                { "SnapResult.Point", "The snapped position, in WORLD coordinates (Y up, origin at the canvas centre). This is the point a drawing tool actually places — not the cursor position it was found from. Always populated." },
+                { "SnapResult.Type", "Which SnapType produced this candidate. It is also what decides ties: SnapEngine ranks by type first and by Distance only within a type." },
+                { "SnapResult.Distance", "How far Point is from the cursor, in WORLD units. Compare candidates of the SAME type with it; across types the type ranking wins. Always populated." },
+                { "SnapResult.ExtensionSource", "Extension snaps only, null otherwise. The endpoint the invisible continuation runs from — draw a dotted line from here to Point to show the user what they are aligned with." },
+                { "SnapResult.ExtensionAngle", "Extension snaps only. The direction of the extended edge in DEGREES, counter-clockwise from +X. Left at 0 for every other snap type, so test Type before reading it." },
+                { "SnapResult.ReferenceSource", "Perpendicular and Tangent snaps only, null otherwise. The point the relationship was measured from — whatever SnapEngine.ReferencePoint held, which for the drawing tool is your first click." },
+                { "SnapResult.ConstraintPoint", "Perpendicular and Tangent snaps only, null otherwise. Where the perpendicular lands on the shape, or where the tangent touches it. In every result SnapEngine actually produces it is set to EXACTLY the same value as Point, so today it carries no information Point does not â it is a separate property because the type is public and settable, and because an overlay reads it by name when drawing the construction line." },
+                { "SnapResult.TangentCenter", "Tangent snaps only, null otherwise. The centre of the circle or arc being touched, which is what lets an overlay draw the radius to the tangent point." },
+
+                // SnapEngine (namespace DoodleSharp.Canvas)
+                { "SnapEngine.FindSnapPoint", "Two overloads, both returning the winning SnapResult or null when nothing is within tolerance. FindSnapPoint(VXYZ cursorWorld, IReadOnlyList<IDrawable> shapes, double scale) considers every shape you hand it — CanvasRenderer.Instance.GetShapes() is the usual argument. FindSnapPoint(VXYZ cursorWorld, SceneIndex? spatialIndex, double scale) lets the cull index narrow the candidates first, which is what the canvas uses on large drawings; passing null to that overload returns null rather than falling back to a full scan. scale is the canvas zoom: the tolerance is a fixed 15 SCREEN pixels internally and is divided by scale to get a world tolerance, so pass 1.0 if you are working in world units and want a 15-unit radius. Candidates are ranked by SnapType first and Distance second." },
+                { "SnapEngine.SyncFromSettings", "Overwrites all eight snap toggles from the application's Snap Settings (Settings > Application Settings > Snap Settings). Nothing calls it for you except DrawingTool's constructor and DrawingTool.RefreshSnapSettings(), so an engine you construct yourself keeps whatever you set on it until you call this — which also means calling it will discard your own toggle choices." },
+                { "SnapEngine.ReferencePoint", "The point that Perpendicular and Tangent snaps measure FROM — in a drawing tool, your first click. VXYZ?, null by default, and while it is null neither of those two types can produce a candidate at all. DrawingTool sets it after the first OnLeftClick and clears it when the shape finishes or is cancelled." },
+                { "SnapEngine.EndpointSnapEnabled", "Whether Endpoint snaps are collected. True by default, like all eight toggles. Set it directly, or call SyncFromSettings() to take the application's setting instead." },
+                { "SnapEngine.MidpointSnapEnabled", "Whether Midpoint snaps are collected. True by default." },
+                { "SnapEngine.CenterSnapEnabled", "Whether Center snaps are collected. True by default." },
+                { "SnapEngine.IntersectionSnapEnabled", "Whether Intersection snaps are collected. True by default. This is the one worth turning off on a dense drawing: intersections are found by testing shapes against each other, so unlike the rest its cost grows with the number of shapes in range rather than being per-shape." },
+                { "SnapEngine.NearestSnapEnabled", "Whether Nearest snaps are collected. True by default. Turning it off is the way to stop 'anywhere on the curve' answering when you wanted a real feature point — though the type ranking already puts it last." },
+                { "SnapEngine.PerpendicularSnapEnabled", "Whether Perpendicular snaps are collected. True by default. Has no effect while ReferencePoint is null, because the type needs a point to measure from." },
+                { "SnapEngine.ExtensionSnapEnabled", "Whether Extension snaps are collected. True by default." },
+                { "SnapEngine.TangentSnapEnabled", "Whether Tangent snaps are collected. True by default. Like Perpendicular, it needs ReferencePoint to be set." },
+
+                // DrawingMode / DrawingInputMode (enums, namespace DoodleSharp.Canvas)
+                { "DrawingMode.None", "Idle — no shape is being drawn. Every click handler on DrawingTool returns false in this state, so the host can pass the event on to selection or panning. SetMode(DrawingMode.None) and Cancel() both land here." },
+                { "DrawingMode.Point", "One click places a VPoint." },
+                { "DrawingMode.Line", "Two clicks: start, then end. Produces a VLine. This is the L keyboard shortcut on the canvas." },
+                { "DrawingMode.Circle", "Two clicks: the centre, then a point at the RADIUS distance from it. Produces a VCircle. This is the C keyboard shortcut." },
+                { "DrawingMode.CircleDiameter", "Two clicks: the centre, then a point whose distance from it is read as the DIAMETER — so the resulting circle is half the size the same two clicks would give in Circle mode." },
+                { "DrawingMode.CircleTwoPoints", "Two clicks that are the opposite ENDS of a diameter; the centre falls half way between them. Built through VCircle.FromTwoPoints." },
+                { "DrawingMode.CircleThreePoints", "Three clicks on the circumference — the circumcircle through them. Collinear points have no circumcircle, so the underlying VCircle(p1, p2, p3) constructor throws." },
+                { "DrawingMode.Rectangle", "Two clicks: any corner, then the opposite one. The corners are normalised, so it does not matter which way round you drag. Produces a VRectangle. This is the R keyboard shortcut." },
+                { "DrawingMode.Ellipse", "Two clicks: the centre, then a point whose X and Y offsets from it become RadiusX and RadiusY. Produces a VEllipse." },
+                { "DrawingMode.Arc", "Three clicks: the start, a point ON the arc, then the end — not centre-start-end. The centre is derived as the circumcentre, and the middle click decides which way round the sweep goes. Draw > Arc in the menu offers ten further constructions that map onto the VArc.From* factories." },
+                { "DrawingMode.Polygon", "Click each vertex; a DOUBLE-click finishes it (OnDoubleClick, not OnLeftClick). Needs at least three points, and the closing edge back to the first vertex is implicit. Produces a VPolygon." },
+                { "DrawingMode.Polyline", "Click each point; a DOUBLE-click finishes it. Needs at least two points. Produces an open VPolyline." },
+                { "DrawingMode.Bezier", "Four clicks: start, first control point, second control point, end. Produces a VBezier." },
+                { "DrawingMode.Spline", "Click each control point; a DOUBLE-click finishes it. Needs at least two. Produces a VSpline through the points." },
+                { "DrawingMode.Arrow", "Two clicks: tail, then head. Produces a VArrow." },
+                { "DrawingMode.Text", "One click for the position — and then, unlike every other mode, NOTHING is created. The tool raises TextPlacementRequested with the location and waits; the host asks the user for the string and calls CompleteText(location, content), which is what finally builds the VText and raises ShapeCompleted." },
+                { "DrawingInputMode.None", "No keyboard entry in progress: the next point follows the mouse and whatever it snaps to. The default, and where Enter and Escape both return you to." },
+                { "DrawingInputMode.Distance", "Typed digits set the distance from the last placed point; the direction still comes from the cursor. Reached by Tab from None, or immediately by typing a digit while drawing. On Enter the value lands in DrawingTool.OverrideDistance." },
+                { "DrawingInputMode.Angle", "Typed digits set the direction in DEGREES, counter-clockwise from +X; the distance still comes from the cursor unless OverrideDistance is also set. Reached by Tab from Distance. On Enter the value lands in DrawingTool.OverrideAngle." },
+
+                // DrawingTool (namespace DoodleSharp.Canvas)
+                { "DrawingTool.Mode", "Which shape is being drawn, as a DrawingMode. Read-only — change it with SetMode, which also clears the points in progress and raises ModeChanged. DrawingMode.None means idle." },
+                { "DrawingTool.Points", "The click points collected so far for the shape in progress, in world coordinates and in click order. The list itself is read-only as a property but its CONTENTS are the tool's working state — treat it as read-only. Cleared by SetMode, Cancel, OnRightClick and by completing a shape." },
+                { "DrawingTool.CurrentPoint", "The last position passed to OnMouseMove, after the orthogonal constraint has been applied but before snapping. VXYZ?, null until the mouse has moved. GetPreviewShape() and GetEffectiveEndPoint() both read it." },
+                { "DrawingTool.IsOrthoMode", "The orthogonal constraint — what holding Shift does. When true and at least one point is down, the next point is forced onto the horizontal or vertical through the previous one, whichever the cursor is closer to. Settable; the canvas mirrors the live Shift key onto it. Applied BEFORE snapping." },
+                { "DrawingTool.CurrentSnap", "The SnapResult under the cursor as of the last OnMouseMove, or null if nothing was in range. Read-only. This is what the canvas draws the snap marker from, and what OnLeftClick uses in place of the raw cursor position." },
+                { "DrawingTool.SnapEngine", "The tool's own SnapEngine, created in the constructor and already synced from the application's Snap Settings. Get-only, but the engine itself is mutable — this is where you reach in to toggle a snap type or read ReferencePoint, which the tool sets to your first click." },
+                { "DrawingTool.InputMode", "Which value the keyboard is currently editing, as a DrawingInputMode. Read-only — CycleInputMode(), StartDistanceInput(), HandleEnterInput(), HandleEscapeInput() and ResetInputMode() are what change it." },
+                { "DrawingTool.InputBuffer", "The characters typed so far in the current input mode, as a string (\"\" when nothing has been typed). Read-only. Digits, a single '.', and a leading '-' are accepted; anything else is refused by HandleCharInput." },
+                { "DrawingTool.IsBufferSelected", "True when the buffer holds a pre-filled value that the next keystroke should REPLACE rather than append to — the same behaviour as text selected in a text box. Set when CycleInputMode or StartDistanceInput pre-populates the buffer from the current distance or angle. Read-only." },
+                { "DrawingTool.OverrideDistance", "The committed distance from the last placed point, in world units, or null when none is in force. double?, read-only, always non-negative (a typed minus sign is dropped by taking the absolute value). Survives Enter so the following click can consume it; cleared by ResetInputMode, which OnLeftClick calls after placing a point." },
+                { "DrawingTool.OverrideAngle", "The committed direction in DEGREES counter-clockwise from +X, or null when none is in force. double?, read-only. Unlike OverrideDistance a negative value is kept, so -90 is straight down." },
+                { "DrawingTool.StatusMessage", "A one-line prompt for the current state, e.g. \"Line: Click end point (Shift: ortho)\" or \"Circle (3 Points): Click second point\". \"Ready\" when Mode is None. Get-only, recomputed on every read — the status bar shows it." },
+                { "DrawingTool.InputChanged", "Raised whenever InputMode or InputBuffer changes, so a host can repaint the little distance/angle readout. EventHandler, no payload — read GetInputDisplayText() in the handler." },
+                { "DrawingTool.ShapeCompleted", "Raised with the finished Shape once enough points have been collected (or a double-click ended a multi-point shape, or CompleteText supplied a string). EventHandler<Shape>. The shape has already been constructed, and therefore already auto-registered on the canvas, by the time this fires — the event is your chance to name it, style it or write it into the user's source, not to place it." },
+                { "DrawingTool.ModeChanged", "Raised with the new DrawingMode whenever SetMode changes it, and by Cancel() when it actually had something to cancel. EventHandler<DrawingMode>. Used to update the Draw menu's check marks and the status bar." },
+                { "DrawingTool.TextPlacementRequested", "Raised by Text mode after its single click, carrying the VXYZ where the text should go. EventHandler<VXYZ>. Nothing is created yet: the host is expected to ask the user for a string and call CompleteText(location, content), which builds the VText and raises ShapeCompleted. This is the only mode that cannot finish on its own." },
+                { "DrawingTool.SetMode", "SetMode(DrawingMode mode) — arms the tool for a shape type. Clears Points, CurrentPoint, CurrentSnap and SnapEngine.ReferencePoint, then raises ModeChanged (unconditionally, unlike Cancel). It does NOT reset the keyboard input mode; Cancel() does." },
+                { "DrawingTool.Cancel", "Cancel() — what Esc does. Drops the shape in progress AND leaves drawing mode entirely (Mode becomes None), clearing the points, the snap, SnapEngine.ReferencePoint and the input mode with its overrides. ModeChanged is raised only if something was actually being drawn. Compare OnRightClick(), which discards the points but stays in the mode." },
+                { "DrawingTool.CycleInputMode", "CycleInputMode() — what Tab does: None to Distance to Angle to None. Returns false, changing nothing, when Mode is None or no point has been placed yet, so a host can let Tab do its normal job. On entering a mode it pre-fills InputBuffer with the current distance or angle and sets IsBufferSelected, so typing replaces it." },
+                { "DrawingTool.StartDistanceInput", "StartDistanceInput() — jumps straight into Distance mode without the Tab cycle, which is what typing a digit while drawing does. Pre-fills InputBuffer with the current distance from the last point to the cursor or snap, with IsBufferSelected set so the digit you just typed replaces it. Does nothing when Mode is None or no point has been placed." },
+                { "DrawingTool.HandleCharInput", "HandleCharInput(char c) — feeds one typed character into the buffer. Accepts digits, one '.', and '-' only at the start; returns FALSE for anything else and for any character at all when InputMode is None, which is how the host knows to handle the key itself. A true return means the value was applied to OverrideDistance/OverrideAngle immediately, so the preview updates as you type." },
+                { "DrawingTool.HandleBackspace", "HandleBackspace() — deletes the last character, or clears the whole buffer when IsBufferSelected. Returns false when InputMode is None, or when the buffer is already empty, so Backspace falls through to the host." },
+                { "DrawingTool.HandleEnterInput", "HandleEnterInput() — commits the typed value into OverrideDistance or OverrideAngle and leaves input mode. Returns false when InputMode is None. Note the override SURVIVES this call: it is consumed by the next OnLeftClick, which is what makes 'type 120, Enter, click the direction' work." },
+                { "DrawingTool.HandleEscapeInput", "HandleEscapeInput() — abandons keyboard entry: clears the buffer AND the overrides, leaving the shape in progress untouched. Returns false when InputMode is None, which is what lets the host's Esc go on to Cancel() the whole shape instead." },
+                { "DrawingTool.ResetInputMode", "ResetInputMode() — back to DrawingInputMode.None with an empty buffer and both overrides cleared. Called automatically by Cancel() and by OnLeftClick after a point is placed, so overrides apply to one click and no more. Raises no event." },
+                { "DrawingTool.GetEffectiveEndPoint", "GetEffectiveEndPoint() — the position the next click would actually place, resolving the typed overrides, the live snap and the raw cursor in that order of precedence. VXYZ?, null when there is nothing to go on. With an override in force the point is built from the last placed point (or the Extension snap's source) by distance and angle; otherwise it is CurrentSnap.Point, or failing that CurrentPoint. This is what the preview shape is drawn from." },
+                { "DrawingTool.GetInputDisplayText", "GetInputDisplayText() — the little readout for the current input mode, e.g. \"Distance: 120_\" or \"Angle: 45_°\", with '_' standing in for the caret. Returns \"\" when InputMode is None." },
+                { "DrawingTool.OnMouseMove", "OnMouseMove(VXYZ worldPos, IReadOnlyList<IDrawable> shapes, double scale, SceneIndex? spatialIndex = null) — updates CurrentPoint and CurrentSnap. Order matters and is fixed: the orthogonal constraint is applied first, then snapping runs against the constrained position. Pass the spatial index on a large drawing and the snap search is culled by it; leave it null and every shape in the list is considered. Does nothing when Mode is None." },
+                { "DrawingTool.OnLeftClick", "OnLeftClick(VXYZ worldPos) — places a point. The position used is the effective one: a typed override wins, then CurrentSnap.Point, then the ortho-constrained cursor. Appends to Points, sets SnapEngine.ReferencePoint on the first click (which is what enables Perpendicular and Tangent snaps for the second), clears the input overrides, and — once the mode's click count is reached — constructs the real shape, raises ShapeCompleted and clears Points while STAYING in the mode so you can draw another. Returns false only when Mode is None. Text mode is the exception: it raises TextPlacementRequested instead of building anything." },
+                { "DrawingTool.OnDoubleClick", "OnDoubleClick(VXYZ worldPos) — finishes the multi-point shapes, and only those: Polygon (3+ points), Polyline (2+) and Spline (2+). Returns false in any other mode, or when there are too few points, so the host can fall through to its own double-click behaviour. The worldPos argument is not added as a point." },
+                { "DrawingTool.OnRightClick", "OnRightClick() — two-stage cancel. With points collected it discards them and STAYS in the drawing mode, ready to start another shape; with none it leaves the mode entirely by calling Cancel(). Returns false when Mode is None." },
+                { "DrawingTool.GetPreviewShape", "GetPreviewShape() — the grey rubber-band shape for the state as it stands, built fresh on each call from Points plus GetEffectiveEndPoint(). Returns null when Mode is None or no point has been placed. The returned shape is for drawing an overlay; it is not the shape ShapeCompleted will hand you." },
+                { "DrawingTool.RefreshSnapSettings", "RefreshSnapSettings() — re-reads the eight snap toggles from the application's Snap Settings into the tool's SnapEngine. Call it after the user changes them, since the engine holds its own copy taken when the tool was constructed." },
+                { "DrawingTool.CompleteText", "CompleteText(VXYZ location, string content) — the second half of Text mode: builds the VText at the location TextPlacementRequested handed you and raises ShapeCompleted. Does nothing if Mode is no longer Text or content is null or empty, so cancelling the host's text prompt is safe." },
 
                 // GifEncoder
                 { "GifEncoder.AddFrame", "AddFrame(BitmapSource frame) — appends one frame to the animation. Every frame must be the width and height passed to the constructor. Frames are written to the stream as they arrive, so a long animation does not accumulate in memory." },
@@ -5148,12 +5448,16 @@ namespace StartViz
 
             AddDrawingToolRow(drawingRowGroup, "Point", "Single click", "1", false);
             AddDrawingToolRow(drawingRowGroup, "Line", "Click start, click end", "2", true);
-            AddDrawingToolRow(drawingRowGroup, "Circle", "Click center, click radius", "2", false);
-            AddDrawingToolRow(drawingRowGroup, "Rectangle", "Click corner, click opposite", "2", true);
-            AddDrawingToolRow(drawingRowGroup, "Arc", "Click center, start, end", "3", false);
-            AddDrawingToolRow(drawingRowGroup, "Polygon", "Click vertices, double-click", "N", true);
-            AddDrawingToolRow(drawingRowGroup, "Polyline", "Click points, double-click", "N", false);
-            AddDrawingToolRow(drawingRowGroup, "Bezier", "Click start, ctrl1, ctrl2, end", "4", true);
+            AddDrawingToolRow(drawingRowGroup, "Circle", "Click center, click a point at the radius", "2", false);
+            AddDrawingToolRow(drawingRowGroup, "Rectangle", "Click corner, click opposite corner", "2", true);
+            AddDrawingToolRow(drawingRowGroup, "Ellipse", "Click center, click for the two radii", "2", false);
+            AddDrawingToolRow(drawingRowGroup, "Arc", "Click start, a point ON the arc, end", "3", true);
+            AddDrawingToolRow(drawingRowGroup, "Polygon", "Click vertices, double-click to close", "N", false);
+            AddDrawingToolRow(drawingRowGroup, "Polyline", "Click points, double-click to finish", "N", true);
+            AddDrawingToolRow(drawingRowGroup, "Bezier", "Click start, ctrl1, ctrl2, end", "4", false);
+            AddDrawingToolRow(drawingRowGroup, "Spline", "Click points, double-click to finish", "N", true);
+            AddDrawingToolRow(drawingRowGroup, "Arrow", "Click tail, click head", "2", false);
+            AddDrawingToolRow(drawingRowGroup, "Text", "Click position, then type the string", "1", true);
 
             drawingTable.RowGroups.Add(drawingRowGroup);
             doc.Blocks.Add(drawingTable);

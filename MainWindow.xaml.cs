@@ -7010,6 +7010,15 @@ public partial class MainWindow : Window
         {
             switch (e.Key)
             {
+                case Key.F:
+                    // Find in Files. The Search menu has advertised this gesture all along, but
+                    // nothing ever handled it: Format occupied Ctrl+Shift+F here, so the menu's
+                    // InputGestureText was aspirational. Moving Format to Alt+Shift+F freed the
+                    // keys and left this arm empty — which made the gesture do nothing at all,
+                    // a worse outcome than doing the wrong thing. This is the other half.
+                    FindInFilesMenuItem_Click(sender, e);
+                    e.Handled = true;
+                    break;
                 case Key.D:
                     DeleteLine();
                     e.Handled = true;
