@@ -9,6 +9,8 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+## [2026.8.4] - 2026-08-18
+
 ### Added
 - **`Canvas.Clear()` and `Canvas.Remove(...)`** — a way to take shapes back off the canvas from your
   own code. This is what a callback that *redraws* needs: shapes register themselves as you construct
