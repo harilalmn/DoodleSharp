@@ -9,6 +9,8 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+## [2026.8.7] - 2026-08-19
+
 ### Added
 - **`VText.Mask` — a solid background behind a label, on by default.** A label sitting on the line it
   describes is hard to read, so every `VText` now fills a rectangle behind its glyphs in the **canvas
