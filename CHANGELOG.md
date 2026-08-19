@@ -9,6 +9,8 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+## [2026.8.8] - 2026-08-19
+
 ### Added
 - **Viewports — split the canvas into a grid, and draw into any cell.** The canvas pane can now hold
   several independent views instead of one. `Viewports.Rows` and `Viewports.Columns` divide it (both
