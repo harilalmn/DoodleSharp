@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using DoodleSharp.Documentation;
 
@@ -156,6 +156,40 @@ public class DocGeneratorTests
         var types = new DocGenerator().GetDocumentableTypes();
 
         Assert.Contains(expected, types);
+    }
+
+    /// <summary>
+    /// A public type nested inside another must still reach the tree.
+    ///
+    /// <para>
+    /// <c>Type.IsPublic</c> is <b>false</b> for a nested type however public it is — the property for
+    /// that is <c>IsNestedPublic</c> — so a filter written as <c>t.IsPublic</c> silently drops every
+    /// one of them. That is what hid the two export tile types: they had descriptions written, and no
+    /// page and no search entry to show them on. Note 91's reachability-versus-rendering split, in a
+    /// new place, so both halves are asserted here and in the test below.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(DoodleSharp.Canvas.SvgExporter.SvgTile))]
+    [InlineData(typeof(DoodleSharp.Export.PdfExporter.PdfTile))]
+    public void APublicNestedTypeIsReachableInTheTree(Type expected)
+    {
+        Assert.False(expected.IsPublic, "the point of this test is that a nested type is not IsPublic");
+        Assert.True(expected.IsNestedPublic);
+
+        Assert.Contains(expected, new DocGenerator().GetDocumentableTypes());
+    }
+
+    /// <summary>The other half: reaching the page is worth nothing if the page lists nothing.</summary>
+    [Theory]
+    [InlineData(typeof(DoodleSharp.Canvas.SvgExporter.SvgTile), "Scale")]
+    [InlineData(typeof(DoodleSharp.Export.PdfExporter.PdfTile), "Scale")]
+    public void APublicNestedTypesPageListsItsMembers(Type type, string member)
+    {
+        var text = RenderedText(type);
+
+        Assert.Contains(member, text, StringComparison.Ordinal);
+        Assert.DoesNotContain("No description available", text, StringComparison.Ordinal);
     }
 
     private static string RenderedText(Type type)
