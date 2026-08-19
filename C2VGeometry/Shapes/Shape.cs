@@ -54,6 +54,15 @@ public abstract class Shape : IDrawable
     /// one-shot user-facing calls; it is not a substitute for a non-registering constructor
     /// (see <c>VLine.Internal</c>) in loops.
     /// </para>
+    ///
+    /// <para>
+    /// Internal, and it has to stay that way: it is a nested type, and the set of names user code
+    /// must not shadow is built by reflecting over this assembly's <i>exported</i> types — where a
+    /// nested type reports its enclosing namespace. Making this public would silently reserve
+    /// "AutoRegisterScope" as a project name. The host reaches it through <c>InternalsVisibleTo</c>,
+    /// which it needs for the same reason the library does: <see cref="Clone"/> registers, so an
+    /// exporter that clones the scene to transform it would leave a copy of the drawing behind.
+    /// </para>
     /// </summary>
     internal static AutoRegisterScope SuspendAutoRegistration() => AutoRegisterScope.Suspend();
 
@@ -437,6 +446,36 @@ public abstract class Shape : IDrawable
     {
         IsExplicitlyDrawn = true;
         DefaultRegistry?.Register(this);
+    }
+
+    /// <summary>
+    /// Puts this shape on a particular viewport, moving it there if it is already somewhere else.
+    ///
+    /// <para>
+    /// Shapes register as they are constructed, which lands them on the root — so this is normally a
+    /// move, and calling it on a shape built several lines earlier works exactly as if the viewport
+    /// had been chosen up front. On the default 1x1 layout <c>Viewports[0][0]</c> <i>is</i> the root,
+    /// so <c>Place(Viewports[0][0])</c> and a bare <see cref="Place()"/> do the same thing.
+    /// </para>
+    ///
+    /// <para>
+    /// Placing on a viewport that has since been subdivided is not an error: the shape draws in that
+    /// viewport's first cell, on the reading that the cell stayed where it was and merely got split.
+    /// </para>
+    /// </summary>
+    /// <param name="viewport">The viewport to draw this shape in, e.g. <c>Viewports[1][2]</c>.</param>
+    /// <exception cref="System.ArgumentNullException"><paramref name="viewport"/> is null.</exception>
+    /// <example>
+    /// <code>
+    /// Viewports.Columns = 2;
+    /// new VCircle(new VXYZ(0, 0), 10).Place(Viewports[0][1]);
+    /// </code>
+    /// </example>
+    public void Place(Viewport viewport)
+    {
+        if (viewport is null) throw new System.ArgumentNullException(nameof(viewport));
+        IsExplicitlyDrawn = true;
+        DefaultRegistry?.Place(this, viewport);
     }
 
     /// <summary>

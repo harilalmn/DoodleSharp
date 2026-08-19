@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using DoodleSharp.Canvas;
@@ -12,11 +12,16 @@ namespace DoodleSharp.Commands
     public class AddShapeCommand : ICommand
     {
         private readonly Shape _shape;
-        private readonly RenderCanvas _canvas;
+        // The host, not one canvas. A command uses only Refresh / AddShape / RemoveShape, which the
+        // host names identically and routes to the cell that actually displays the shape. Capturing
+        // a single canvas would capture whichever cell happened to be hovered when the command was
+        // built, so undoing a delete made in one cell could re-add the shape to another — the
+        // registry-versus-display desync these commands exist to keep closed.
+        private readonly ViewportHost _canvas;
 
         public string Description { get; }
 
-        public AddShapeCommand(Shape shape, RenderCanvas canvas, string? description = null)
+        public AddShapeCommand(Shape shape, ViewportHost canvas, string? description = null)
         {
             _shape = shape ?? throw new ArgumentNullException(nameof(shape));
             _canvas = canvas ?? throw new ArgumentNullException(nameof(canvas));
@@ -61,11 +66,11 @@ namespace DoodleSharp.Commands
     public class DeleteShapesCommand : ICommand
     {
         private readonly List<Shape> _shapes;
-        private readonly RenderCanvas _canvas;
+        private readonly ViewportHost _canvas;
 
         public string Description { get; }
 
-        public DeleteShapesCommand(IEnumerable<Shape> shapes, RenderCanvas canvas)
+        public DeleteShapesCommand(IEnumerable<Shape> shapes, ViewportHost canvas)
         {
             _shapes = shapes.ToList();
             _canvas = canvas ?? throw new ArgumentNullException(nameof(canvas));
@@ -76,7 +81,7 @@ namespace DoodleSharp.Commands
                 Description = $"Delete {_shapes.Count} shapes";
         }
 
-        public DeleteShapesCommand(Shape shape, RenderCanvas canvas)
+        public DeleteShapesCommand(Shape shape, ViewportHost canvas)
             : this(new[] { shape }, canvas)
         {
         }
@@ -156,7 +161,7 @@ namespace DoodleSharp.Commands
         }
 
         private readonly List<Shape> _shapes;
-        private readonly RenderCanvas _canvas;
+        private readonly ViewportHost _canvas;
         private readonly List<CodeEdit> _edits;
         private readonly Action<object, string> _applyContent;
 
@@ -169,7 +174,7 @@ namespace DoodleSharp.Commands
         /// </param>
         public DeleteShapesWithCodeCommand(
             IEnumerable<Shape> shapes,
-            RenderCanvas canvas,
+            ViewportHost canvas,
             IEnumerable<CodeEdit> edits,
             Action<object, string> applyContent)
         {
@@ -234,7 +239,7 @@ namespace DoodleSharp.Commands
     public class MoveShapesCommand : ICommand
     {
         private readonly List<Shape> _shapes;
-        private readonly RenderCanvas _canvas;
+        private readonly ViewportHost _canvas;
         private VXYZ _totalDisplacement;
         private readonly DateTime _createdAt;
 
@@ -245,7 +250,7 @@ namespace DoodleSharp.Commands
         /// </summary>
         public static int MergeWindowMs { get; set; } = 500;
 
-        public MoveShapesCommand(IEnumerable<Shape> shapes, VXYZ displacement, RenderCanvas canvas)
+        public MoveShapesCommand(IEnumerable<Shape> shapes, VXYZ displacement, ViewportHost canvas)
         {
             _shapes = shapes.ToList();
             _totalDisplacement = displacement;
@@ -255,7 +260,7 @@ namespace DoodleSharp.Commands
             UpdateDescription();
         }
 
-        public MoveShapesCommand(Shape shape, VXYZ displacement, RenderCanvas canvas)
+        public MoveShapesCommand(Shape shape, VXYZ displacement, ViewportHost canvas)
             : this(new[] { shape }, displacement, canvas)
         {
         }
@@ -329,7 +334,7 @@ namespace DoodleSharp.Commands
         private readonly T _oldValue;
         private readonly T _newValue;
         private readonly Action<T> _setter;
-        private readonly RenderCanvas _canvas;
+        private readonly ViewportHost _canvas;
 
         public string Description { get; }
 
@@ -339,7 +344,7 @@ namespace DoodleSharp.Commands
             T oldValue,
             T newValue,
             Action<T> setter,
-            RenderCanvas canvas)
+            ViewportHost canvas)
         {
             _shape = shape ?? throw new ArgumentNullException(nameof(shape));
             _propertyName = propertyName;
@@ -374,11 +379,11 @@ namespace DoodleSharp.Commands
         private readonly List<Shape> _shapes;
         private readonly VXYZ _pivot;
         private readonly double _angleDegrees;
-        private readonly RenderCanvas _canvas;
+        private readonly ViewportHost _canvas;
 
         public string Description { get; }
 
-        public RotateShapesCommand(IEnumerable<Shape> shapes, VXYZ pivot, double angleDegrees, RenderCanvas canvas)
+        public RotateShapesCommand(IEnumerable<Shape> shapes, VXYZ pivot, double angleDegrees, ViewportHost canvas)
         {
             _shapes = shapes.ToList();
             _pivot = pivot;
@@ -421,11 +426,11 @@ namespace DoodleSharp.Commands
         private readonly List<Shape> _shapes;
         private readonly VXYZ _center;
         private readonly double _factor;
-        private readonly RenderCanvas _canvas;
+        private readonly ViewportHost _canvas;
 
         public string Description { get; }
 
-        public ScaleShapesCommand(IEnumerable<Shape> shapes, VXYZ center, double factor, RenderCanvas canvas)
+        public ScaleShapesCommand(IEnumerable<Shape> shapes, VXYZ center, double factor, ViewportHost canvas)
         {
             _shapes = shapes.ToList();
             _center = center;

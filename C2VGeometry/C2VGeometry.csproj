@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -20,6 +20,13 @@
          canvas — the guards for CLAUDE.md notes 6/10/27 need to assert on them directly. -->
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
       <_Parameter1>DoodleSharp.Tests</_Parameter1>
+    </AssemblyAttribute>
+    <!-- And the host, for Shape.SuspendAutoRegistration: Clone() registers, so the exporter that
+         clones the scene to tile it into model space would otherwise leave a full copy of the
+         drawing on the canvas. It cannot be made public — it is a nested type, and public nested
+         types silently enter the set of names a project may not be called. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>DoodleSharp</_Parameter1>
     </AssemblyAttribute>
   </ItemGroup>
 </Project>

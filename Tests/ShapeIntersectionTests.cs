@@ -178,5 +178,6 @@ public class ShapeIntersectionTests
         public void Unregister(Shape shape) { }
         public void Clear() { }
         public void NotifyOrderChanged(Shape shape) { }
+        public void Place(Shape shape, Viewport viewport) => Register(shape);
     }
 }

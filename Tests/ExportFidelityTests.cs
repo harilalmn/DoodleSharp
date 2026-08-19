@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -55,7 +55,10 @@ public class ExportFidelityTests
         var body = next > start ? source[start..next] : source[start..];
 
         Assert.Contains("SuppressOverlayForCapture", body);
-        Assert.Contains("rtb.Render(RenderCanvas)", body); // the scan is still looking at a capture path
+
+        // The whole container is captured, not one cell, so a divided drawing exports tiled exactly
+        // as it appears. Also confirms the scan is still looking at a capture path.
+        Assert.Contains("rtb.Render(ViewportHost)", body);
 
         // A capture reads the canvas's own ActualWidth/Height, and a dockable pane that is hidden — or
         // sitting on a non-selected tab, which AvalonDock unloads — reports zero. Before the panels

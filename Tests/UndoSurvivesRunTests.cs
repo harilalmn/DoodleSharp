@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using DoodleSharp.Commands;
 
 namespace DoodleSharp.Tests;
@@ -9,10 +9,16 @@ namespace DoodleSharp.Tests;
 /// <para>
 /// Every run site cleared the undo stack outright, on the reasoning that all shapes are regenerated
 /// from code so any command holding a <c>Shape</c> reference is stale. That is true of move, resize
-/// and style — but the canvas delete <b>edits the source</b>, and writing the edited text back into
-/// the editor starts the debounced auto-run (on by default, 500 ms). So the run caused by the delete
-/// cleared the undo entry the delete had just pushed, and Ctrl+Z half a second later reported
-/// "Nothing to undo". The delete removed the code correctly the whole time; only undo was lost.
+/// and style — but the canvas delete <b>edits the source</b>, and a run cleared the undo entry the
+/// delete had just pushed, so Ctrl+Z afterwards reported "Nothing to undo". The delete removed the
+/// code correctly the whole time; only undo was lost.
+/// </para>
+///
+/// <para>
+/// The original trigger was the debounced auto-run started by the delete's own source edit; that
+/// feature is gone and code now runs on F5 / Run only. The mechanism stays because two triggers
+/// remain: pressing F5 straight after a delete, and the Global Parameters paths, which re-run the
+/// program in response to a value change without anyone pressing Run.
 /// </para>
 /// </summary>
 public class UndoSurvivesRunTests

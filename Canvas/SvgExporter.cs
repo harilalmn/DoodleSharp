@@ -330,4 +330,88 @@ public static class SvgExporter
         var svg = Export(shapes, width, height);
         System.IO.File.WriteAllText(filePath, svg);
     }
+
+    /// <summary>One cell of a divided drawing: where it sits on the page, and the view it is showing.</summary>
+    /// <param name="PageRect">The cell's rectangle on the page, in device pixels.</param>
+    /// <param name="Scale">Screen pixels per world unit in that cell — that cell's own zoom.</param>
+    /// <param name="PanX">The cell's horizontal pan, in pixels.</param>
+    /// <param name="PanY">The cell's vertical pan, in pixels.</param>
+    /// <param name="Shapes">The shapes placed on that cell.</param>
+    public readonly record struct SvgTile(
+        System.Windows.Rect PageRect,
+        double Scale,
+        double PanX,
+        double PanY,
+        IReadOnlyList<IDrawable> Shapes);
+
+    /// <summary>
+    /// Exports a divided drawing: every cell tiled onto one page exactly as it appears on screen,
+    /// each at its own pan and zoom.
+    ///
+    /// <para>
+    /// The transform per tile is derived from that cell's own view rather than re-computed here,
+    /// which is what makes "as it appears on screen" literal instead of approximate. Shapes are
+    /// still emitted in world coordinates; the matrix carries the cell's scale, its pan, its
+    /// position on the page, and the Y flip from mathematical to screen coordinates all at once.
+    /// </para>
+    ///
+    /// <para>
+    /// This is deliberately <b>not</b> what an undivided drawing exports.
+    /// <see cref="Export(IEnumerable{IDrawable}, double, double, double)"/> fits the <i>shapes</i>
+    /// with padding and ignores the screen entirely — it exports the drawing, not the view. Those are
+    /// different pictures, and switching the single-cell case to this one would silently change the
+    /// output of every export that has ever been made.
+    /// </para>
+    /// </summary>
+    public static string ExportTiled(IReadOnlyList<SvgTile> tiles, double width, double height)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+        sb.AppendLine($"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{F(width)}\" height=\"{F(height)}\" viewBox=\"0 0 {F(width)} {F(height)}\">");
+
+        sb.AppendLine("  <defs>");
+        for (var i = 0; i < tiles.Count; i++)
+        {
+            var r = tiles[i].PageRect;
+            sb.AppendLine($"    <clipPath id=\"viewport{i}\"><rect x=\"{F(r.X)}\" y=\"{F(r.Y)}\" width=\"{F(r.Width)}\" height=\"{F(r.Height)}\" /></clipPath>");
+        }
+        sb.AppendLine("  </defs>");
+
+        for (var i = 0; i < tiles.Count; i++)
+        {
+            var tile = tiles[i];
+            var r = tile.PageRect;
+
+            // world -> page:  x = scale*wx + (left + width/2 + panX)
+            //                 y = -scale*wy + (top + height/2 + panY)
+            var e = r.X + r.Width / 2 + tile.PanX;
+            var f = r.Y + r.Height / 2 + tile.PanY;
+
+            sb.AppendLine($"  <g clip-path=\"url(#viewport{i})\" transform=\"matrix({F(tile.Scale)} 0 0 {F(-tile.Scale)} {F(e)} {F(f)})\">");
+            foreach (var shape in tile.Shapes)
+            {
+                var element = ShapeToSvg(shape);
+                if (!string.IsNullOrEmpty(element)) sb.AppendLine("    " + element);
+            }
+            sb.AppendLine("  </g>");
+        }
+
+        // The cell separators, so the tiling is as legible in the file as it is on screen. Drawn last
+        // so geometry cannot paint over them, and pinned to device pixels like every other stroke.
+        if (tiles.Count > 1)
+        {
+            foreach (var tile in tiles)
+            {
+                var r = tile.PageRect;
+                sb.AppendLine($"  <rect x=\"{F(r.X)}\" y=\"{F(r.Y)}\" width=\"{F(r.Width)}\" height=\"{F(r.Height)}\" fill=\"none\" stroke=\"#333333\" stroke-width=\"1\"{StrokeExtras(LineType.Continuous, 1.0)} />");
+            }
+        }
+
+        sb.AppendLine("</svg>");
+        return sb.ToString();
+    }
+
+    /// <summary>Saves a divided drawing, tiled as it appears on screen.</summary>
+    public static void SaveTiledToFile(string filePath, IReadOnlyList<SvgTile> tiles, double width, double height)
+        => System.IO.File.WriteAllText(filePath, ExportTiled(tiles, width, height));
 }

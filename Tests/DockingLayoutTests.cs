@@ -322,19 +322,30 @@ public class DockingLayoutTests
         Assert.Contains("RestoreLayout();", code);
     }
 
+    /// <summary>
+    /// The pane holds the viewport container and the animation transport, and nothing else.
+    ///
+    /// <para>
+    /// <c>AnimationControlsPanel</c> is a sibling of <c>ViewportHost</c>: playback is one transport
+    /// for the whole drawing, not a per-cell control, and being a sibling is what keeps it out of an
+    /// exported bitmap. The navigation overlay used to sit here for the same reason and has moved
+    /// <i>inside</i> each cell — so it is now within the captured element, and it is
+    /// <c>ViewportHost.SuppressOverlayForCapture</c> that keeps it out of exports instead.
+    /// </para>
+    /// </summary>
     [Fact]
-    public void TheCanvasOverlayStillTravelsWithTheCanvas()
+    public void TheCanvasPaneHoldsTheViewportHostAndTheTransport()
     {
-        // CanvasNavPanel and AnimationControlsPanel are siblings of RenderCanvas inside the pane's
-        // Grid, which is what keeps them out of the exported bitmap and moves them with a floated
-        // canvas. Guarded because the restructure moved this whole block.
         var xaml = MainWindowXaml();
         var pane = xaml.IndexOf("ContentId=\"ds.tool.canvas\"", StringComparison.Ordinal);
         var end = xaml.IndexOf("</avalonDock:LayoutAnchorable>", pane, StringComparison.Ordinal);
 
         var content = xaml[pane..end];
-        Assert.Contains("x:Name=\"RenderCanvas\"", content);
-        Assert.Contains("x:Name=\"CanvasNavPanel\"", content);
+        Assert.Contains("x:Name=\"ViewportHost\"", content);
         Assert.Contains("x:Name=\"AnimationControlsPanel\"", content);
+
+        // The navigation chrome is built per cell now; leaving a copy in the markup would give the
+        // single-cell case two of them.
+        Assert.DoesNotContain("x:Name=\"CanvasNavPanel\"", content);
     }
 }

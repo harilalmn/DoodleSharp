@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -85,6 +85,17 @@ public static class ReservedNames
                 if (type.Namespace != null && imported.Contains(type.Namespace))
                     names.Add(StripArity(type.Name));
             }
+        }
+
+        // Names reachable unqualified through a `using static`, which the reflection above cannot
+        // see: it collects type names, and these are members. The compiler injects
+        // `global using static C2VGeometry.ViewportRoot;` into every compilation, so `Viewports` is
+        // as shadowable as any type name and has to be reserved the same way.
+        foreach (var member in typeof(C2VGeometry.ViewportRoot).GetMembers(
+                     System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static |
+                     System.Reflection.BindingFlags.DeclaredOnly))
+        {
+            names.Add(member.Name);
         }
 
         return names;

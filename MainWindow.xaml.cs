@@ -123,9 +123,6 @@ public partial class MainWindow : Window
     private Editor.SemanticHighlighter? _semanticHighlighter;
     private DispatcherTimer? _semanticUpdateTimer;
 
-    // Auto-update Canvas (debounced auto-run)
-    private DispatcherTimer? _autoUpdateTimer;
-
     // Auto Save (periodic write-to-disk of unsaved project files)
     private DispatcherTimer? _autoSaveTimer;
     private bool _autoSavePromptActive;      // an auto-save prompt is on screen - don't stack another
@@ -149,7 +146,6 @@ public partial class MainWindow : Window
 
     // Properties Panel
     private PropertiesPanel? _propertiesPanel;
-    private bool _suppressAutoUpdate;
 
     public static RoutedCommand RenameCommand = new RoutedCommand();
     public static RoutedCommand GoToDefinitionCommand = new RoutedCommand();
@@ -273,11 +269,11 @@ public partial class MainWindow : Window
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         Journal.Info("MW.LOADED", "Main window loaded");
-        RenderCanvas.CenterOrigin();
+        ViewportHost.CenterOrigin();
 
         // Apply application settings
         var settings = ApplicationSettings.Instance;
-        RenderCanvas.ShowGrid = settings.ShowGrid;
+        ViewportHost.ShowGrid = settings.ShowGrid;
         GridMenuItem.IsChecked = settings.ShowGrid;
 
         // Restore the docking arrangement. Falls back to the XAML default plus the saved visibility
@@ -308,25 +304,26 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// The canvas of the viewport the user is working in — the cell the pointer last entered or
+    /// clicked.
+    ///
+    /// <para>
+    /// A property, never a field: a snapshot taken once would pin the first cell forever, and every
+    /// tool, selection and keyboard shortcut would keep acting on it after the pointer moved on.
+    /// Anything that belongs to the <i>drawing</i> rather than to where the user is working — the
+    /// background, the grid, snapping, a repaint — goes through <see cref="ViewportHost"/> instead.
+    /// </para>
+    /// </summary>
+    private RenderCanvas RenderCanvas => ViewportHost.ActiveCanvas;
+
     private void InitializeCanvas()
     {
-        RenderCanvas.MouseWorldPositionChanged += (s, pos) =>
-        {
-            CoordinatesText.Text = $"X: {pos.X:F2}  Y: {pos.Y:F2}";
-        };
-
-        // Keeps the floating zoom readout honest no matter what changed the view — the buttons, a
-        // zoom-to-fit, or a middle-drag pan (which still works in interactive mode).
-        RenderCanvas.Viewport.TransformChanged += (s, e) =>
-        {
-            if (CanvasNavPanel.Visibility == Visibility.Visible) UpdateCanvasZoomReadout();
-        };
-
-        // Selection changes
-        RenderCanvas.SelectionTool.SelectionChanged += OnSelectionChanged;
-
-        // Control point drag ended - update code when shape is moved
-        RenderCanvas.SelectionTool.ControlPointDragEnded += OnControlPointDragEnded;
+        // Wired per canvas, because a resize can create more of them at any time. Raised for the
+        // first cell during the host's own construction, so this must be attached before then —
+        // it is: the host raises it again for every cell it builds afterwards.
+        ViewportHost.CanvasCreated += (s, canvas) => WireCanvas(canvas);
+        foreach (var canvas in ViewportHost.Canvases) WireCanvas(canvas);
 
         // Timeline panel events
         TimelinePanel.TimeChanged += (s, time) =>
@@ -342,7 +339,7 @@ public partial class MainWindow : Window
                     _animationStopwatch.Stop();
                     PlayPauseBtn.Content = "\u25B6";
                 }
-                RenderCanvas.Refresh();
+                ViewportHost.Refresh();
             }
         };
 
@@ -391,7 +388,7 @@ public partial class MainWindow : Window
                     try
                     {
                         var c = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(bgRequest);
-                        RenderCanvas.CanvasBackground = new System.Windows.Media.SolidColorBrush(c);
+                        ViewportHost.CanvasBackground = new System.Windows.Media.SolidColorBrush(c);
                     }
                     catch
                     {
@@ -406,11 +403,13 @@ public partial class MainWindow : Window
                 // objects are new every frame. Refresh() alone would keep repainting the snapshot
                 // that Render() took at Run time — which is why a sketch creating its shapes in
                 // Draw() used to sit on frame 0. Hand the canvas this frame's shapes first.
-                RenderCanvas.SetFrameShapes(CanvasRenderer.Instance.GetShapes());
-                RenderCanvas.Refresh();
+                ViewportHost.ForEach(c =>
+                    c.SetFrameShapes(CanvasRenderer.Instance.GetShapes(c.OwningViewport!)));
+                ViewportHost.Refresh();
 
                 if (DoodleSharp.Sketching.SketchRuntime.Instance.TryConsumeZoomRequest())
-                    RenderCanvas.ZoomExtents(CanvasRenderer.Instance.GetShapes());
+                    ViewportHost.ForEach(c =>
+                        c.ZoomExtents(CanvasRenderer.Instance.GetShapes(c.OwningViewport!)));
 
                 UpdateAnimationControlsVisibility();
                 return;
@@ -456,17 +455,18 @@ public partial class MainWindow : Window
                     // are unchanged but the bounds the cull index holds are now stale. Re-read them
                     // before repainting — culling is no longer disabled during playback, and a
                     // stale box means a moving shape either vanishes or fails to appear.
-                    RenderCanvas.ReindexForAnimationFrame();
+                    ViewportHost.ForEach(c => c.ReindexForAnimationFrame());
 
                     // Redraw canvas first (critical path — before UI updates trigger layout)
-                    RenderCanvas.Refresh();
+                    ViewportHost.Refresh();
 
                     // Zoom to fit on first frame that has visible shapes (if setting enabled)
                     if (_needsInitialZoom && timeline.Shapes.Count > 0)
                     {
                         if (ApplicationSettings.Instance.ZoomToFitOnRun)
                         {
-                            RenderCanvas.ZoomExtents(CanvasRenderer.Instance.GetShapes());
+                            ViewportHost.ForEach(c =>
+                                c.ZoomExtents(CanvasRenderer.Instance.GetShapes(c.OwningViewport!)));
                         }
                         _needsInitialZoom = false;
                     }
@@ -509,15 +509,32 @@ public partial class MainWindow : Window
         if (version != _lastRepaintedRegistryVersion)
         {
             _lastRepaintedRegistryVersion = version;
-            RenderCanvas.SetFrameShapes(CanvasRenderer.Instance.GetShapes());
+            ViewportHost.ForEach(c =>
+                c.SetFrameShapes(CanvasRenderer.Instance.GetShapes(c.OwningViewport!)));
         }
         else
         {
             // Shapes moved in place, so only the cull index's cached boxes went stale.
-            RenderCanvas.ReindexForAnimationFrame();
+            ViewportHost.ForEach(c => c.ReindexForAnimationFrame());
         }
 
-        RenderCanvas.Refresh();
+        ViewportHost.Refresh();
+    }
+
+    /// <summary>
+    /// Everything the window needs from one canvas. Called for every cell, including ones a layout
+    /// change creates later — a cell whose events were never attached looks alive but reports no
+    /// coordinates and no selection, which is invisible until someone tries to work in it.
+    /// </summary>
+    private void WireCanvas(RenderCanvas canvas)
+    {
+        canvas.MouseWorldPositionChanged += (s, pos) =>
+        {
+            CoordinatesText.Text = $"X: {pos.X:F2}  Y: {pos.Y:F2}";
+        };
+
+        canvas.SelectionTool.SelectionChanged += OnSelectionChanged;
+        canvas.SelectionTool.ControlPointDragEnded += OnControlPointDragEnded;
     }
 
     private void InitializeConsole()
@@ -1277,29 +1294,6 @@ public partial class MainWindow : Window
         // Track text changes for syntax checking
         CodeEditor.TextChanged += (s, e) => _textChangedSinceLastCheck = true;
 
-        // Auto-update canvas timer (debounced auto-run)
-        _autoUpdateTimer = new DispatcherTimer();
-        _autoUpdateTimer.Interval = TimeSpan.FromMilliseconds(ApplicationSettings.Instance.AutoUpdateDelayMs);
-        _autoUpdateTimer.Tick += async (s, e) =>
-        {
-            _autoUpdateTimer.Stop();
-            if (ApplicationSettings.Instance.AutoUpdateCanvas && _currentProject != null)
-            {
-                await AutoRunCodeAsync();
-            }
-        };
-
-        // Trigger auto-update on text changes
-        CodeEditor.TextChanged += (s, e) =>
-        {
-            if (_suppressAutoUpdate) return;
-            if (ApplicationSettings.Instance.AutoUpdateCanvas)
-            {
-                _autoUpdateTimer.Stop();
-                _autoUpdateTimer.Start();
-            }
-        };
-
         // Auto Save timer (periodic save of unsaved project files)
         _autoSaveTimer = new DispatcherTimer();
         _autoSaveTimer.Tick += AutoSaveTimer_Tick;
@@ -1314,10 +1308,10 @@ public partial class MainWindow : Window
         // Clear canvas selection when user clicks into the code editor
         CodeEditor.PreviewMouseDown += (s, e) =>
         {
-            if (RenderCanvas.SelectionTool.SelectedShapes.Count > 0)
+            if (ViewportHost.SelectedShapes.Count > 0)
             {
-                RenderCanvas.SelectionTool.ClearSelection();
-                RenderCanvas.Refresh();
+                ViewportHost.ClearSelection();
+                ViewportHost.Refresh();
                 _propertiesPanel?.UpdateSelection(new List<C2VGeometry.Shape>());
             }
         };
@@ -1499,7 +1493,7 @@ public partial class MainWindow : Window
             e.Handled = true;
             if (RenderCanvas.DrawingTool.CycleInputMode())
             {
-                RenderCanvas.Refresh();
+                ViewportHost.Refresh();
                 UpdateDrawingInputStatus();
             }
             return;
@@ -4021,9 +4015,9 @@ public partial class MainWindow : Window
     /// <c>InitializeComponent</c> raises Checked / SelectionChanged for any control that declares a
     /// starting value, long before <see cref="LoadSettingsToUI"/> runs — and a settings handler that
     /// fires there writes the markup's value into <c>ApplicationSettings.Instance</c> and saves it,
-    /// destroying what was on disk before it is ever read. <c>AutoUpdateCheck</c> carried
-    /// <c>IsChecked="True"</c> and did exactly that: Auto Draw Shapes came back on at every launch
-    /// and could not be turned off permanently. Every settings handler checks
+    /// destroying what was on disk before it is ever read. The retired <i>Auto Draw Shapes</i>
+    /// checkbox carried <c>IsChecked="True"</c> and did exactly that: the setting came back on at
+    /// every launch and could not be turned off permanently. Every settings handler checks
     /// <see cref="SettingsUiBusy"/>, which covers both this window and the load itself.
     /// </para>
     /// </summary>
@@ -4082,7 +4076,7 @@ public partial class MainWindow : Window
             {
                 try {
                     var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(settings.DefaultCanvasBackgroundColor));
-                    RenderCanvas.CanvasBackground = brush;
+                    ViewportHost.CanvasBackground = brush;
                 } catch {}
             }
         }
@@ -4131,7 +4125,7 @@ public partial class MainWindow : Window
         SnapExtensionCheck.IsChecked = appSettings.SnapExtensionEnabled;
         SnapTangentCheck.IsChecked = appSettings.SnapTangentEnabled;
         SnapToGridCheck.IsChecked = appSettings.SnapToGridEnabled;
-        RenderCanvas.SnapToGrid = appSettings.SnapToGridEnabled;
+        ViewportHost.SnapToGrid = appSettings.SnapToGridEnabled;
 
         // Highlight Settings
         HighlightColorBox.Text = appSettings.HighlightColor ?? "Yellow";
@@ -4141,8 +4135,6 @@ public partial class MainWindow : Window
 
         // Canvas Settings
         SettingsZoomToFitCheck.IsChecked = appSettings.ZoomToFitOnRun;
-        SettingsAutoUpdateCanvasCheck.IsChecked = appSettings.AutoUpdateCanvas;
-        AutoUpdateCheck.IsChecked = appSettings.AutoDraw;
         SettingsDrawPointAsPatchCheck.IsChecked = appSettings.DrawPointAsPatch;
 
         // Auto Save Settings
@@ -4224,7 +4216,7 @@ public partial class MainWindow : Window
         // Live canvas background for the canvas-color boxes.
         if ((box == SettingsCanvasColorBox || box == AppSettingsCanvasColorBox) && !string.IsNullOrWhiteSpace(val))
         {
-            try { RenderCanvas.CanvasBackground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(val)); } catch { }
+            try { ViewportHost.CanvasBackground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(val)); } catch { }
         }
     }
 
@@ -4340,26 +4332,12 @@ public partial class MainWindow : Window
         ApplicationSettings.Save();
     }
 
-    private void SettingsAutoUpdateCanvasCheck_Changed(object sender, RoutedEventArgs e)
-    {
-        if (SettingsUiBusy) return;
-        ApplicationSettings.Instance.AutoUpdateCanvas = SettingsAutoUpdateCanvasCheck.IsChecked == true;
-        ApplicationSettings.Save();
-    }
-
-    private void AutoUpdateCheck_Changed(object sender, RoutedEventArgs e)
-    {
-        if (SettingsUiBusy) return;
-        ApplicationSettings.Instance.AutoDraw = AutoUpdateCheck.IsChecked == true;
-        ApplicationSettings.Save();
-    }
-
     private void SettingsDrawPointAsPatchCheck_Changed(object sender, RoutedEventArgs e)
     {
         if (SettingsUiBusy) return;
         ApplicationSettings.Instance.DrawPointAsPatch = SettingsDrawPointAsPatchCheck.IsChecked == true;
         ApplicationSettings.Save();
-        RenderCanvas.Refresh();
+        ViewportHost.Refresh();
     }
 
     private void SettingsAutoSaveCheck_Changed(object sender, RoutedEventArgs e)
@@ -4396,7 +4374,7 @@ public partial class MainWindow : Window
 
         ApplicationSettings.Instance.DisplayLineWeight = SettingsDisplayLineWeightCheck.IsChecked == true;
         ApplicationSettings.Save();
-        RenderCanvas.Refresh();
+        ViewportHost.Refresh();
     }
 
     /// <summary>
@@ -4418,7 +4396,7 @@ public partial class MainWindow : Window
         ApplicationSettings.Save();
 
         // A backend switch changes layer ordering, so the whole scene has to be rebuilt.
-        RenderCanvas.Refresh();
+        ViewportHost.Refresh();
     }
 
     private void SaveSettingsButton_Click(object sender, RoutedEventArgs e)
@@ -4499,7 +4477,7 @@ public partial class MainWindow : Window
             {
                 try {
                     var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(canvasColor));
-                    RenderCanvas.CanvasBackground = brush;
+                    ViewportHost.CanvasBackground = brush;
                 } catch { }
             }
 
@@ -4546,7 +4524,7 @@ public partial class MainWindow : Window
         ApplicationSettings.Instance.SnapExtensionEnabled = SnapExtensionCheck.IsChecked == true;
         ApplicationSettings.Instance.SnapTangentEnabled = SnapTangentCheck.IsChecked == true;
         ApplicationSettings.Instance.SnapToGridEnabled = SnapToGridCheck.IsChecked == true;
-        RenderCanvas.SnapToGrid = ApplicationSettings.Instance.SnapToGridEnabled;
+        ViewportHost.SnapToGrid = ApplicationSettings.Instance.SnapToGridEnabled;
 
         // Save Highlight Settings
         ApplicationSettings.Instance.HighlightColor = HighlightColorBox.Text.Trim();
@@ -4555,9 +4533,7 @@ public partial class MainWindow : Window
         ApplicationSettings.Save();
 
         // Refresh snap settings for all tools
-        RenderCanvas.MeasuringTool.RefreshSnapSettings();
-        RenderCanvas.SelectionTool.RefreshSnapSettings();
-        RenderCanvas.DrawingTool.RefreshSnapSettings();
+        ViewportHost.RefreshSnapSettings();
 
         SetStatus("Settings saved (Project and Application).", isError: false);
     }
@@ -4605,7 +4581,7 @@ public partial class MainWindow : Window
         DoodleSharp.Sketching.SketchRuntime.Instance.Stop();
         if (wasSketchRunning)
         {
-            RenderCanvas.CanvasBackground = new System.Windows.Media.SolidColorBrush(
+            ViewportHost.CanvasBackground = new System.Windows.Media.SolidColorBrush(
                 System.Windows.Media.Color.FromRgb(30, 30, 30));
         }
 
@@ -4697,7 +4673,7 @@ public partial class MainWindow : Window
     private async void RunButton_Click(object sender, RoutedEventArgs e)
     {
         using var runScope = Journal.Scope("MW.RUN", "Run requested",
-            $"project={_currentProject?.ProjectFile.Name ?? "<none>"} files={_currentProject?.Files.Count ?? 0} autoDraw={ApplicationSettings.Instance.AutoDraw}");
+            $"project={_currentProject?.ProjectFile.Name ?? "<none>"} files={_currentProject?.Files.Count ?? 0}");
 
         if (_currentProject == null || _currentProject.Files.Count == 0)
         {
@@ -4719,7 +4695,7 @@ public partial class MainWindow : Window
         RunButton.IsEnabled = false;
 
         // Clear selection before running (shapes will be recreated from code)
-        RenderCanvas.SelectionTool.ClearSelection();
+        ViewportHost.ClearSelection();
         _propertiesPanel?.UpdateSelection(new List<C2VGeometry.Shape>());
 
         // Show console tab when running code, unless the user has hidden it via Windows > Console
@@ -4731,14 +4707,13 @@ public partial class MainWindow : Window
         try
         {
             _textMarkerService?.Clear();
-            C2VGeometry.Shape.AutoRegister = ApplicationSettings.Instance.AutoDraw;
             var result = await _compiler.CompileAndExecuteAsync(_currentProject);
 
             // Apply project settings (including background)
             _currentProject.ApplySettings();
             if (_currentProject.ProjectFile.Settings.DefaultCanvasBackgroundColor is string bgCode)
             {
-                 try { RenderCanvas.CanvasBackground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(bgCode)); } catch {}
+                 try { ViewportHost.CanvasBackground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(bgCode)); } catch {}
             }
 
             if (result.Success)
@@ -4755,7 +4730,7 @@ public partial class MainWindow : Window
                 var shapes = CanvasRenderer.Instance.GetShapes();
                 var count = shapes.Count;
 
-                CanvasRenderer.Instance.RenderTo(RenderCanvas);
+                CanvasRenderer.Instance.RenderTo(ViewportHost);
                 SetStatus($"Success: {count} shape{(count != 1 ? "s" : "")} drawn", isError: false);
                 PopulateOutliner(shapes);
                 Journal.Info("MW.RUN.OK", "Run succeeded", $"shapes={count}");
@@ -4858,9 +4833,11 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Silently compiles and runs code for auto-update (no error dialogs, minimal status updates).
+    /// Compiles and runs the project without the Run button's ceremony — no error dialogs, minimal
+    /// status updates. Used by the Global Parameters paths, which re-run the program in response to
+    /// a value change rather than to a user pressing Run.
     /// </summary>
-    private async Task AutoRunCodeAsync()
+    private async Task RunSilentlyAsync()
     {
         if (_currentProject == null || _currentProject.Files.Count == 0)
             return;
@@ -4875,14 +4852,13 @@ public partial class MainWindow : Window
         try
         {
             _textMarkerService?.Clear();
-            C2VGeometry.Shape.AutoRegister = ApplicationSettings.Instance.AutoDraw;
             var result = await _compiler.CompileAndExecuteAsync(_currentProject);
 
             // Apply project settings
             _currentProject.ApplySettings();
             if (_currentProject.ProjectFile.Settings.DefaultCanvasBackgroundColor is string bgCode)
             {
-                try { RenderCanvas.CanvasBackground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(bgCode)); } catch { }
+                try { ViewportHost.CanvasBackground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(bgCode)); } catch { }
             }
 
             if (result.Success)
@@ -4895,15 +4871,16 @@ public partial class MainWindow : Window
                 TransactionManager.Instance.PruneAfterCodeRun();
 
                 var shapes = CanvasRenderer.Instance.GetShapes();
-                CanvasRenderer.Instance.RenderTo(RenderCanvas);
+                CanvasRenderer.Instance.RenderTo(ViewportHost);
 
                 // Zoom to fit if enabled in settings
                 if (ApplicationSettings.Instance.ZoomToFitOnRun && shapes.Count > 0)
                 {
-                    RenderCanvas.ZoomExtents(shapes);
+                    ViewportHost.ForEach(c =>
+                        c.ZoomExtents(CanvasRenderer.Instance.GetShapes(c.OwningViewport!)));
                 }
 
-                SetStatus($"Auto-update: {shapes.Count} shape{(shapes.Count != 1 ? "s" : "")}", isError: false);
+                SetStatus($"Parameters: {shapes.Count} shape{(shapes.Count != 1 ? "s" : "")}", isError: false);
                 PopulateOutliner(shapes);
             }
             else
@@ -4912,7 +4889,7 @@ public partial class MainWindow : Window
                 var errorCount = result.Diagnostics?.Count(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error) ?? 0;
                 if (errorCount > 0)
                 {
-                    SetStatus($"Auto-update: {errorCount} error{(errorCount != 1 ? "s" : "")}", isError: true);
+                    SetStatus($"Parameters: {errorCount} error{(errorCount != 1 ? "s" : "")}", isError: true);
                 }
 
                 // Add error markers to editor silently
@@ -4953,7 +4930,7 @@ public partial class MainWindow : Window
     private void ClearButton_Click(object sender, RoutedEventArgs e)
     {
         CanvasRenderer.Instance.Clear();
-        RenderCanvas.ClearShapes();
+        ViewportHost.ClearShapes();
         TransactionManager.Instance.Clear(); // Clear undo stack
         SetStatus("Canvas cleared", isError: false);
     }
@@ -5029,7 +5006,7 @@ public partial class MainWindow : Window
     {
         SetPaneVisible("ds.tool.canvas", true);
         UpdateLayout();
-        RenderCanvas.UpdateLayout();
+        ViewportHost.UpdateLayout();
     }
 
     private void ExportCanvasToPng(string filePath, Brush? overrideBackground = null, bool includeGrid = true,
@@ -5038,29 +5015,29 @@ public partial class MainWindow : Window
         EnsureCanvasReadyForCapture();
 
         // Save current state
-        bool wasGridShown = RenderCanvas.ShowGrid;
-        var originalBackground = RenderCanvas.CanvasBackground;
+        bool wasGridShown = ViewportHost.ShowGrid;
+        var originalBackground = ViewportHost.CanvasBackground;
 
         // The overlay layer is a visual child of the canvas and every capture below renders the
         // canvas, so without this the F10 readout and any selection handles land in the PNG.
-        using var overlayOff = RenderCanvas.SuppressOverlayForCapture();
+        using var overlayOff = ViewportHost.SuppressOverlayForCapture();
 
         try
         {
             // Apply export settings
-            RenderCanvas.ShowGrid = includeGrid;
+            ViewportHost.ShowGrid = includeGrid;
 
             // Set the export background (null means use current canvas background)
             if (overrideBackground != null)
             {
-                RenderCanvas.CanvasBackground = overrideBackground;
+                ViewportHost.CanvasBackground = overrideBackground;
             }
 
             // Allow visual to update
-            RenderCanvas.UpdateLayout();
+            ViewportHost.UpdateLayout();
 
-            var canvasWidth = (int)RenderCanvas.ActualWidth;
-            var canvasHeight = (int)RenderCanvas.ActualHeight;
+            var canvasWidth = (int)ViewportHost.ActualWidth;
+            var canvasHeight = (int)ViewportHost.ActualHeight;
 
             if (canvasWidth <= 0 || canvasHeight <= 0)
                 throw new InvalidOperationException($"Invalid Canvas Dimensions: {canvasWidth}x{canvasHeight}");
@@ -5075,7 +5052,7 @@ public partial class MainWindow : Window
             {
                 // Render canvas at its actual size first
                 var canvasRtb = new RenderTargetBitmap(canvasWidth, canvasHeight, 96, 96, PixelFormats.Pbgra32);
-                canvasRtb.Render(RenderCanvas);
+                canvasRtb.Render(ViewportHost);
 
                 // Scale uniformly to fit within custom size, preserving aspect ratio
                 double scaleX = (double)outputWidth / canvasWidth;
@@ -5104,7 +5081,7 @@ public partial class MainWindow : Window
             else
             {
                 rtb = new RenderTargetBitmap(outputWidth, outputHeight, 96, 96, PixelFormats.Pbgra32);
-                rtb.Render(RenderCanvas);
+                rtb.Render(ViewportHost);
             }
 
             var encoder = new PngBitmapEncoder();
@@ -5116,9 +5093,9 @@ public partial class MainWindow : Window
         finally
         {
             // Restore original state
-            RenderCanvas.CanvasBackground = originalBackground;
-            RenderCanvas.ShowGrid = wasGridShown;
-            RenderCanvas.UpdateLayout();
+            ViewportHost.CanvasBackground = originalBackground;
+            ViewportHost.ShowGrid = wasGridShown;
+            ViewportHost.UpdateLayout();
         }
     }
 
@@ -5147,8 +5124,27 @@ public partial class MainWindow : Window
             try
             {
                 var exporter = new DxfExporter();
-                exporter.Export(shapes, dialog.FileName);
-                SetStatus($"Exported: {Path.GetFileName(dialog.FileName)}", isError: false);
+                if (ViewportHost.IsDivided)
+                {
+                    // R12 DXF has no viewport concept, so a divided drawing is flattened into model
+                    // space laid out like the screen. Said out loud, because the coordinates in the
+                    // file are then screen distances rather than the ones the code produced.
+                    EnsureCanvasReadyForCapture();
+                    var flattened = ViewportHost.FlattenForModelSpace();
+                    exporter.Export(flattened, dialog.FileName);
+
+                    Console.ConsoleOutput.Instance.WriteLine("Export", 0,
+                        $"Exported {ViewportHost.Canvases.Count} viewports tiled into DXF model space. " +
+                        "DXF has no viewport concept, so each cell was scaled by its own zoom and " +
+                        "moved into place — coordinates in the file are screen distances, not the " +
+                        "drawing's own. Export a single undivided viewport for true coordinates.");
+                    SetStatus($"Exported {ViewportHost.Canvases.Count} viewports tiled (coordinates rescaled)", isError: false);
+                }
+                else
+                {
+                    exporter.Export(shapes, dialog.FileName);
+                    SetStatus($"Exported: {Path.GetFileName(dialog.FileName)}", isError: false);
+                }
             }
             catch (Exception ex)
             {
@@ -5203,9 +5199,25 @@ public partial class MainWindow : Window
             try
             {
                 var exporter = new PdfExporter();
-                exporter.Export(shapes, dialog.FileName,
-                    options.PageWidthMm, options.PageHeightMm,
-                    options.ScaleMmPerUnit, options.MarginMm);
+                if (ViewportHost.IsDivided)
+                {
+                    // Tiled as it appears on screen. The page-setup scale is not carried across:
+                    // "1 unit = N mm" has no single answer once the cells are at different zooms.
+                    EnsureCanvasReadyForCapture();
+                    var tiles = ViewportHost.GetTiles()
+                        .Select(t => new PdfExporter.PdfTile(
+                            t.DeviceRect, t.Scale, t.Canvas.Viewport.PanX, t.Canvas.Viewport.PanY, t.Shapes))
+                        .ToList();
+
+                    exporter.ExportTiled(tiles, dialog.FileName,
+                        ViewportHost.ActualWidth, ViewportHost.ActualHeight, options.MarginMm);
+                }
+                else
+                {
+                    exporter.Export(shapes, dialog.FileName,
+                        options.PageWidthMm, options.PageHeightMm,
+                        options.ScaleMmPerUnit, options.MarginMm);
+                }
                 SetStatus($"Exported: {Path.GetFileName(dialog.FileName)}", isError: false);
             }
             catch (Exception ex)
@@ -5239,7 +5251,25 @@ public partial class MainWindow : Window
         {
             try
             {
-                Canvas.SvgExporter.SaveToFile(dialog.FileName, shapes);
+                if (ViewportHost.IsDivided)
+                {
+                    // A divided drawing exports tiled, as it appears on screen. An undivided one
+                    // keeps the historical path untouched: that one fits the *shapes* with padding
+                    // and ignores the view entirely, which is a different picture and the one every
+                    // existing export has produced.
+                    EnsureCanvasReadyForCapture();
+                    var tiles = ViewportHost.GetTiles()
+                        .Select(t => new Canvas.SvgExporter.SvgTile(
+                            t.DeviceRect, t.Scale, t.Canvas.Viewport.PanX, t.Canvas.Viewport.PanY, t.Shapes))
+                        .ToList();
+
+                    Canvas.SvgExporter.SaveTiledToFile(
+                        dialog.FileName, tiles, ViewportHost.ActualWidth, ViewportHost.ActualHeight);
+                }
+                else
+                {
+                    Canvas.SvgExporter.SaveToFile(dialog.FileName, shapes);
+                }
                 SetStatus($"Exported: {Path.GetFileName(dialog.FileName)}", isError: false);
             }
             catch (Exception ex)
@@ -5310,24 +5340,24 @@ public partial class MainWindow : Window
         EnsureCanvasReadyForCapture();
 
         // Save current state
-        bool wasGridShown = RenderCanvas.ShowGrid;
-        var originalBackground = RenderCanvas.CanvasBackground;
+        bool wasGridShown = ViewportHost.ShowGrid;
+        var originalBackground = ViewportHost.CanvasBackground;
         bool wasPlaying = timeline.IsPlaying;
 
         // Keep the F10 readout and selection handles out of every captured frame.
-        using var overlayOff = RenderCanvas.SuppressOverlayForCapture();
+        using var overlayOff = ViewportHost.SuppressOverlayForCapture();
 
         try
         {
             // Apply export settings
-            RenderCanvas.ShowGrid = includeGrid;
+            ViewportHost.ShowGrid = includeGrid;
             if (overrideBackground != null)
             {
-                RenderCanvas.CanvasBackground = overrideBackground;
+                ViewportHost.CanvasBackground = overrideBackground;
             }
 
-            var width = (int)RenderCanvas.ActualWidth;
-            var height = (int)RenderCanvas.ActualHeight;
+            var width = (int)ViewportHost.ActualWidth;
+            var height = (int)ViewportHost.ActualHeight;
 
             if (width <= 0 || height <= 0)
                 throw new InvalidOperationException($"Invalid Canvas Dimensions: {width}x{height}");
@@ -5349,14 +5379,14 @@ public partial class MainWindow : Window
                 timeline.Update(time);
 
                 // Force canvas to redraw with updated animation state
-                RenderCanvas.Refresh();
+                ViewportHost.Refresh();
 
                 // Force the dispatcher to process rendering and UI updates
                 Dispatcher.Invoke(() => { }, DispatcherPriority.Render);
 
                 // Capture frame
                 var rtb = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-                rtb.Render(RenderCanvas);
+                rtb.Render(ViewportHost);
 
                 encoder.AddFrame(rtb);
             }
@@ -5364,8 +5394,8 @@ public partial class MainWindow : Window
         finally
         {
             // Restore original state
-            RenderCanvas.CanvasBackground = originalBackground;
-            RenderCanvas.ShowGrid = wasGridShown;
+            ViewportHost.CanvasBackground = originalBackground;
+            ViewportHost.ShowGrid = wasGridShown;
 
             // Restore timeline to end if it was playing
             if (wasPlaying)
@@ -5373,7 +5403,7 @@ public partial class MainWindow : Window
                 timeline.Update(timeline.Duration);
             }
 
-            RenderCanvas.Refresh();
+            ViewportHost.Refresh();
         }
     }
 
@@ -5393,7 +5423,7 @@ public partial class MainWindow : Window
         var optionsDialog = new VideoExportOptionsWindow();
         optionsDialog.Owner = this;
         optionsDialog.SetDuration(timeline.Duration);
-        optionsDialog.SetCanvasSize((int)RenderCanvas.ActualWidth, (int)RenderCanvas.ActualHeight);
+        optionsDialog.SetCanvasSize((int)ViewportHost.ActualWidth, (int)ViewportHost.ActualHeight);
 
         if (optionsDialog.ShowDialog() != true) return;
 
@@ -5440,23 +5470,23 @@ public partial class MainWindow : Window
     {
         EnsureCanvasReadyForCapture();
 
-        bool wasGridShown = RenderCanvas.ShowGrid;
-        var originalBackground = RenderCanvas.CanvasBackground;
+        bool wasGridShown = ViewportHost.ShowGrid;
+        var originalBackground = ViewportHost.CanvasBackground;
         bool wasPlaying = timeline.IsPlaying;
 
         // Keep the F10 readout and selection handles out of every captured frame.
-        using var overlayOff = RenderCanvas.SuppressOverlayForCapture();
+        using var overlayOff = ViewportHost.SuppressOverlayForCapture();
 
         try
         {
-            RenderCanvas.ShowGrid = includeGrid;
+            ViewportHost.ShowGrid = includeGrid;
             if (overrideBackground != null)
             {
-                RenderCanvas.CanvasBackground = overrideBackground;
+                ViewportHost.CanvasBackground = overrideBackground;
             }
 
-            var canvasWidth = (int)RenderCanvas.ActualWidth;
-            var canvasHeight = (int)RenderCanvas.ActualHeight;
+            var canvasWidth = (int)ViewportHost.ActualWidth;
+            var canvasHeight = (int)ViewportHost.ActualHeight;
 
             if (canvasWidth <= 0 || canvasHeight <= 0)
                 throw new InvalidOperationException($"Invalid Canvas Dimensions: {canvasWidth}x{canvasHeight}");
@@ -5480,7 +5510,7 @@ public partial class MainWindow : Window
                 double time = i * timeStep;
                 timeline.Update(time);
 
-                RenderCanvas.Refresh();
+                ViewportHost.Refresh();
                 Dispatcher.Invoke(() => { }, DispatcherPriority.Render);
 
                 RenderTargetBitmap rtb;
@@ -5500,7 +5530,7 @@ public partial class MainWindow : Window
                     // Higher DPI = WPF renders more pixels for the same logical size
                     double targetDpi = 96 * scale;
                     var canvasRtb = new RenderTargetBitmap(scaledPixelWidth, scaledPixelHeight, targetDpi, targetDpi, PixelFormats.Pbgra32);
-                    canvasRtb.Render(RenderCanvas);
+                    canvasRtb.Render(ViewportHost);
 
                     // Calculate centering offset for letterbox/pillarbox
                     double offsetX = (width - scaledPixelWidth) / 2.0;
@@ -5511,7 +5541,7 @@ public partial class MainWindow : Window
                     using (var dc = drawingVisual.RenderOpen())
                     {
                         // Fill background first (for letterbox/pillarbox areas)
-                        var bgBrush = overrideBackground ?? RenderCanvas.CanvasBackground ?? Brushes.Black;
+                        var bgBrush = overrideBackground ?? ViewportHost.CanvasBackground ?? Brushes.Black;
                         dc.DrawRectangle(bgBrush, null, new Rect(0, 0, width, height));
 
                         // Draw the high-res render centered (no scaling, 1:1 pixels)
@@ -5524,7 +5554,7 @@ public partial class MainWindow : Window
                 else
                 {
                     rtb = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-                    rtb.Render(RenderCanvas);
+                    rtb.Render(ViewportHost);
                 }
 
                 encoder.AddFrame(rtb);
@@ -5532,23 +5562,22 @@ public partial class MainWindow : Window
         }
         finally
         {
-            RenderCanvas.CanvasBackground = originalBackground;
-            RenderCanvas.ShowGrid = wasGridShown;
+            ViewportHost.CanvasBackground = originalBackground;
+            ViewportHost.ShowGrid = wasGridShown;
 
             if (wasPlaying)
             {
                 timeline.Update(timeline.Duration);
             }
 
-            RenderCanvas.Refresh();
+            ViewportHost.Refresh();
         }
     }
 
     private void GridMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        if (RenderCanvas != null)
         {
-            RenderCanvas.ShowGrid = GridMenuItem.IsChecked;
+            ViewportHost.ShowGrid = GridMenuItem.IsChecked;
 
             // Save to application settings
             ApplicationSettings.Instance.ShowGrid = GridMenuItem.IsChecked;
@@ -5735,7 +5764,7 @@ public partial class MainWindow : Window
             if (!visible) return;
             InitializePropertiesPanel();
             DockedPropertiesContainer.Child = _propertiesPanel;
-            _propertiesPanel?.UpdateSelection(RenderCanvas.SelectionTool.SelectedShapes.ToList());
+            _propertiesPanel?.UpdateSelection(ViewportHost.SelectedShapes.ToList());
         });
 
         Register("ds.tool.globalparameters", GlobalParametersPane, ShowGlobalParametersMenuItem, visible =>
@@ -6271,17 +6300,16 @@ public partial class MainWindow : Window
         {
             if (!ModuleCompiler.HasResidentAssembly)
             {
-                await AutoRunCodeAsync();
+                await RunSilentlyAsync();
                 return;
             }
 
-            C2VGeometry.Shape.AutoRegister = ApplicationSettings.Instance.AutoDraw;
             var result = await ModuleCompiler.ReExecuteResidentAsync();
 
             if (result.Success)
             {
                 var shapes = CanvasRenderer.Instance.GetShapes();
-                CanvasRenderer.Instance.RenderTo(RenderCanvas);
+                CanvasRenderer.Instance.RenderTo(ViewportHost);
                 PopulateOutliner(shapes);
                 SetStatus($"Parameters: {shapes.Count} shape{(shapes.Count != 1 ? "s" : "")}", isError: false);
             }
@@ -6320,7 +6348,7 @@ public partial class MainWindow : Window
         {
             // The source changed, so the resident IL is stale — force a real recompile.
             ModuleCompiler.InvalidateResident();
-            await AutoRunCodeAsync();
+            await RunSilentlyAsync();
             _globalParametersPanel?.RefreshValues();
         }
         else
@@ -6378,9 +6406,7 @@ public partial class MainWindow : Window
         {
             // Surgical replace keeps undo/redo and the caret intact — resetting CodeEditor.Text
             // would scroll the view and blow away the undo stack on every commit.
-            _suppressAutoUpdate = true;
-            try { CodeEditor.Document.Replace(span.Offset, span.Length, literal); }
-            finally { _suppressAutoUpdate = false; }
+            CodeEditor.Document.Replace(span.Offset, span.Length, literal);
             SaveCurrentEditorContent();
         }
         else
@@ -6405,7 +6431,7 @@ public partial class MainWindow : Window
         _propertiesPanel = new PropertiesPanel();
         _propertiesPanel.ShapePropertyChanged += OnPropertiesPanelPropertyChanged;
         // Flex-slider drag: redraw the canvas only (no source-code sync) so dragging stays smooth.
-        _propertiesPanel.ShapeLivePreview += (_, __) => RenderCanvas.Refresh();
+        _propertiesPanel.ShapeLivePreview += (_, __) => ViewportHost.Refresh();
     }
 
     #region Interactive mode (user Mouse handlers)
@@ -6431,8 +6457,10 @@ public partial class MainWindow : Window
     {
         var interactive = IsCanvasInteractive;
 
-        CanvasNavPanel.Visibility = interactive ? Visibility.Visible : Visibility.Collapsed;
-        if (interactive) UpdateCanvasZoomReadout();
+        // The navigation overlay is no longer switched here: every cell reveals its own while the
+        // pointer is over it, in either mode. Interactive mode's guarantee — that there is still a
+        // way to zoom once user code owns the wheel — is unchanged, because hovering is a superset
+        // of it.
 
         // The status-bar hint describes gestures that no longer do what it says once user code owns
         // the mouse — scroll in particular is handed over wholesale.
@@ -6450,7 +6478,7 @@ public partial class MainWindow : Window
         {
             // Drop any selection made before the run so no stale handles are left on screen and the
             // outliner does not keep reporting a selection the canvas will not honour.
-            RenderCanvas.SelectionTool.ClearSelection();
+            ViewportHost.ClearSelection();
             SetPaneVisible("ds.tool.properties", false);
 
             // Deliberately not persisted: this is a temporary consequence of the running project, not
@@ -6463,29 +6491,7 @@ public partial class MainWindow : Window
             SetPaneVisible("ds.tool.properties", true);
         }
 
-        RenderCanvas.Refresh();
-    }
-
-    /// <summary>Updates the zoom percentage shown in the floating canvas controls.</summary>
-    private void UpdateCanvasZoomReadout()
-        => CanvasZoomText.Text = $"{RenderCanvas.Scale * 100:0.#}%";
-
-    private void CanvasZoomIn_Click(object sender, RoutedEventArgs e)
-    {
-        RenderCanvas.ZoomStep(zoomIn: true);
-        UpdateCanvasZoomReadout();
-    }
-
-    private void CanvasZoomOut_Click(object sender, RoutedEventArgs e)
-    {
-        RenderCanvas.ZoomStep(zoomIn: false);
-        UpdateCanvasZoomReadout();
-    }
-
-    private void CanvasZoomExtents_Click(object sender, RoutedEventArgs e)
-    {
-        RenderCanvas.ZoomExtents(CanvasRenderer.Instance.GetShapes());
-        UpdateCanvasZoomReadout();
+        ViewportHost.Refresh();
     }
 
     #endregion
@@ -6498,7 +6504,7 @@ public partial class MainWindow : Window
     private void OnPropertiesPanelPropertyChanged(object? sender, ShapePropertyChangedEventArgs e)
     {
         // Refresh canvas
-        RenderCanvas.Refresh();
+        ViewportHost.Refresh();
 
         // Update code (suppress auto-update to avoid recompiling and losing in-memory changes)
         var shape = e.Shape;
@@ -6557,17 +6563,9 @@ public partial class MainWindow : Window
 
             if (_activeFile == entryFile)
             {
-                _suppressAutoUpdate = true;
-                try
-                {
-                    var caretOffset = CodeEditor.CaretOffset;
-                    CodeEditor.Text = content;
-                    CodeEditor.CaretOffset = Math.Min(caretOffset, content.Length);
-                }
-                finally
-                {
-                    _suppressAutoUpdate = false;
-                }
+                var caretOffset = CodeEditor.CaretOffset;
+                CodeEditor.Text = content;
+                CodeEditor.CaretOffset = Math.Min(caretOffset, content.Length);
             }
 
             RefreshFileTabs();
@@ -6583,7 +6581,7 @@ public partial class MainWindow : Window
         var dialog = new ZoomToShapeDialog { Owner = this };
         if (dialog.ShowDialog() == true && dialog.ShapeId.HasValue)
         {
-            if (RenderCanvas.ZoomToShape(dialog.ShapeId.Value))
+            if (ViewportHost.ZoomToShape(dialog.ShapeId.Value))
             {
                 SetStatus($"Zoomed to shape ID: {dialog.ShapeId.Value}", isError: false);
             }
@@ -6794,7 +6792,7 @@ public partial class MainWindow : Window
     {
         // HIGHEST PRIORITY: Drawing input when mouse is over canvas and waiting for next point
         // This intercepts digit keys to start distance input mode for precise drawing
-        if (RenderCanvas.IsMouseOver &&
+        if (ViewportHost.IsMouseOver &&
             RenderCanvas.DrawingTool.Mode != Canvas.DrawingMode.None &&
             RenderCanvas.DrawingTool.Points.Count > 0)
         {
@@ -6806,7 +6804,7 @@ public partial class MainWindow : Window
                 e.Handled = true;
                 if (RenderCanvas.DrawingTool.CycleInputMode())
                 {
-                    RenderCanvas.Refresh();
+                    ViewportHost.Refresh();
                     UpdateDrawingInputStatus();
                 }
                 return;
@@ -6816,7 +6814,7 @@ public partial class MainWindow : Window
             if (e.Key == Key.Escape && isInInputMode)
             {
                 RenderCanvas.DrawingTool.HandleEscapeInput();
-                RenderCanvas.Refresh();
+                ViewportHost.Refresh();
                 UpdateDrawingInputStatus();
                 e.Handled = true;
                 return;
@@ -6827,7 +6825,7 @@ public partial class MainWindow : Window
             {
                 if (RenderCanvas.DrawingTool.HandleBackspace())
                 {
-                    RenderCanvas.Refresh();
+                    ViewportHost.Refresh();
                     UpdateDrawingInputStatus();
                     e.Handled = true;
                 }
@@ -6855,7 +6853,7 @@ public partial class MainWindow : Window
 
                 if (RenderCanvas.DrawingTool.HandleCharInput(inputChar.Value))
                 {
-                    RenderCanvas.Refresh();
+                    ViewportHost.Refresh();
                     UpdateDrawingInputStatus();
                     e.Handled = true;
                 }
@@ -6872,7 +6870,7 @@ public partial class MainWindow : Window
                     {
                         // Simulate a click at the effective position
                         RenderCanvas.DrawingTool.OnLeftClick(effectivePoint);
-                        RenderCanvas.Refresh();
+                        ViewportHost.Refresh();
                         UpdateDrawingInputStatus();
                     }
                 }
@@ -7075,8 +7073,8 @@ public partial class MainWindow : Window
         {
             // Frame-timing readout. A diagnostic, so it is off unless asked for -- FrameMetrics
             // costs nothing while disabled.
-            RenderCanvas.ShowPerformanceHud = !RenderCanvas.ShowPerformanceHud;
-            SetStatus($"Performance HUD: {(RenderCanvas.ShowPerformanceHud ? "ON" : "OFF")}", isError: false);
+            ViewportHost.ShowPerformanceHud = !ViewportHost.ShowPerformanceHud;
+            SetStatus($"Performance HUD: {(ViewportHost.ShowPerformanceHud ? "ON" : "OFF")}", isError: false);
             e.Handled = true;
         }
         else if (e.Key == Key.F9 && Keyboard.Modifiers == ModifierKeys.None)
@@ -7085,7 +7083,7 @@ public partial class MainWindow : Window
             var newValue = !ApplicationSettings.Instance.SnapToGridEnabled;
             ApplicationSettings.Instance.SnapToGridEnabled = newValue;
             SnapToGridCheck.IsChecked = newValue;
-            RenderCanvas.SnapToGrid = newValue;
+            ViewportHost.SnapToGrid = newValue;
             ApplicationSettings.Save();
             SetStatus($"Snap to Grid: {(newValue ? "ON" : "OFF")}", isError: false);
             e.Handled = true;
@@ -7099,7 +7097,7 @@ public partial class MainWindow : Window
                 var digit = (char)('0' + (e.Key - Key.D0));
                 if (RenderCanvas.DrawingTool.HandleCharInput(digit))
                 {
-                    RenderCanvas.Refresh();
+                    ViewportHost.Refresh();
                     UpdateDrawingInputStatus();
                     e.Handled = true;
                 }
@@ -7109,7 +7107,7 @@ public partial class MainWindow : Window
                 var digit = (char)('0' + (e.Key - Key.NumPad0));
                 if (RenderCanvas.DrawingTool.HandleCharInput(digit))
                 {
-                    RenderCanvas.Refresh();
+                    ViewportHost.Refresh();
                     UpdateDrawingInputStatus();
                     e.Handled = true;
                 }
@@ -7119,7 +7117,7 @@ public partial class MainWindow : Window
             {
                 if (RenderCanvas.DrawingTool.HandleCharInput('.'))
                 {
-                    RenderCanvas.Refresh();
+                    ViewportHost.Refresh();
                     UpdateDrawingInputStatus();
                     e.Handled = true;
                 }
@@ -7129,7 +7127,7 @@ public partial class MainWindow : Window
             {
                 if (RenderCanvas.DrawingTool.HandleCharInput('-'))
                 {
-                    RenderCanvas.Refresh();
+                    ViewportHost.Refresh();
                     UpdateDrawingInputStatus();
                     e.Handled = true;
                 }
@@ -7139,7 +7137,7 @@ public partial class MainWindow : Window
             {
                 if (RenderCanvas.DrawingTool.HandleBackspace())
                 {
-                    RenderCanvas.Refresh();
+                    ViewportHost.Refresh();
                     UpdateDrawingInputStatus();
                     e.Handled = true;
                 }
@@ -7154,7 +7152,7 @@ public partial class MainWindow : Window
                     if (effectivePoint != null)
                     {
                         RenderCanvas.DrawingTool.OnLeftClick(effectivePoint);
-                        RenderCanvas.Refresh();
+                        ViewportHost.Refresh();
                         UpdateDrawingStatus();
                     }
                     e.Handled = true;
@@ -7167,7 +7165,7 @@ public partial class MainWindow : Window
             if (RenderCanvas.DrawingTool.InputMode != Canvas.DrawingInputMode.None)
             {
                 RenderCanvas.DrawingTool.HandleEscapeInput();
-                RenderCanvas.Refresh();
+                ViewportHost.Refresh();
                 UpdateDrawingStatus();
                 e.Handled = true;
             }
@@ -7182,15 +7180,15 @@ public partial class MainWindow : Window
             else if (RenderCanvas.MeasuringTool.Mode == Canvas.ToolMode.Measuring)
             {
                 RenderCanvas.MeasuringTool.CancelMeasuring();
-                RenderCanvas.Refresh();
+                ViewportHost.Refresh();
                 SetStatus("Measuring cancelled", isError: false);
                 e.Handled = true;
             }
             // Clear selection if in selection mode
-            else if (RenderCanvas.IsSelectionMode && RenderCanvas.SelectionTool.SelectedShapes.Count > 0)
+            else if (RenderCanvas.IsSelectionMode && ViewportHost.SelectedShapes.Count > 0)
             {
-                RenderCanvas.SelectionTool.ClearSelection();
-                RenderCanvas.Refresh();
+                ViewportHost.ClearSelection();
+                ViewportHost.Refresh();
                 SetStatus("Selection cleared", isError: false);
                 e.Handled = true;
             }
@@ -7198,7 +7196,7 @@ public partial class MainWindow : Window
         // Delete key - delete selected shapes (only when no text input is focused)
         else if (e.Key == Key.Delete && !CodeEditor.IsKeyboardFocusWithin && !IsTextInputFocused())
         {
-            if (RenderCanvas.IsSelectionMode && RenderCanvas.SelectionTool.SelectedShapes.Count > 0)
+            if (RenderCanvas.IsSelectionMode && ViewportHost.SelectedShapes.Count > 0)
             {
                 DeleteSelectedShapes();
                 e.Handled = true;
@@ -7229,8 +7227,10 @@ public partial class MainWindow : Window
                     // Select all shapes (when not in editor)
                     if (RenderCanvas.IsSelectionMode)
                     {
-                        RenderCanvas.SelectionTool.SelectAll(RenderCanvas.GetCurrentShapes());
-                        RenderCanvas.Refresh();
+                        // "Select all" means the whole drawing, so every cell selects its own —
+                        // a selection cannot span canvases, but the command should not stop at one.
+                        ViewportHost.ForEach(c => c.SelectionTool.SelectAll(c.GetCurrentShapes()));
+                        ViewportHost.Refresh();
                         var count = RenderCanvas.SelectionTool.SelectedShapes.Count;
                         SetStatus($"Selected {count} shape{(count != 1 ? "s" : "")}", isError: false);
                         e.Handled = true;
@@ -7263,10 +7263,10 @@ public partial class MainWindow : Window
 
         // Clear selection first — the shapes are about to leave the canvas.
         var count = selectedShapes.Count;
-        RenderCanvas.SelectionTool.ClearSelection();
+        ViewportHost.ClearSelection();
 
         TransactionManager.Instance.Execute(new DeleteShapesWithCodeCommand(
-            selectedShapes, RenderCanvas, edits, ApplyFileContentFromCommand));
+            selectedShapes, ViewportHost, edits, ApplyFileContentFromCommand));
 
         // Say plainly when the canvas and the code have diverged. Reporting "Deleted 1 shape" while
         // the declaration is still sitting in the file is how this went unnoticed: the next run just
@@ -7334,7 +7334,7 @@ public partial class MainWindow : Window
             SetStatus("Ready", isError: false);
         }
 
-        RenderCanvas.Refresh();
+        ViewportHost.Refresh();
     }
 
     private void OnMeasurementCompleted(object? sender, double distance)
@@ -7369,11 +7369,11 @@ public partial class MainWindow : Window
 
     private void EnableSelectionMode()
     {
-        RenderCanvas.IsSelectionMode = true;
+        ViewportHost.IsSelectionMode = true;
         RenderCanvas.Cursor = Cursors.Arrow;
-        RenderCanvas.SelectionTool.RefreshSnapSettings();
+        ViewportHost.RefreshSnapSettings();
         SetStatus("Selection mode: Click to select, Shift+Click to add, Ctrl+Click to toggle", isError: false);
-        RenderCanvas.Refresh();
+        ViewportHost.Refresh();
     }
 
     private void OnSelectionChanged(object? sender, EventArgs e)
@@ -7423,21 +7423,10 @@ public partial class MainWindow : Window
             // Update the editor if this file is currently displayed
             if (_activeFile == entryFile)
             {
-                _suppressAutoUpdate = true;
-                try
-                {
-                    // Save cursor position
-                    var caretOffset = CodeEditor.CaretOffset;
-
-                    CodeEditor.Text = newContent;
-
-                    // Restore cursor position (clamped to valid range)
-                    CodeEditor.CaretOffset = Math.Min(caretOffset, newContent.Length);
-                }
-                finally
-                {
-                    _suppressAutoUpdate = false;
-                }
+                // Save and restore the caret: assigning Text sends it to 0.
+                var caretOffset = CodeEditor.CaretOffset;
+                CodeEditor.Text = newContent;
+                CodeEditor.CaretOffset = Math.Min(caretOffset, newContent.Length);
             }
 
             // Mark as modified
@@ -7593,8 +7582,8 @@ public partial class MainWindow : Window
         }
 
         // Disable selection mode when drawing
-        RenderCanvas.IsSelectionMode = false;
-        RenderCanvas.SelectionTool.ClearSelection();
+        ViewportHost.IsSelectionMode = false;
+        ViewportHost.ClearSelection();
 
         var tool = RenderCanvas.DrawingTool;
         tool.SetMode(mode);
@@ -7615,7 +7604,7 @@ public partial class MainWindow : Window
         tool.TextPlacementRequested += OnTextPlacementRequested;
         tool.RefreshSnapSettings();
 
-        RenderCanvas.Refresh();
+        ViewportHost.Refresh();
     }
 
     private void CancelDrawingTool()
@@ -7627,7 +7616,7 @@ public partial class MainWindow : Window
         // Reset cursor to normal
         RenderCanvas.Cursor = Cursors.Arrow;
 
-        RenderCanvas.Refresh();
+        ViewportHost.Refresh();
     }
 
     private void UpdateDrawingStatus()
@@ -11813,7 +11802,7 @@ public class {typeName}
         _animationStopwatch.Reset();
         _lastAnimationFrameTime = -1;
         timeline.Update(0);
-        RenderCanvas.Refresh();
+        ViewportHost.Refresh();
 
         PlayPauseBtn.Content = "\u25B6"; // Play symbol
         TimeDisplay.Text = $"0.00s / {timeline.Duration:F2}s";

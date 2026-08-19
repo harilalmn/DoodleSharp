@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using C2VGeometry;
 
 namespace DoodleSharp.Animation;
@@ -94,6 +94,19 @@ public sealed class MouseInfo
     /// Supplies <see cref="Target"/> on demand. Called at most once, and only if a handler actually
     /// reads <see cref="Target"/>.
     /// </param>
+    /// <summary>
+    /// Which viewport the pointer was in. The root when the drawing is undivided, which is every
+    /// drawing that never sets <c>Viewports.Rows</c> or <c>Viewports.Columns</c>.
+    ///
+    /// <para>
+    /// Handlers are registered once for the whole drawing, not per cell — a pointer has one
+    /// <c>onmousemove</c> — so this is how a handler tells cells apart:
+    /// <c>if (e.Viewport == Viewports[0][1]) …</c>. Compared by reference: a viewport keeps its
+    /// identity across every resize that does not remove it.
+    /// </para>
+    /// </summary>
+    public Viewport Viewport { get; }
+
     public MouseInfo(
         MouseEventKind kind,
         VXYZ position,
@@ -110,8 +123,10 @@ public sealed class MouseInfo
         int clickCount = 0,
         int wheelDelta = 0,
         double scale = 1.0,
-        Func<VXYZ, Shape?>? hitTest = null)
+        Func<VXYZ, Shape?>? hitTest = null,
+        Viewport? viewport = null)
     {
+        Viewport = viewport ?? Viewport.Root;
         Kind = kind;
         Position = position;
         RawPosition = rawPosition;

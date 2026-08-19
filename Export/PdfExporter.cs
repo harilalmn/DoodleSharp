@@ -157,6 +157,102 @@ public class PdfExporter
         document.Save(filePath);
     }
 
+    /// <summary>One cell of a divided drawing: where it sits on the page, and the view it is showing.</summary>
+    /// <param name="PageRect">The cell's rectangle within the on-screen container, in device pixels.</param>
+    /// <param name="Scale">Screen pixels per world unit in that cell — that cell's own zoom.</param>
+    /// <param name="PanX">The cell's horizontal pan, in pixels.</param>
+    /// <param name="PanY">The cell's vertical pan, in pixels.</param>
+    /// <param name="Shapes">The shapes placed on that cell.</param>
+    public readonly record struct PdfTile(
+        System.Windows.Rect PageRect,
+        double Scale,
+        double PanX,
+        double PanY,
+        IReadOnlyList<IDrawable> Shapes);
+
+    /// <summary>
+    /// Exports a divided drawing: every cell tiled onto one page exactly as it appears on screen,
+    /// each at its own pan and zoom, fitted to the page as a whole.
+    ///
+    /// <para>
+    /// The page keeps the container's aspect ratio and the cells keep their relative positions, so
+    /// the result is the screen on paper. <c>ScaleMmPerUnit</c> has no meaning across cells at
+    /// different zooms and is deliberately not offered here.
+    /// </para>
+    /// </summary>
+    public void ExportTiled(IReadOnlyList<PdfTile> tiles, string filePath,
+        double containerWidth, double containerHeight, double marginMm = 10)
+    {
+        if (tiles.Count == 0 || containerWidth <= 0 || containerHeight <= 0) return;
+
+        const double mmToPoints = 72.0 / 25.4;
+        var marginPt = marginMm * mmToPoints;
+
+        // A4 landscape or portrait, whichever matches the container better — the drawing is a view,
+        // not a measured plan, so fitting it to a familiar sheet beats inventing a page size.
+        var landscape = containerWidth >= containerHeight;
+        var pageWPt = (landscape ? 297.0 : 210.0) * mmToPoints;
+        var pageHPt = (landscape ? 210.0 : 297.0) * mmToPoints;
+
+        var document = new PdfDocument();
+        document.Info.Title = "DoodleSharp Export";
+
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(pageWPt);
+        page.Height = XUnit.FromPoint(pageHPt);
+
+        using var gfx = XGraphics.FromPdfPage(page);
+
+        // One fit for the whole container, so the cells keep their proportions to each other.
+        var fit = Math.Min((pageWPt - 2 * marginPt) / containerWidth,
+                           (pageHPt - 2 * marginPt) / containerHeight);
+        var originX = (pageWPt - containerWidth * fit) / 2;
+        var originY = (pageHPt - containerHeight * fit) / 2;
+
+        foreach (var tile in tiles)
+        {
+            var r = tile.PageRect;
+
+            var state = gfx.Save();
+
+            gfx.IntersectClip(new XRect(
+                originX + r.X * fit, originY + r.Y * fit, r.Width * fit, r.Height * fit));
+
+            // world -> page, in one composition: the cell's own view, then the cell's position in
+            // the container, then the container's fit to the sheet.
+            gfx.TranslateTransform(
+                originX + (r.X + r.Width / 2 + tile.PanX) * fit,
+                originY + (r.Y + r.Height / 2 + tile.PanY) * fit);
+            gfx.ScaleTransform(tile.Scale * fit, -tile.Scale * fit);
+
+            // Line weights and point markers are device sizes, so they must be divided back out of
+            // the transform or a zoomed-in cell would print with fat strokes. Recomputed per tile
+            // because every cell has its own zoom — a single value would be wrong for all but one.
+            _uiSizeScale = 1.0 / (tile.Scale * fit);
+
+            foreach (var drawable in tile.Shapes)
+            {
+                if (drawable is Shape shape && shape.IsVisible) DrawShape(gfx, shape);
+            }
+
+            gfx.Restore(state);
+        }
+
+        // The cell separators, so the tiling is as legible on paper as on screen.
+        if (tiles.Count > 1)
+        {
+            var pen = new XPen(XColors.Gray, 0.5);
+            foreach (var tile in tiles)
+            {
+                var r = tile.PageRect;
+                gfx.DrawRectangle(pen, new XRect(
+                    originX + r.X * fit, originY + r.Y * fit, r.Width * fit, r.Height * fit));
+            }
+        }
+
+        document.Save(filePath);
+    }
+
     private BoundingBox GetBounds(IReadOnlyList<IDrawable> shapes)
     {
         double minX = double.MaxValue, minY = double.MaxValue;

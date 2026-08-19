@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Runtime.Loader;
@@ -87,11 +87,12 @@ public class SketchFrameShapesTests : IDisposable
 
         var push = source.IndexOf("SetFrameShapes", tick, StringComparison.Ordinal);
         Assert.True(push >= 0,
-            "The sketch frame loop must call RenderCanvas.SetFrameShapes(...) after Tick(). Without " +
+            "The sketch frame loop must push this frame's shapes to every cell after Tick(). Without " +
             "it the canvas repaints the snapshot Render() took at Run time and the sketch sits on " +
             "frame 0 — see the class remarks.");
 
-        var refresh = source.IndexOf("RenderCanvas.Refresh()", tick, StringComparison.Ordinal);
+        // Fanned out over the viewport grid: each cell is handed the shapes placed on it.
+        var refresh = source.IndexOf("ViewportHost.Refresh()", tick, StringComparison.Ordinal);
         Assert.True(refresh >= 0, "Could not find the repaint following the sketch tick.");
 
         Assert.True(push < refresh,

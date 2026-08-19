@@ -1,4 +1,4 @@
-using Xunit;
+﻿using Xunit;
 using DoodleSharp.Editor;
 using ICSharpCode.AvalonEdit.CodeCompletion;
 using Microsoft.CodeAnalysis;
@@ -289,14 +289,13 @@ class Test {
         workspace.UpdateFile("file1.cs", "class A { }");
         workspace.UpdateFile("file2.cs", "class B : A { }");
 
-        var compilation = workspace.GetCompilation();
-        // Should have 2 syntax trees
-        Assert.Equal(2, compilation.SyntaxTrees.Count());
+        // Counted excluding the synthetic global-using tree the workspace also carries, so this
+        // keeps measuring what it is about — the user's files — rather than the tree total.
+        Assert.Equal(2, UserTrees(workspace));
 
         // Update file1 - should replace, not add
         workspace.UpdateFile("file1.cs", "class A { int X; }");
-        compilation = workspace.GetCompilation();
-        Assert.Equal(2, compilation.SyntaxTrees.Count());
+        Assert.Equal(2, UserTrees(workspace));
     }
 
     [Fact]
@@ -310,11 +309,19 @@ class Test {
 
         workspace.UpdateFile("a.cs", "class A {}");
         workspace.UpdateFile("b.cs", "class B {}");
-        Assert.Equal(2, workspace.GetCompilation().SyntaxTrees.Count());
+        Assert.Equal(2, UserTrees(workspace));
 
         workspace.RemoveFile("a.cs");
-        Assert.Single(workspace.GetCompilation().SyntaxTrees);
+        Assert.Equal(1, UserTrees(workspace));
     }
+
+    /// <summary>
+    /// The workspace's trees minus the synthetic global-using one it always carries (so that
+    /// <c>Viewports</c> resolves in IntelliSense the same way it does at compile time).
+    /// </summary>
+    private static int UserTrees(CachedCompilationWorkspace workspace) =>
+        workspace.GetCompilation().SyntaxTrees
+            .Count(t => t.FilePath != DoodleSharp.Execution.SyntheticUsings.FilePath);
 
     // ---- Phase 2: FuzzyMatcher Tests ----
 

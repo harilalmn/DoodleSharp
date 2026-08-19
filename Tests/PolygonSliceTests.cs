@@ -263,5 +263,7 @@ public class PolygonSliceTests
         public void Clear() => Registered.Clear();
 
         public void NotifyOrderChanged(Shape shape) { }
+
+        public void Place(Shape shape, Viewport viewport) => Register(shape);
     }
 }

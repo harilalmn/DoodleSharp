@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Reflection;
 using System.Runtime.Loader;
 using Microsoft.CodeAnalysis;
@@ -777,6 +777,11 @@ public class ModuleCompiler
             // Using newRoot.SyntaxTree loses the file path!
             return tree.WithRootAndOptions(newRoot, tree.Options);
         }).ToList();
+
+        // The global-using tree that makes `Viewports` resolve unqualified. Its own file, so it
+        // shifts no offsets in the user's trees — which is why it is safe on the offset-faithful
+        // path as well as the execute one.
+        syntaxTrees.Insert(0, SyntheticUsings.Tree);
 
         Journal.Debug("EXEC.PARSE.DONE", "Syntax trees built",
             $"files={syntaxTrees.Count} forExecution={forExecution} chars={allSourceFiles.Sum(f => f.Content.Length)}");

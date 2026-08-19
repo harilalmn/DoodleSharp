@@ -46,6 +46,7 @@ public class CanvasApiTests : IDisposable
         public void Unregister(Shape s) => Shapes.Remove(s);
         public void Clear() { ClearCalls++; Shapes.Clear(); }
         public void NotifyOrderChanged(Shape s) { }
+        public void Place(Shape s, Viewport v) => Register(s);
     }
 
     [Fact]

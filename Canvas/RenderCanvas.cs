@@ -152,6 +152,43 @@ public class RenderCanvas : FrameworkElement
     public SelectionTool SelectionTool => _selectionTool ??= new SelectionTool();
 
     /// <summary>
+    /// Re-reads the snap settings for whichever tools this canvas has actually created.
+    ///
+    /// <para>
+    /// Deliberately goes through the backing fields rather than the three lazy properties: touching
+    /// those would force all three tools into existence on every cell of a grid, which is exactly
+    /// the cost the laziness exists to avoid. A tool created later picks the settings up itself.
+    /// </para>
+    /// </summary>
+    /// <summary>
+    /// Gives up this canvas's Direct3D device, if it holds one, and returns its slot to the budget.
+    /// Called when a layout change retires a cell — nothing used to destroy a canvas, so without
+    /// this a drawing that is divided and re-divided leaks a device each time.
+    /// </summary>
+    internal void ReleaseGpuBackend()
+    {
+        if (_gpuBackend == null) return;
+
+        _gpuBackend.Dispose();
+        _gpuBackend = null;
+        _gpuUploadedVersion = -1;
+        if (_gpuBackendsInUse > 0) _gpuBackendsInUse--;
+    }
+
+    public void RefreshToolSnapSettings()
+    {
+        _measuringTool?.RefreshSnapSettings();
+        _selectionTool?.RefreshSnapSettings();
+        _drawingTool?.RefreshSnapSettings();
+    }
+
+    /// <summary>
+    /// The viewport this canvas draws, set by the host that owns the grid. Null when the canvas is
+    /// used standalone, as the benchmark and the offscreen render harness do.
+    /// </summary>
+    internal C2VGeometry.Viewport? OwningViewport { get; set; }
+
+    /// <summary>
     /// Whether selection mode is active (vs drawing mode).
     /// </summary>
     public bool IsSelectionMode { get; set; } = true;
@@ -521,7 +558,10 @@ public class RenderCanvas : FrameworkElement
             scale: _viewport.Scale,
             // Deferred, so a handler that never asks "what is under the cursor?" never pays for the
             // spatial query. SelectionTool.HitTest reuses an internal buffer, so this allocates nothing.
-            hitTest: p => SelectionTool.HitTest(p, _sceneIndex, _viewport.Scale));
+            hitTest: p => SelectionTool.HitTest(p, _sceneIndex, _viewport.Scale),
+            // Which cell the event came from. Without it a handler in a divided drawing cannot tell
+            // where a click landed, and every cell's events look alike.
+            viewport: OwningViewport);
     }
 
     /// <summary>Maps the button this event is about, or None for a move/wheel/enter/leave.</summary>
@@ -1332,6 +1372,23 @@ public class RenderCanvas : FrameworkElement
         }
     }
 
+    /// <summary>
+    /// Whether this canvas is the one that paints the frame-timing readout.
+    ///
+    /// <para>
+    /// <see cref="Rendering.FrameMetrics"/> is a process-wide singleton, so a grid of canvases all
+    /// report into one set of numbers — which is honest, because the frame cost genuinely is the
+    /// whole frame. Painting that one readout on every cell would not be. F10 stays one key for one
+    /// diagnostic; the host points this at the cell the user is looking at.
+    /// </para>
+    ///
+    /// <para>
+    /// Defaults to true, so a canvas used on its own — the benchmark, the offscreen render harness —
+    /// behaves exactly as before.
+    /// </para>
+    /// </summary>
+    internal bool DrawsPerformanceHud { get; set; } = true;
+
     private bool _overlaySuppressed;
 
     /// <summary>
@@ -1379,7 +1436,7 @@ public class RenderCanvas : FrameworkElement
 
         if (ActualWidth <= 0 || ActualHeight <= 0) return;
 
-        if (_frameMetrics.IsEnabled) DrawPerformanceHud(dc);
+        if (_frameMetrics.IsEnabled && DrawsPerformanceHud) DrawPerformanceHud(dc);
 
         if (_highlightedShapeId.HasValue)
         {
@@ -3706,9 +3763,35 @@ public class RenderCanvas : FrameworkElement
     /// CPU paths at 4K.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// How many canvases may hold a Direct3D device at once.
+    ///
+    /// <para>
+    /// The backend is created lazily, per canvas — which was free while there was only ever one. A
+    /// grid of viewports would ask for one device per cell, and an 8x8 layout for sixty-four, which
+    /// integrated hardware will not survive. Two is the working set that matters: the cell being
+    /// navigated, plus one being switched to.
+    /// </para>
+    ///
+    /// <para>
+    /// A canvas that does not get a slot falls through to the CPU rasterizer. That needs no new
+    /// path, because the backend already fails soft by design — an exhausted budget is just another
+    /// reason it is unavailable. The visible consequence is worth stating: with the renderer forced
+    /// to GPU and the canvas divided, most cells quietly draw on a CPU path.
+    /// </para>
+    /// </summary>
+    private const int MaxGpuBackends = 2;
+
+    private static int _gpuBackendsInUse;
+
     private IReadOnlyList<Shape>? RenderThroughGpuBackend(int width, int height)
     {
-        _gpuBackend ??= new Rendering.Raster.D3D11RasterBackend();
+        if (_gpuBackend == null)
+        {
+            if (_gpuBackendsInUse >= MaxGpuBackends) return null;
+            _gpuBackend = new Rendering.Raster.D3D11RasterBackend();
+            _gpuBackendsInUse++;
+        }
 
         if (!_gpuBackend.Initialise())
         {

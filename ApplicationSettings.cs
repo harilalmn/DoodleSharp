@@ -9,9 +9,6 @@ public class AppSettingsData
     public string DefaultExportBackground { get; set; } = "Transparent";
     public bool ShowGrid { get; set; } = true;
     public bool ZoomToFitOnRun { get; set; } = false;
-    public bool AutoUpdateCanvas { get; set; } = true;
-    public int AutoUpdateDelayMs { get; set; } = 500;
-    public bool AutoDraw { get; set; } = true;
     public bool DrawPointAsPatch { get; set; } = false;
 
     /// <summary>

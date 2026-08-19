@@ -44,4 +44,25 @@ public interface IShapeRegistry
     /// </para>
     /// </summary>
     void NotifyOrderChanged(Shape shape);
+
+    /// <summary>
+    /// Called by <see cref="Shape.Place(Viewport)"/>: registers the shape if it is not already, and
+    /// assigns it to <paramref name="viewport"/>, moving it off whichever viewport it was on.
+    ///
+    /// <para>
+    /// A shape auto-registers when it is constructed, long before any <c>Place(viewport)</c> call,
+    /// so this is almost always a <b>move</b> rather than a first registration. That makes it a
+    /// change to the shape <i>set</i> from each viewport's point of view — a host that caches
+    /// per-viewport lists must drop them and bump whatever version counter its per-frame paths
+    /// compare, or the shape will keep drawing in the cell it came from.
+    /// </para>
+    ///
+    /// <para>
+    /// A separate member rather than a second meaning for <see cref="NotifyOrderChanged"/>: that one
+    /// names one precise question, and overloading it would let every existing implementation
+    /// compile while silently dropping viewport assignment. A compile error in an implementer is the
+    /// cheaper failure.
+    /// </para>
+    /// </summary>
+    void Place(Shape shape, Viewport viewport);
 }

@@ -19,6 +19,7 @@ public class NewConvenienceApiTests : IDisposable
         public void Unregister(Shape s) => Shapes.Remove(s);
         public void Clear() => Shapes.Clear();
         public void NotifyOrderChanged(Shape s) { }
+        public void Place(Shape s, Viewport v) => Register(s);
     }
 
     private readonly CountingRegistry _reg = new();

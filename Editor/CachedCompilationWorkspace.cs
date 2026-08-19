@@ -1,4 +1,5 @@
-using Microsoft.CodeAnalysis;
+using System.Linq;
+﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 
 namespace DoodleSharp.Editor;
@@ -17,9 +18,11 @@ public class CachedCompilationWorkspace
 
     public CachedCompilationWorkspace(IEnumerable<MetadataReference> references)
     {
+        // Carries the same synthetic global-using tree the execute path adds, so IntelliSense
+        // resolves `Viewports` instead of red-squiggling a name that compiles perfectly well.
         _compilation = CSharpCompilation.Create(
             "CompletionAnalysis",
-            Array.Empty<SyntaxTree>(),
+            new[] { DoodleSharp.Execution.SyntheticUsings.Tree },
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
     }
@@ -118,9 +121,11 @@ public class CachedCompilationWorkspace
     {
         lock (_lock)
         {
+            // _trees holds the user's files only, so the synthetic tree has to be re-added here or
+            // a NuGet change would silently take `Viewports` out of IntelliSense.
             _compilation = CSharpCompilation.Create(
                 "CompletionAnalysis",
-                _trees.Values,
+                _trees.Values.Prepend(DoodleSharp.Execution.SyntheticUsings.Tree),
                 references,
                 new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         }

@@ -1752,44 +1752,6 @@
                                                         Foreground="{StaticResource ForegroundBrush}"
                                                         Unchecked="SettingsZoomToFitCheck_Changed" />
 
-                                                    <!--  Auto-update Canvas  -->
-                                                    <TextBlock
-                                                        Grid.Row="24"
-                                                        Grid.Column="0"
-                                                        Margin="0,8,0,0"
-                                                        VerticalAlignment="Center"
-                                                        Foreground="{StaticResource ForegroundBrush}"
-                                                        Text="Auto-update Canvas:" />
-                                                    <CheckBox
-                                                        x:Name="SettingsAutoUpdateCanvasCheck"
-                                                        Grid.Row="24"
-                                                        Grid.Column="1"
-                                                        Margin="0,8,0,0"
-                                                        VerticalAlignment="Center"
-                                                        Checked="SettingsAutoUpdateCanvasCheck_Changed"
-                                                        Content="Enabled (updates after 500ms pause)"
-                                                        Foreground="{StaticResource ForegroundBrush}"
-                                                        Unchecked="SettingsAutoUpdateCanvasCheck_Changed" />
-
-                                                    <!--  Auto-Draw Shapes  -->
-                                                    <TextBlock
-                                                        Grid.Row="25"
-                                                        Grid.Column="0"
-                                                        Margin="0,8,0,0"
-                                                        VerticalAlignment="Center"
-                                                        Foreground="{StaticResource ForegroundBrush}"
-                                                        Text="Auto-Draw Shapes:" />
-                                                    <CheckBox
-                                                        x:Name="AutoUpdateCheck"
-                                                        Grid.Row="25"
-                                                        Grid.Column="1"
-                                                        Margin="0,8,0,0"
-                                                        VerticalAlignment="Center"
-                                                        Checked="AutoUpdateCheck_Changed"
-                                                        Content="Enabled"
-                                                        Foreground="{StaticResource ForegroundBrush}"
-                                                        Unchecked="AutoUpdateCheck_Changed" />
-
                                                     <!--  Draw Point As Patch  -->
                                                     <TextBlock
                                                         Grid.Row="26"
@@ -2003,51 +1965,7 @@
                         BorderBrush="{StaticResource BorderBrush}"
                         BorderThickness="0,0,1,0">
                         <Grid>
-                            <canvas:RenderCanvas x:Name="RenderCanvas" />
-
-                            <!--
-                                Canvas navigation overlay. Shown only in interactive mode — when user code
-                                has registered a Mouse handler, the canvas stops zooming on the wheel and
-                                on double-click, so there has to be another way to navigate.
-                            -->
-                            <Border
-                                x:Name="CanvasNavPanel"
-                                Margin="0,12,12,0"
-                                Padding="6,4"
-                                HorizontalAlignment="Right"
-                                VerticalAlignment="Top"
-                                Background="#CC1E1E1E"
-                                CornerRadius="6"
-                                Visibility="Collapsed">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock
-                                        x:Name="CanvasZoomText"
-                                        MinWidth="46"
-                                        Margin="4,0,8,0"
-                                        VerticalAlignment="Center"
-                                        Foreground="LightGray"
-                                        Text="100%"
-                                        ToolTip="Current zoom level" />
-                                    <Button
-                                        x:Name="CanvasZoomOutBtn"
-                                        Click="CanvasZoomOut_Click"
-                                        Content="&#x2212;"
-                                        Style="{StaticResource MediaButtonStyle}"
-                                        ToolTip="Zoom out" />
-                                    <Button
-                                        x:Name="CanvasZoomInBtn"
-                                        Click="CanvasZoomIn_Click"
-                                        Content="+"
-                                        Style="{StaticResource MediaButtonStyle}"
-                                        ToolTip="Zoom in" />
-                                    <Button
-                                        x:Name="CanvasZoomExtentsBtn"
-                                        Click="CanvasZoomExtents_Click"
-                                        Content="&#x2922;"
-                                        Style="{StaticResource MediaButtonStyle}"
-                                        ToolTip="Zoom to fit all shapes" />
-                                </StackPanel>
-                            </Border>
+                            <canvas:ViewportHost x:Name="ViewportHost" />
 
                             <!--  Animation Controls Overlay  -->
                             <Border

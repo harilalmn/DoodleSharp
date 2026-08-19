@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -224,21 +224,31 @@ public class MouseWiringTests
 
     // ── Interactive-mode chrome ──────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// The zoom overlay still exists, still starts hidden, and still offers the three gestures the
+    /// wheel gives up when user code owns the mouse.
+    ///
+    /// <para>
+    /// It lives in <c>ViewportCell</c> now, one per cell, revealed while the pointer is over that
+    /// cell — in either mode. Interactive mode's guarantee is unchanged, because hovering is a
+    /// superset of it; what changed is that with several cells an always-visible panel per cell
+    /// would be noise, and a revealed one also says which cell the pointer is on.
+    /// </para>
+    /// </summary>
     [Fact]
     public void TheNavigationOverlayExistsAndStartsHidden()
     {
-        var xaml = ReadRepoFile("MainWindow.xaml");
+        var cell = ReadRepoFile(System.IO.Path.Combine("Canvas", "ViewportCell.cs"));
 
-        Assert.Contains("x:Name=\"CanvasNavPanel\"", xaml);
-        Assert.Contains("x:Name=\"CanvasZoomInBtn\"", xaml);
-        Assert.Contains("x:Name=\"CanvasZoomOutBtn\"", xaml);
-        Assert.Contains("x:Name=\"CanvasZoomExtentsBtn\"", xaml);
-        Assert.Contains("x:Name=\"CanvasZoomText\"", xaml);
+        Assert.Contains("Visibility = Visibility.Collapsed", cell);
+        Assert.Contains("ZoomStep(false)", cell);
+        Assert.Contains("ZoomStep(true)", cell);
+        Assert.Contains("ZoomExtentsRequested", cell);
 
-        // It must not be visible for ordinary projects, which keep wheel zoom.
-        var panelAt = xaml.IndexOf("x:Name=\"CanvasNavPanel\"", StringComparison.Ordinal);
-        var panelEnd = xaml.IndexOf("</Border>", panelAt, StringComparison.Ordinal);
-        Assert.Contains("Visibility=\"Collapsed\"", xaml[panelAt..panelEnd]);
+        // Revealed on hover, and deliberately not hidden again on the way to a menu — the active
+        // cell has to survive the pointer leaving, or every keyboard shortcut loses its target.
+        Assert.Contains("MouseEnter += OnPointerEntered", cell);
+        Assert.Contains("MouseLeave += OnPointerLeft", cell);
     }
 
     [Fact]

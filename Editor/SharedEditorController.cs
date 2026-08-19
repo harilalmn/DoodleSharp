@@ -63,10 +63,6 @@ namespace DoodleSharp.Editor
         public Action<string, int, int> NavigateToLocation { get; set; } = (f, l, c) => { };
         public Action<string, List<RefactoringProvider.ReferenceLocation>> ShowReferences { get; set; } = (s, r) => { };
         
-        // Auto-run canvas callback (mainly DoodleSharp debounced auto-update)
-        public Func<Task> AutoRunCodeAsync { get; set; } = () => Task.CompletedTask;
-        public Func<bool> IsAutoUpdateEnabled { get; set; } = () => false;
-        public Func<int> GetAutoUpdateDelayMs { get; set; } = () => 1000;
 
         // Workspace Compilation Provider
         public Func<CachedCompilationWorkspace?> GetWorkspace { get; set; } = () => null;
@@ -90,7 +86,6 @@ namespace DoodleSharp.Editor
         private DispatcherTimer? _semanticUpdateTimer;
         private DispatcherTimer? _foldingTimer;
         private DispatcherTimer? _syntaxCheckTimer;
-        private DispatcherTimer? _autoUpdateTimer;
 
         // Overlays
         private CompletionWindow? _completionWindow;
@@ -107,7 +102,6 @@ namespace DoodleSharp.Editor
         private bool _textChangedSinceLastCheck;
         private bool _isAddingNextOccurrence;
         private bool _isMultiCursorEditing;
-        private bool _suppressAutoUpdate;
         
         public bool EnableInternalSyntaxCheck { get; set; } = true;
 
@@ -369,20 +363,9 @@ namespace DoodleSharp.Editor
             };
             _syntaxCheckTimer.Start();
 
-            _autoUpdateTimer = new DispatcherTimer();
-            _autoUpdateTimer.Tick += async (s, e) =>
-            {
-                _autoUpdateTimer.Stop();
-                if (IsAutoUpdateEnabled() && !_suppressAutoUpdate)
-                {
-                    await AutoRunCodeAsync();
-                }
-            };
-
             _editor.TextChanged += (s, e) =>
             {
                 _textChangedSinceLastCheck = true;
-                _suppressAutoUpdate = false;
 
                 // Keep the C# compilation workspace in sync
                 var ws = GetWorkspace();
@@ -393,13 +376,6 @@ namespace DoodleSharp.Editor
                 }
 
                 TriggerSemanticHighlightingUpdate();
-
-                if (IsAutoUpdateEnabled())
-                {
-                    _autoUpdateTimer.Interval = TimeSpan.FromMilliseconds(GetAutoUpdateDelayMs());
-                    _autoUpdateTimer.Stop();
-                    _autoUpdateTimer.Start();
-                }
             };
 
             // Font resizing via Ctrl+MouseWheel
