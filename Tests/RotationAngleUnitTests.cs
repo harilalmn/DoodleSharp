@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using C2VGeometry;
+using Xunit;
 
 namespace DoodleSharp.Tests;
 
@@ -78,5 +79,69 @@ public class RotationAngleUnitTests
 
         Assert.Equal(radians.OfVector(VXYZ.BasisX).X, degrees.OfVector(VXYZ.BasisX).X, Tol);
         Assert.Equal(radians.OfVector(VXYZ.BasisX).Y, degrees.OfVector(VXYZ.BasisX).Y, Tol);
+    }
+
+    // ── VXYZ.AngleTo: the second radians-in-a-degrees-library trap ───────────────────────────────
+    //
+    // Reported as "the text mask is slightly off axis when the line points towards negative X".
+    // The recipe was `text.Rotate(text.Location, dir.AngleTo(VXYZ.BasisX))` — and for a direction
+    // along -X, AngleTo answers pi, which lands in the degrees-taking Angle as a 3.14 DEGREE tilt.
+    // A bare label made that invisible; a filled mask rectangle made it obvious.
+
+    [Fact]
+    public void AngleToRadiansIsRadians()
+    {
+        Assert.Equal(Math.PI, new VXYZ(-1, 0).AngleToRadians(VXYZ.BasisX), Tol);
+        Assert.Equal(Math.PI / 2, VXYZ.BasisY.AngleToRadians(VXYZ.BasisX), Tol);
+        Assert.Equal(0, VXYZ.BasisX.AngleToRadians(VXYZ.BasisX), Tol);
+    }
+
+    [Fact]
+    public void AngleToDegreesIsTheDegreeSpelling()
+    {
+        Assert.Equal(180, new VXYZ(-1, 0).AngleToDegrees(VXYZ.BasisX), Tol);
+        Assert.Equal(90, VXYZ.BasisY.AngleToDegrees(VXYZ.BasisX), Tol);
+        Assert.Equal(45, new VXYZ(1, 1).AngleToDegrees(VXYZ.BasisX), Tol);
+    }
+
+    [Fact]
+    public void AngleToDegreesTurnsAReversedDirectionRightRoundNotByThreeDegrees()
+    {
+        // The reported symptom, as an assertion: rotating a label by the angle between its line and
+        // the X axis must be a half turn for a reversed line, not an almost-imperceptible tilt.
+        var reversed = new VXYZ(-1, 0);
+
+        Assert.Equal(180, reversed.AngleToDegrees(VXYZ.BasisX), Tol);
+        Assert.Equal(Math.PI, reversed.AngleToRadians(VXYZ.BasisX), Tol);
+        Assert.True(Math.Abs(reversed.AngleToRadians(VXYZ.BasisX) - 3.14) < 0.01,
+            "the radians answer really is the ~3.14 that was being read as degrees");
+    }
+
+    [Fact]
+    public void BothSpellingsAgreeAcrossTheRange()
+    {
+        for (int deg = 0; deg <= 180; deg += 15)
+        {
+            var v = VXYZ.BasisX.Rotate(deg);   // VXYZ.Rotate takes DEGREES
+            Assert.Equal(deg, v.AngleToDegrees(VXYZ.BasisX), 1e-6);
+            Assert.Equal(((double)deg).ToRadians(), v.AngleToRadians(VXYZ.BasisX), 1e-6);
+        }
+    }
+
+    [Fact]
+    public void ZeroLengthVectorsAnswerZeroInBothSpellings()
+    {
+        Assert.Equal(0, VXYZ.Zero.AngleToRadians(VXYZ.BasisX), Tol);
+        Assert.Equal(0, VXYZ.Zero.AngleToDegrees(VXYZ.BasisX), Tol);
+    }
+
+    [Fact]
+    public void TheAmbiguousNameStillWorksAndIsStillRadians()
+    {
+        // Deprecated, not redefined: making AngleTo return degrees would silently change every
+        // existing `Math.Cos(a.AngleTo(b))` in the wild. Note 70's precedent.
+#pragma warning disable CS0618
+        Assert.Equal(Math.PI, new VXYZ(-1, 0).AngleTo(VXYZ.BasisX), Tol);
+#pragma warning restore CS0618
     }
 }

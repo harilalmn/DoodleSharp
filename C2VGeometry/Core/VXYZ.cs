@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace C2VGeometry;
 
@@ -102,7 +102,26 @@ public class VXYZ
         return DotProduct(a.CrossProduct(b));
     }
 
-    public double AngleTo(VXYZ source)
+    /// <summary>
+    /// The unsigned angle between this vector and <paramref name="source"/>, <b>in radians</b>
+    /// (0 to π). Returns 0 when either vector has zero length.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the one query in the library that answers in radians, and it is the odd one out:
+    /// <c>Shape.Rotate</c>, <c>VXYZ.Rotate</c>, <c>VText.Angle</c>, <c>VArc</c>'s angles and
+    /// everything else take <b>degrees</b>. Feeding this straight into one of them is silently
+    /// wrong rather than obviously wrong — a direction reversed along X answers π, which lands as a
+    /// 3.14° tilt instead of a 180° turn, and only shows up as a label that looks very slightly
+    /// crooked. Use <see cref="AngleToDegrees"/> for the library's convention.
+    /// </para>
+    /// <para>
+    /// It is also <b>unsigned</b>, so it cannot tell a direction turned 45° up from one turned 45°
+    /// down. To orient something along a 2D direction, use
+    /// <c>Math.Atan2(dir.Y, dir.X).ToDegrees()</c>.
+    /// </para>
+    /// </remarks>
+    public double AngleToRadians(VXYZ source)
     {
         double dot = DotProduct(source);
         double lenProd = GetLength() * source.GetLength();
@@ -115,6 +134,34 @@ public class VXYZ
 
         return Math.Acos(cos);
     }
+
+    /// <summary>
+    /// The unsigned angle between this vector and <paramref name="source"/>, <b>in degrees</b>
+    /// (0 to 180) — the library's convention, so the result can be handed straight to
+    /// <c>Rotate</c>, <c>VText.Angle</c> and the rest. Returns 0 when either vector has zero length.
+    /// </summary>
+    /// <remarks>
+    /// Unsigned: a direction 45° above the X axis and one 45° below both answer 45. To orient
+    /// something along a 2D direction, where the sign matters, use
+    /// <c>Math.Atan2(dir.Y, dir.X).ToDegrees()</c>.
+    /// </remarks>
+    public double AngleToDegrees(VXYZ source) => AngleToRadians(source).ToDegrees();
+
+    /// <summary>
+    /// The unsigned angle between this vector and <paramref name="source"/>, in <b>radians</b>.
+    /// </summary>
+    /// <remarks>
+    /// Deprecated because the name says nothing about its unit while every rotation API in the
+    /// library takes degrees, and the mismatch is invisible: <c>text.Angle = dir.AngleTo(BasisX)</c>
+    /// on a direction pointing along −X assigns π as 3.14 <i>degrees</i>, which reads as a label
+    /// that is very slightly crooked rather than as a wrong answer. Behaviour is unchanged — this
+    /// forwards to <see cref="AngleToRadians"/>; only the name is retired, exactly as
+    /// <c>VTransform.CreateRotation</c> was.
+    /// </remarks>
+    [Obsolete("Ambiguous name: this returns RADIANS while the rest of the library works in degrees. " +
+              "Use AngleToDegrees for the library's convention, or AngleToRadians if you want radians. " +
+              "Behaviour is unchanged.")]
+    public double AngleTo(VXYZ source) => AngleToRadians(source);
 
     // Methods for implementation consistency
     public bool IsZeroLength() => IsZero(GetLength());

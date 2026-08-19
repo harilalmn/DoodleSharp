@@ -25,6 +25,14 @@ tags; this file is the curated, human-friendly summary.
   a `Mouse` or `Frame` callback.
 
 ### Changed
+- **`VXYZ.AngleTo` is deprecated in favour of `AngleToDegrees` / `AngleToRadians`.** It returns
+  radians, and this library works in degrees everywhere else — so
+  `text.Angle = dir.AngleTo(VXYZ.BasisX)` on a direction pointing along −X assigned π as **3.14
+  degrees**, drawing the label a hair crooked instead of turning it right round. Reported as a text
+  mask that looked "slightly off axis" on one half of a drawing and square on the other, because for
+  +X the answer is 0 in either unit. Behaviour of `AngleTo` is unchanged; only the name is retired.
+  Both spellings are unsigned (0–180 / 0–π) — to orient something *along* a direction, where the sign
+  matters, use `Math.Atan2(dir.Y, dir.X).ToDegrees()`.
 - **The IntelliSense list is alphabetical.** What you type still filters it, and matched characters
   are still shown in bold, but among what survives the filter the order is plain A–Z. It used to be
   ranked by expected type, match-score band, type-vs-member, scope and then *name length*, which put

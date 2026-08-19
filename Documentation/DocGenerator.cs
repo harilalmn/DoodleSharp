@@ -103,7 +103,7 @@ namespace DoodleSharp.Documentation
                 { "VRadialDimension", "Represents a radial or diameter dimension for circles and arcs. Draws a leader line from center to circumference with an arrowhead and text label (R for radius, \u2300 for diameter). Constructors: VRadialDimension(circle), VRadialDimension(arc), VRadialDimension(center, radius). Properties: LeaderAngle (direction of leader), ShowDiameter (diameter mode), ArrowSize, TextHeight, DecimalPlaces, Prefix, Suffix, CustomText, TextBackgroundOpaque. Per-element colors: DimensionLineColor, TextColor." },
 
                 // Support classes
-                { "VXYZ", "3D coordinate type (X, Y, Z) used for every position, vector and direction parameter in the library — the counterpart to Revit's XYZ. Its components are read-only: every operation returns a new instance, so a VXYZ can be shared without aliasing bugs. Constructors: (x, y, z), (x, y) with Z = 0, and () for the origin. Never registers on the canvas — use it freely for intermediate maths, and reach for VPoint only when you want a dot drawn. Vector operations: Add, Subtract, Multiply, Divide, Negate, Normalize (returns Zero for a zero-length vector rather than throwing), GetLength, DistanceTo, DotProduct, CrossProduct, TripleProduct, AngleTo (radians, 0 to π), Rotate(degrees) about the Z axis, Clone, AsVPoint. Tests: IsZeroLength, IsUnitLength, IsAlmostEqualTo(other, tolerance = 1e-9), static IsWithinLengthLimits. Indexer [0]/[1]/[2] reads X/Y/Z and throws IndexOutOfRangeException otherwise. Operators +, -, * and / work with scalars and with VPoint (mixed operations return a plain VXYZ, never a drawable point); == and != are fuzzy comparisons using IsAlmostEqualTo, so GetHashCode rounds to 8 decimals to match. Static properties: Zero, BasisX, BasisY, BasisZ." },
+                { "VXYZ", "3D coordinate type (X, Y, Z) used for every position, vector and direction parameter in the library — the counterpart to Revit's XYZ. Its components are read-only: every operation returns a new instance, so a VXYZ can be shared without aliasing bugs. Constructors: (x, y, z), (x, y) with Z = 0, and () for the origin. Never registers on the canvas — use it freely for intermediate maths, and reach for VPoint only when you want a dot drawn. Vector operations: Add, Subtract, Multiply, Divide, Negate, Normalize (returns Zero for a zero-length vector rather than throwing), GetLength, DistanceTo, DotProduct, CrossProduct, TripleProduct, AngleToDegrees (unsigned, 0 to 180 - the library's convention) and AngleToRadians (0 to π), Rotate(degrees) about the Z axis, Clone, AsVPoint. The unit-less AngleTo is OBSOLETE: it returns radians, which is the one place this library does not work in degrees, and handing its answer to a degrees-taking API is silently wrong rather than obviously wrong. Tests: IsZeroLength, IsUnitLength, IsAlmostEqualTo(other, tolerance = 1e-9), static IsWithinLengthLimits. Indexer [0]/[1]/[2] reads X/Y/Z and throws IndexOutOfRangeException otherwise. Operators +, -, * and / work with scalars and with VPoint (mixed operations return a plain VXYZ, never a drawable point); == and != are fuzzy comparisons using IsAlmostEqualTo, so GetHashCode rounds to 8 decimals to match. Static properties: Zero, BasisX, BasisY, BasisZ." },
                 { "VFont", "Font family for VText. Values: Arial (default), TimesNewRoman, CourierNew, Verdana, Georgia, Tahoma, TrebuchetMS, Consolas, Calibri, Cambria, SegoeUI, ComicSansMS, Impact, LucidaConsole." },
                 { "VFontWeight", "Font weight for VText: Normal (default) or Bold." },
                 { "VPlane", "An infinite plane in 3D, used as the mirror for VTransform.CreateReflection and as the source for VCoordinateSystem.ByPlane. It has no public constructor — build one with the static factories CreateByNormalAndOrigin(normal, origin), CreateByOriginAndBasis(origin, xVec, yVec) or CreateByThreePoints(p1, p2, p3). Read-only properties: Origin, Normal, XVec, YVec — all four are normalised on construction, and the two basis vectors are derived automatically when you supply only a normal. There is no ProjectPoint or DistanceTo on VPlane; project a point yourself with VCoordinateSystem.ByPlane(plane).ToLocal(point), whose Z component is the signed distance to the plane. The drawing canvas is the XY plane, so VPlane matters only for 3D vector maths — nothing on it renders." },
@@ -1305,6 +1305,19 @@ var z = VXYZ.BasisZ;  // (0, 0, 1)
 
 // Rotate a vector around the Z-axis
 var rotated = v1.Rotate(90);  // Rotates 90 degrees
+
+// Angle between two vectors. UNSIGNED (0-180), and mind the unit: this library
+// works in degrees, so AngleToDegrees is what feeds Rotate / VText.Angle.
+double deg = new VXYZ(-1, 0).AngleToDegrees(VXYZ.BasisX);   // 180
+double rad = new VXYZ(-1, 0).AngleToRadians(VXYZ.BasisX);   // 3.14159...
+// The obsolete AngleTo returns RADIANS. text.Angle = dir.AngleTo(VXYZ.BasisX)
+// on a reversed direction assigns 3.14 DEGREES - a label that looks very
+// slightly crooked instead of turned right round.
+
+// Unsigned means a direction 45 degrees up and one 45 degrees down both answer
+// 45. To orient something ALONG a 2D direction, use Atan2 and keep the sign:
+var dir = new VXYZ(3, -4);
+double heading = System.Math.Atan2(dir.Y, dir.X).ToDegrees();   // -53.13
 
 // Operators: +, -, * and / work with scalars and with VPoint.
 // Mixing VXYZ and VPoint always returns a plain VXYZ (never a drawable point).
@@ -4088,7 +4101,9 @@ if (lifted != null) { lifted.Move(new VXYZ(0, -80)); lifted.Color = ""Magenta"";
                 { "VXYZ.DotProduct", "Returns the dot product (scalar product) of this vector with another vector." },
                 { "VXYZ.CrossProduct", "Returns the cross product of this vector with another vector (3D only)." },
                 { "VXYZ.TripleProduct", "Returns the scalar triple product of three vectors: this · (a × b)." },
-                { "VXYZ.AngleTo", "Returns the unsigned angle in radians between this vector and another, in the range 0 to π. Returns 0 when either vector has zero length. Use Math.Atan2 if you need a signed angle." },
+                { "VXYZ.AngleToDegrees", "Returns the unsigned angle in DEGREES between this vector and another, 0 to 180 - the library's convention, so the answer can go straight into Rotate, VText.Angle, VArc's angles and the rest. Returns 0 when either vector has zero length. Unsigned: a direction 45 degrees above the X axis and one 45 degrees below both answer 45, so to ORIENT something along a 2D direction use Math.Atan2(dir.Y, dir.X).ToDegrees(), which keeps the sign." },
+                { "VXYZ.AngleToRadians", "Returns the unsigned angle in RADIANS between this vector and another, 0 to π - for handing to System.Math, which works in radians. Returns 0 when either vector has zero length. Everything else in this library takes degrees; AngleToDegrees is the spelling that matches it." },
+                { "VXYZ.AngleTo", "OBSOLETE - use AngleToDegrees for the library's convention, or AngleToRadians if you want radians. Behaviour is unchanged: it returns the unsigned angle in RADIANS, 0 to π. The name was retired because it says nothing about its unit while every rotation API here takes degrees, and the mismatch does not look like an error: text.Angle = dir.AngleTo(VXYZ.BasisX) on a direction pointing along -X assigns π as 3.14 DEGREES, so the label is drawn a hair crooked instead of turned right round - reported as a text mask that was 'slightly off axis'." },
                 { "VXYZ.IsZeroLength", "Returns true if the vector has zero length (all components are zero)." },
                 { "VXYZ.IsUnitLength", "Returns true if the vector has unit length (magnitude ≈ 1)." },
                 { "VXYZ.IsAlmostEqualTo", "Returns true if this vector is approximately equal to another within the given tolerance (default GeometryTolerance.Epsilon, 1e-9)." },

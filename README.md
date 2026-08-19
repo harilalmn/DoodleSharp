@@ -3939,7 +3939,12 @@ var normalized = v.Normalize();     // a zero-length vector returns VXYZ.Zero, n
 var cross = v1.CrossProduct(v2);
 var dot = v1.DotProduct(v2);
 double triple = v.TripleProduct(v1, v2);
-double radians = v1.AngleTo(v2);    // unsigned, 0 to pi
+double degrees = v1.AngleToDegrees(v2);   // unsigned, 0 to 180 — the library's convention
+double radians = v1.AngleToRadians(v2);   // unsigned, 0 to pi — for System.Math
+// `AngleTo` is obsolete: it returns RADIANS, and this library takes degrees everywhere else,
+// so `text.Angle = dir.AngleTo(VXYZ.BasisX)` on a reversed direction assigns 3.14 *degrees*.
+// Both are unsigned. To orient something ALONG a direction, keep the sign with Atan2:
+double heading = Math.Atan2(dir.Y, dir.X).ToDegrees();
 double d = v1.DistanceTo(v2);
 
 // Arithmetic also available as methods
