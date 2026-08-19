@@ -220,7 +220,30 @@ public class RenderCanvas : FrameworkElement
         {
             _backgroundBrush = value;
             if (_backgroundBrush.CanFreeze) _backgroundBrush.Freeze();
+            PublishBackgroundColour();
             RedrawAll();
+        }
+    }
+
+    /// <summary>
+    /// Copies the background colour onto <see cref="VText.CanvasBackgroundColor"/>, which is how
+    /// the surfaces with no canvas of their own — the SVG and PDF exporters — resolve a text whose
+    /// <c>MaskColor</c> is null ("match the canvas"). The renderer itself never reads it back: it
+    /// resolves against the live brush, which cannot go stale.
+    ///
+    /// <para>
+    /// Called from the constructor as well as the setter, because the field is initialised directly
+    /// there and the setter never runs for the default.
+    /// </para>
+    /// </summary>
+    private void PublishBackgroundColour()
+    {
+        if (_backgroundBrush is SolidColorBrush solid)
+        {
+            var c = solid.Color;
+            // #RRGGBB, dropping alpha: WPF, SVG and PDFsharp all read that spelling, whereas WPF's
+            // own #AARRGGBB is not valid SVG.
+            VText.CanvasBackgroundColor = $"#{c.R:X2}{c.G:X2}{c.B:X2}";
         }
     }
 
@@ -240,6 +263,7 @@ public class RenderCanvas : FrameworkElement
     {
         _backgroundBrush = new SolidColorBrush(Color.FromRgb(30, 30, 30));
         _backgroundBrush.Freeze();
+        PublishBackgroundColour();
 
         // Four layers, bottom first: grid, raster, vector, overlay. The raster layer holds the
         // bitmap the managed backend writes hairline geometry into; the vector layer above it holds
@@ -2901,7 +2925,13 @@ public class RenderCanvas : FrameworkElement
         if (text.Mask)
         {
             var pad = text.MaskOffset * fontSize;
-            dc.DrawRectangle(GetCachedBrush(text.MaskColor), null, new Rect(
+            // A null MaskColor means "the canvas background", and it is resolved HERE rather than
+            // captured on the text, so a label keeps blending in after the background is changed
+            // — no re-run, nothing to invalidate.
+            var maskBrush = string.IsNullOrEmpty(text.MaskColor)
+                ? CanvasBackground
+                : GetCachedBrush(text.MaskColor);
+            dc.DrawRectangle(maskBrush, null, new Rect(
                 drawX - pad,
                 drawY - pad,
                 formattedText.Width + 2 * pad,

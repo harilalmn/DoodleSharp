@@ -510,7 +510,12 @@ public class PdfExporter
         if (text.Mask)
         {
             var pad = text.MaskOffset * measuredHeight;
-            gfx.DrawRectangle(new XSolidBrush(ParseColor(text.MaskColor)),
+            // Null means "the canvas background"; with no canvas here, that is whatever the host
+            // last published (see VText.CanvasBackgroundColor).
+            var maskColour = string.IsNullOrEmpty(text.MaskColor)
+                ? VText.CanvasBackgroundColor
+                : text.MaskColor;
+            gfx.DrawRectangle(new XSolidBrush(ParseColor(maskColour)),
                 -pad, -pad, measuredWidth + 2 * pad, measuredHeight + 2 * pad);
         }
 

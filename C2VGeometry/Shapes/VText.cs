@@ -66,22 +66,51 @@ public class VText : Shape
 
     /// <summary>
     /// When true, a solid rectangle is painted behind the text so it stays legible over whatever
-    /// it crosses — the dimension-label "mask" a CAD package draws. Default is false.
+    /// it crosses — the label "mask" a CAD package draws. <b>Default is true</b>, with
+    /// <see cref="MaskColor"/> following the canvas background, so a label reads cleanly wherever
+    /// it lands and looks no different from unmasked text over empty canvas.
     ///
     /// <para>
     /// The mask is part of the text, not a separate shape: it is drawn immediately before the
     /// glyphs, so it never hides them and never appears on its own in the shape list. Use
-    /// <see cref="Shape.ZIndex"/> to decide what the masked text sits above.
+    /// <see cref="Shape.ZIndex"/> to decide what the masked text sits above — a mask only hides
+    /// what the text is drawn over.
+    /// </para>
+    ///
+    /// <para>
+    /// Set it to false for a label that should let the drawing show through, which is the one thing
+    /// this costs: over a filled shape, a masked label punches a canvas-coloured hole.
     /// </para>
     /// </summary>
-    public bool Mask { get; set; } = false;
+    public bool Mask { get; set; } = true;
 
     /// <summary>
     /// The colour of the <see cref="Mask"/> rectangle — a colour name or hex string, exactly like
-    /// <see cref="Shape.Color"/>, so <c>VColor.Black</c> and <c>"#202020"</c> both work. Defaults
-    /// to <c>"Black"</c>, which is the canvas background.
+    /// <see cref="Shape.Color"/>, so <c>VColor.Black</c> and <c>"#202020"</c> both work.
+    ///
+    /// <para>
+    /// <b>Null (the default) means "the canvas background"</b>, resolved when the text is drawn
+    /// rather than captured when it is constructed — so a label keeps blending in after the
+    /// background is changed, with nothing to re-run. Away from a canvas (the SVG and PDF
+    /// exporters) it resolves against <see cref="CanvasBackgroundColor"/>, which the host keeps up
+    /// to date.
+    /// </para>
     /// </summary>
-    public string MaskColor { get; set; } = "Black";
+    public string? MaskColor { get; set; } = null;
+
+    /// <summary>
+    /// The canvas background colour, as the host last set it (<c>"#RRGGBB"</c>). It is how a
+    /// surface with no canvas of its own — the SVG and PDF exporters — resolves a null
+    /// <see cref="MaskColor"/>. Mirrors <see cref="Shape.DefaultRegistry"/> and
+    /// <see cref="GlyphOutlineProvider"/>: C2VGeometry has no UI and cannot know this by itself.
+    ///
+    /// <para>
+    /// The canvas renderer does <b>not</b> read this — it resolves a null mask against its own live
+    /// background brush, which cannot go stale. This is the fallback for everything else, and
+    /// defaults to the app's own canvas colour so an export from a headless run still looks right.
+    /// </para>
+    /// </summary>
+    public static string CanvasBackgroundColor { get; set; } = "#1E1E1E";
 
     /// <summary>
     /// How far the <see cref="Mask"/> extends beyond the text's bounding box, as a fraction of the

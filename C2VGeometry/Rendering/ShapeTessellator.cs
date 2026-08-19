@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace C2VGeometry.Rendering;
@@ -50,6 +50,13 @@ public sealed class ShapeTessellator
                 Height = height,
                 Color = color,
                 Anchor = VTextAnchor.MiddleCenter,
+                // VText.Mask defaults to ON, and this label is not a user's text — it is how a
+                // dimension's number reaches a sink. The vector renderer draws that number itself
+                // and gives it a background only when the dimension asks for one
+                // (VDimension.TextBackgroundOpaque), so leaving the default here would put a plate
+                // behind every dimension on the raster and GPU backends and none on the vector one:
+                // the same drawing rendering differently per backend, which is note 92's failure.
+                Mask = false,
             };
         }
     }

@@ -194,13 +194,18 @@ public static class SvgExporter
         var width = t.Width > 0 ? t.Width : t.Height * (t.Content?.Length ?? 0) * 0.6;
         var pad = t.MaskOffset * t.Height;
 
+        // A null MaskColor means "the canvas background". There is no canvas here, so it resolves
+        // against the colour the host publishes (VText.CanvasBackgroundColor) — otherwise a default
+        // masked label would export with no plate at all and the SVG would not match the screen.
+        var fill = string.IsNullOrEmpty(t.MaskColor) ? VText.CanvasBackgroundColor : t.MaskColor;
+
         var minX = t.Location.X - pad;
         var minY = t.Location.Y - pad;
         var w = width + 2 * pad;
         var h = t.Height + 2 * pad;
 
         // y is negated (and the top edge used) because the parent group flips Y.
-        return $"<rect x=\"{F(minX)}\" y=\"{F(-(minY + h))}\" width=\"{F(w)}\" height=\"{F(h)}\" fill=\"{t.MaskColor}\" stroke=\"none\" />";
+        return $"<rect x=\"{F(minX)}\" y=\"{F(-(minY + h))}\" width=\"{F(w)}\" height=\"{F(h)}\" fill=\"{fill}\" stroke=\"none\" />";
     }
 
     private static string ArcToSvg(VArc arc)

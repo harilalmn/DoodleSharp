@@ -741,24 +741,40 @@ header.Anchor = VTextAnchor.TopCenter;
 | `FontWeight` | VFontWeight | Normal | Normal or Bold |
 | `Anchor` | VTextAnchor | BottomLeft | Which point of the text is placed at Location |
 | `Angle` | double | 0 | Rotation in degrees, CCW around Location (Excel-style block rotation) |
-| `Mask` | bool | false | Paint a solid rectangle behind the glyphs — see [Text mask](#text-mask) |
-| `MaskColor` | string | `"Black"` | Colour of that rectangle. Any colour name or hex, like `Color` |
+| `Mask` | bool | **true** | Paint a solid rectangle behind the glyphs — see [Text mask](#text-mask) |
+| `MaskColor` | string? | `null` | Colour of that rectangle; `null` means **the canvas background**. Any colour name or hex, like `Color` |
 | `MaskOffset` | double | 0.15 | Padding around the text as a **fraction of the text height**. Clamped to 0–1 |
 
 **VFont values**: Arial, TimesNewRoman, CourierNew, Verdana, Georgia, Tahoma, TrebuchetMS, Consolas, Calibri, Cambria, SegoeUI, ComicSansMS, Impact, LucidaConsole
 
 ### Text mask
 
-A label crossing the geometry it describes is hard to read. `Mask` fills a rectangle behind the
-glyphs first:
+A label crossing the geometry it describes is hard to read, so **every `VText` is masked by
+default**: a rectangle in the **canvas background colour** is filled behind the glyphs. Over empty
+canvas that is invisible; over a line it reads as a clean interruption.
 
 ```csharp
 var dim = new VText(new VXYZ(0, 40), "433.5", 14);
-dim.Anchor = VTextAnchor.MiddleCenter;
-dim.Mask = true;             // off by default
-dim.MaskColor = VColor.Black; // or "#202020", or any colour name
-dim.MaskOffset = 0.25;        // padding = 25% of the text height on every side
+dim.Anchor = VTextAnchor.MiddleCenter;   // masked already — nothing to switch on
+
+dim.MaskOffset = 0.25;         // padding = 25% of the text height on every side
+dim.MaskColor  = VColor.Red;   // override the colour; null (default) = follow the canvas
 ```
+
+`MaskColor` is `null` by default, meaning *the canvas background*, and it is resolved **when the text
+is drawn** rather than captured when it is constructed — change the canvas colour and every default
+label follows it, with nothing to re-run. Away from a canvas (the SVG and PDF exporters) it resolves
+against `VText.CanvasBackgroundColor`, which the app keeps in step with the canvas.
+
+The one thing this costs is over a **filled** shape, where a masked label punches a
+canvas-coloured hole. Turn it off there:
+
+```csharp
+var overFill = new VText(new VXYZ(0, 0), "on the polygon", 14) { Mask = false };
+```
+
+Dimension labels are unaffected — `VDimension` has its own `TextBackgroundOpaque` switch, and the
+label the renderer builds for it is deliberately unmasked so every backend draws it identically.
 
 `MaskOffset` is a **fraction of the text height**, not a number of drawing units: `0` hugs the
 glyphs, `1` pads by a full text height on every side, and anything outside `[0, 1]` is clamped on

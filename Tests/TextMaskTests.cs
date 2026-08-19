@@ -11,13 +11,68 @@ namespace DoodleSharp.Tests;
 public class TextMaskTests
 {
     [Fact]
-    public void IsOffByDefault()
+    public void IsOnByDefaultAndFollowsTheCanvasBackground()
     {
         var text = new VText(new VXYZ(0, 0), "hello");
 
-        Assert.False(text.Mask);
-        Assert.Equal("Black", text.MaskColor);
+        Assert.True(text.Mask);
+        // Null is the sentinel for "whatever the canvas background is", resolved at draw time so a
+        // label keeps blending in after the background changes. A captured colour would go stale.
+        Assert.Null(text.MaskColor);
         Assert.Equal(0.15, text.MaskOffset, 9);
+    }
+
+    [Fact]
+    public void ADefaultLabelExportsAPlateInTheCanvasColour()
+    {
+        var previous = VText.CanvasBackgroundColor;
+        try
+        {
+            VText.CanvasBackgroundColor = "#123456";
+            var text = new VText(new VXYZ(0, 0), "433.5", 20);   // nothing set: default mask
+            var svg = DoodleSharp.Canvas.SvgExporter.Export(new[] { (IDrawable)text });
+
+            Assert.Contains("<rect", svg);
+            Assert.Contains("fill=\"#123456\"", svg);
+        }
+        finally
+        {
+            VText.CanvasBackgroundColor = previous;
+        }
+    }
+
+    [Fact]
+    public void AnExplicitMaskColourWinsOverTheCanvasBackground()
+    {
+        var previous = VText.CanvasBackgroundColor;
+        try
+        {
+            VText.CanvasBackgroundColor = "#123456";
+            var text = new VText(new VXYZ(0, 0), "433.5", 20) { MaskColor = "Red" };
+            var svg = DoodleSharp.Canvas.SvgExporter.Export(new[] { (IDrawable)text });
+
+            Assert.Contains("fill=\"Red\"", svg);
+            Assert.DoesNotContain("#123456", svg);
+        }
+        finally
+        {
+            VText.CanvasBackgroundColor = previous;
+        }
+    }
+
+    [Fact]
+    public void DimensionLabelsAreNotMasked()
+    {
+        // The tessellator's label is how a dimension's number reaches the raster and GPU sinks. The
+        // vector renderer draws that number itself and plates it only when the dimension asks
+        // (TextBackgroundOpaque), so inheriting the new default here would make one drawing render
+        // differently per backend.
+        var source = File.ReadAllText(Path.Combine(ArrowheadConsistencyTests.RepoRoot(),
+            "C2VGeometry", "Rendering", "ShapeTessellator.cs"));
+        var label = source.IndexOf("private static VText Label(", System.StringComparison.Ordinal);
+
+        Assert.True(label > 0, "the dimension label helper must still exist");
+        Assert.Contains("Mask = false", source[label..]);
     }
 
     [Theory]
@@ -83,7 +138,7 @@ public class TextMaskTests
     [Fact]
     public void AnUnmaskedLabelExportsNoRect()
     {
-        var plain = new VText(new VXYZ(0, 0), "433.5", 20);
+        var plain = new VText(new VXYZ(0, 0), "433.5", 20) { Mask = false };
         var svg = DoodleSharp.Canvas.SvgExporter.Export(new[] { (IDrawable)plain });
 
         Assert.DoesNotContain("<rect", svg);

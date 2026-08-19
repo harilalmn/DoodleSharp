@@ -10,14 +10,19 @@ tags; this file is the curated, human-friendly summary.
 ## [Unreleased]
 
 ### Added
-- **`VText.Mask` — a solid background behind a label.** A dimension label sitting on the line it
-  measures is hard to read; set `Mask = true` and the text gets an opaque rectangle underneath it.
-  `MaskColor` is any colour name or hex (default `"Black"`, the canvas background) and `MaskOffset`
-  is the padding around the glyphs as a *fraction of the text height* — `0` hugs them, `1` pads by a
-  full text height on every side, default `0.15`, clamped to that range. The mask never appears as a
-  shape of its own and does not change the text's bounding box, so zoom-extents is unaffected.
-  Honoured on the canvas and in SVG and PDF exports; DXF has no background fill in the R12 format
-  DoodleSharp writes, so a masked label exports there as plain text.
+- **`VText.Mask` — a solid background behind a label, on by default.** A label sitting on the line it
+  describes is hard to read, so every `VText` now fills a rectangle behind its glyphs in the **canvas
+  background colour**: invisible over empty canvas, a clean interruption over anything it crosses.
+  `MaskColor` is `null` by default, meaning *follow the canvas background* — resolved when the text
+  is drawn, so changing the canvas colour updates every label with nothing to re-run — and can be set
+  to any colour name or hex. `MaskOffset` is the padding as a *fraction of the text height*: `0` hugs
+  the glyphs, `1` pads by a full text height on every side, default `0.15`, clamped to that range.
+  The mask never appears as a shape of its own and does not change the text's bounding box, so
+  zoom-extents is unaffected. Over a **filled** shape a masked label punches a canvas-coloured hole —
+  set `Mask = false` there. Dimension labels keep their own `TextBackgroundOpaque` switch and are
+  deliberately unmasked, so every render backend draws them identically. Honoured on the canvas and
+  in SVG and PDF exports; DXF has no background fill in the R12 format DoodleSharp writes, so a
+  masked label exports there as plain text.
 - **`Shape.ZIndex` — global draw order.** Every shape now has an `int ZIndex`: the drawing is painted
   in ascending order, shapes sharing a value keep the order they were created in, and negatives push
   a backdrop behind everything. Hit-testing follows the same order, so the shape you click is the one
