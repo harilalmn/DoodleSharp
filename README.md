@@ -8,12 +8,13 @@ A WPF application for visualizing 2D geometric shapes through C# code execution 
 
 ## Overview
 
-DoodleSharp is a visual programming environment that lets you write C# code to create, style, and animate 2D geometric shapes on an interactive canvas. It combines a code editor with syntax highlighting, a real-time rendering canvas with zoom and pan capabilities, and a timeline-based animation system with GIF export.
+DoodleSharp is a visual programming environment that lets you write C# code to create, style, and animate 2D geometric shapes on an interactive canvas. It combines a code editor with syntax highlighting, a rendering canvas with zoom and pan capabilities — one canvas, or a [grid of independent ones](#viewports--dividing-the-drawing-surface) — and a timeline-based animation system with GIF export. Your code runs when you press `F5`.
 
 ## Features
 
-- **Live Preview**: Canvas updates automatically as you type (debounced auto-run)
+- **Run on Demand**: Press `F5` (or Run) to compile and draw — your code runs when you ask it to, never while you are still typing it
 - **No Placement Call Required**: Shapes appear automatically when created
+- **Viewports**: Split the drawing surface into a grid of independent canvases with `Viewports.Rows`/`Viewports.Columns`, place shapes into a cell with `Place(Viewports[0][1])`, and subdivide any cell again for uneven layouts. Each cell pans and zooms on its own. See [Viewports](#viewports--dividing-the-drawing-surface)
 - **C# Code Editor**: Roslyn-powered IntelliSense, semantic highlighting, refactoring, and squiggle diagnostics
 - **Rich Shape Library**: Points, lines, circles, rectangles, ellipses, arcs, polygons, polylines, Bezier curves, splines, regions (curve-bounded areas), hatches (pattern fills), text, arrows, and dimension annotations
 - **Charts**: Built-in `Chart.Bar/Line/Scatter/Pie/Area` helpers produce ready-to-render chart groups (axes, ticks, labels, palette) from raw data
@@ -68,13 +69,17 @@ namespace MyProject          // your project's name
 }
 ```
 
-### 3. See Results Instantly
-With **Auto-update Canvas** enabled (default), the canvas updates automatically as you type - no need to press Run!
+### 3. Run It
 
-- **Auto-update**: Canvas refreshes 500ms after you stop typing
-- **Manual mode**: Disable auto-update in Settings to use F5/Run button instead
-- **Auto-Draw Shapes**: Toggle in Settings > Canvas Settings to control whether shapes auto-register on construction
-- **No explicit placement needed**: Shapes appear when created. `Place()` is there for the ones that don't come from a plain `new` — method results, query results, anything built while auto-register was off. (`Draw()` is the historical name for the same call and still works.)
+Press **`F5`** (or `Ctrl+Enter`, or the **Run** button) to compile and draw. Code runs only when you
+ask it to — there is no background re-run while you type, so a half-written statement never reaches
+the canvas and a long-running drawing is never started behind your back.
+
+- **Every run starts clean**: shape IDs rewind to 1, the [viewport layout](#viewports--dividing-the-drawing-surface)
+  goes back to a single undivided canvas, and the drawing is rebuilt from your code. Delete a line
+  and the next run reflects it — nothing lingers until restart
+- **No explicit placement needed**: Shapes appear when created. `Place()` is there for the ones that don't come from a plain `new` — method results, query results, anything built while `Shape.AutoRegister` was off. (`Draw()` is the historical name for the same call and still works.)
+- **`Place(viewport)`** is the same call aimed at one cell of a divided drawing — see [Viewports](#viewports--dividing-the-drawing-surface)
 
 ---
 
@@ -158,7 +163,7 @@ touch them to change behaviour deliberately.
 | Member | Type | Description |
 |--------|------|-------------|
 | `Shape.DefaultRegistry` | `IShapeRegistry?` | The canvas every constructor registers with. DoodleSharp sets it to its renderer at start-up; setting it to `null` makes shapes purely computational |
-| `Shape.AutoRegister` | bool | When false, constructors stop registering — the switch behind the **Auto-Draw Shapes** setting. Shapes built while it is off need `Place()` to appear |
+| `Shape.AutoRegister` | bool | `true`. Set it to false and constructors stop registering, so shapes are built without appearing; shapes made while it is off need `Place()` to show up. Restore it yourself — it is a code-level switch, not a setting |
 | `Shape.DefaultColor` | string | `"Cyan"` — the fallback stroke for shapes that do not define their own |
 | `Shape.DefaultFillColor` | string | `"Transparent"` |
 | `Shape.DefaultLineWeight` | double | `2.0` |
@@ -182,8 +187,9 @@ poly.Invalidate();                    // so anything caching derived geometry re
 #### `Place()` — put a shape on the canvas and keep it there
 
 ```csharp
-shape.Place();     // on the canvas, and safe from the post-run cleanup
-shape.Remove();    // the inverse
+shape.Place();                    // on the canvas, and safe from the post-run cleanup
+shape.Place(Viewports[0][1]);     // the same, but into one cell of a divided drawing
+shape.Remove();                   // the inverse
 ```
 
 One rule covers every case: **`Place()` puts a shape on the canvas and keeps it there.** It registers
@@ -199,6 +205,13 @@ You need it whenever a shape did not come from a plain `var x = new VShape(...)`
   `GeometryHelper.IntersectLineLine` and friends, `VRay.ToFiniteLine()`, `VRay.ToXLine()`,
   `VXLine.ToFiniteLine()`
 - anything built while `Shape.AutoRegister` was false
+
+**`Place(viewport)`** is the same call with a destination. It takes a
+[`Viewport`](#viewports--dividing-the-drawing-surface) — `shape.Place(Viewports[1][2])` — and because
+a shape has already auto-registered onto the root by the time you call it, it is normally a *move*
+rather than a first registration. It throws `ArgumentNullException` on a null viewport. On the
+default 1x1 layout `Viewports[0][0]` **is** the root, so `Place(Viewports[0][0])` and a bare
+`Place()` do exactly the same thing.
 
 **`Draw()` is the historical name for `Place()` and does exactly the same thing** — it is a
 one-line forward, pinned by a test. **Existing files that call `Draw()` keep working unchanged, and
@@ -262,7 +275,7 @@ plumbing is not a mystery.
 
 | Interface | Set through | Members | Purpose |
 |-----------|-------------|---------|---------|
-| `IShapeRegistry` | `Shape.DefaultRegistry` | `Register(shape)`, `Unregister(shape)`, `Clear()`, `NotifyOrderChanged(shape)` | What a constructor calls, so shapes appear without an explicit placement call. `Place()` and `Remove()` are thin wrappers over the first two; assigning `ZIndex` calls the last, which tells the host its draw order is stale |
+| `IShapeRegistry` | `Shape.DefaultRegistry` | `Register(shape)`, `Unregister(shape)`, `Clear()`, `NotifyOrderChanged(shape)`, `Place(shape, viewport)` | What a constructor calls, so shapes appear without an explicit placement call. `Place()` and `Remove()` are thin wrappers over the first two; assigning `ZIndex` calls `NotifyOrderChanged`, which tells the host its draw order is stale; `Place(shape, viewport)` is what [`Shape.Place(Viewport)`](#viewports--dividing-the-drawing-surface) calls to move a shape into a cell |
 | `IGlyphOutlineProvider` | `VText.GlyphOutlineProvider` | `GetCharContours(text, charIndex)` → `List<List<VXYZ>>?` | Turns a character into closed contours in world coordinates, honouring font, height, anchor and rotation. One inner list per contour (an `O` has two). Returns null for whitespace — and with no provider set, `ToCharShape` / `LiftChar` / `LiftChars` all return null |
 
 The third seam is `GeometryDiagnostics.Sink` — see [Why a Union returned null](#why-a-union-returned-null).
@@ -1869,8 +1882,9 @@ see every gesture. While at least one handler is registered:
 
 - **click-to-select, wheel zoom and double-click-zoom-to-fit are suppressed** — the click, the wheel
   and the double click are yours;
-- **floating zoom controls appear at the canvas's top-right** in their place — zoom in, zoom out, zoom
-  to fit, and a live zoom percentage;
+- **the zoom controls at a cell's top-right are how you navigate instead** — zoom in, zoom out, zoom
+  to fit, and a live zoom percentage. They are revealed by hovering over a cell, in every mode, not
+  only this one;
 - **the properties panel is hidden and `F4` is inert**, because it edits the *selected* shape and there
   is no longer a selection. It comes back by itself the next time you run something that registers
   nothing;
@@ -2028,6 +2042,10 @@ Every registration method takes `Action<MouseInfo>?` and returns `void`. Passing
 | `Mouse.IsDown` | `bool` — whether any button is held over the canvas. Likewise always tracked |
 | `Mouse.CallbackFailed` | `event Action<Exception>` raised when a handler throws. The app subscribes for you and prints to the console; you rarely need it |
 
+Registration is **per drawing, not per cell**: one `Mouse.OnMove` covers every
+[viewport](#viewports--dividing-the-drawing-surface), and `e.Viewport` tells you which cell the
+event came from.
+
 `Mouse.X`/`Y`/`IsDown` are a **polled** alternative to callbacks — they are recorded on every mouse
 event whether or not anything is registered, so reading them from a `Frame` callback needs no
 registration and does not put the canvas into interactive mode:
@@ -2066,6 +2084,7 @@ constructor, but it is there for the host and for tests; user code only ever rea
 | `WheelNotches` | `double` | `WheelDelta / 120.0` — 1.0 per detent, the friendlier form |
 | `Scale` | `double` | canvas zoom when the event happened, in screen pixels per world unit. `8 / e.Scale` is "8 pixels" expressed in world units |
 | `Target` | `Shape?` | topmost shape under the cursor, or `null` over empty space. Computed on first read and cached — see above |
+| `Viewport` | `Viewport` | which cell the pointer was in. The root on an undivided drawing, which is every drawing that never sets `Viewports.Rows`/`Columns`. Compare it by reference: `if (e.Viewport == Viewports[0][1]) …`. See [Viewports](#viewports--dividing-the-drawing-surface) |
 
 `MouseEventKind` is `Move`, `Down`, `Up`, `Click`, `DoubleClick`, `Drag`, `Wheel`, `Enter`, `Leave`.
 `MouseButtonKind` is `None`, `Left`, `Right`, `Middle`, `XButton1`, `XButton2`.
@@ -2134,7 +2153,7 @@ Every animation is an object that **attaches to one shape** and knows how long i
 
 Each frame the timeline hands every animation a **normalized time `t`** — `0` at its start, `1` at its end. The animation runs `EasingFunction(t)` and writes the result into its target shape (`DrawFactor`, `OffsetX`/`OffsetY`, `RotationAngle`, `Opacity`, or a property you named). So `duration` is always **seconds**, and `EasingFunction` only reshapes the curve between the same two endpoints — it never changes where the animation starts or finishes.
 
-Adding an animation also **places its target on the canvas** if it isn't already, so an animated shape shows up even with *Auto-Draw Shapes* turned off.
+Adding an animation also **places its target on the canvas** if it isn't already, so an animated shape shows up even when it was built while `Shape.AutoRegister` was false.
 
 > **Only one Animator plays at a time.** `Animate()` makes that animator's timeline *the* active timeline, replacing any previous one. If you build several `Animator` instances and call `Animate()` on each, only the last one runs. Put everything into a single `Animator` — that is what `Pause()` and the parallel `List<Animation>` overload are for.
 
@@ -2269,7 +2288,7 @@ What you see: the source shape until the morph's turn arrives, then an internall
 - Curve shapes (`VLine`, `VArc`, `VCircle`, `VEllipse`, `VPolyline`, `VPolygon`, `VRectangle`, `VBezier`, `VSpline`) are sampled along their real geometry.
 - Non-curve shapes (`VText`, `VArrow`, …) fall back to their **bounding-box outline**.
 - A `VGroup` morphs by its **longest child contour** — which is what makes a lifted multi-contour glyph like `O` or `A` behave sensibly.
-- Both shapes and the proxy are registered explicitly, so the morph renders even with *Auto-Draw Shapes* off.
+- Both shapes and the proxy are registered explicitly, so the morph renders even when `Shape.AutoRegister` is off.
 - Passing `null` for either shape throws `ArgumentNullException`.
 
 The second constructor morphs **a single character of a `VText`**:
@@ -2590,6 +2609,245 @@ off-screen.
 
 If a layout ever misbehaves, deleting `%APPDATA%\DoodleSharp\layout.xml` restores the default.
 
+The **Canvas** panel stays one pane however your drawing is divided — the grid of
+[viewports](#viewports--dividing-the-drawing-surface) lives inside it, so it docks, tabs and floats
+as a single object and the panel layout never has to know how many canvases are in there.
+
+## Viewports — dividing the drawing surface
+
+By default the drawing surface is one canvas, and nothing below applies. Set `Viewports.Rows` or
+`Viewports.Columns` and it becomes a **grid of independent canvases** — each with its own pan and
+zoom — still living in the single docked pane titled "Canvas".
+
+```csharp
+Viewports.Rows = 2;
+Viewports.Columns = 3;
+
+new VCircle(new VXYZ(0, 0), 10).Place(Viewports[0][0]);                // top-left cell
+new VLine(new VXYZ(-40, 0), new VXYZ(40, 0)).Place(Viewports[1][2]);   // bottom-right cell
+new VRectangle(new VXYZ(-20, -20), 40, 40).Place();                    // no argument -> the root, i.e. Viewports[0][0]
+```
+
+`Viewports` is available unqualified in every file of a project — you never write the class it lives
+on. (For the curious: C# has no static indexers, so it is a static *property* named `Viewports` on
+`C2VGeometry.ViewportRoot`, and the compiler injects `global using static C2VGeometry.ViewportRoot;`
+into every compilation. Nothing to import, and nothing to spell.)
+
+### The rules
+
+Each of these is a decision you cannot guess from the API's shape, so they are worth reading once.
+
+- **Indices are 0-based and row first.** `Viewports[0][0]` is top-left; `Viewports[1][2]` is row 1,
+  column 2.
+- **A leaf's only cell is itself.** On the default 1x1 layout `Viewports[0][0]` **is** the root —
+  which is why a bare `Place()`, a shape that simply auto-registered, and `Place(Viewports[0][0])`
+  all put the shape in the same place, with no special case anywhere.
+- **1x1 is the default, and a drawing that never touches `Viewports` is unaffected** — same canvas,
+  same behaviour, same cost.
+- **The layout resets to 1x1 on every run**, exactly like shape IDs. Delete a `Viewports.Rows = 2;`
+  line and the next run is undivided again, rather than the old grid lingering until you restart.
+  (`Canvas.Clear()` does *not* reset it — that clears shapes and nothing else, so wiping the canvas
+  from a mouse handler cannot pull the layout out from under you.)
+- **Indexing past the current size throws `ArgumentOutOfRangeException`**, and the message names the
+  size the layout actually has. The usual cause is indexing before setting `Rows`:
+
+  ```text
+  Viewports[1] is out of range. The layout is 1 row x 1 column (valid rows 0..0,
+  columns 0..0). Set Viewports.Rows before placing.
+  ```
+
+- **Rows and columns are limited to `Viewport.MaxDimension`, which is 8.** Anything below 1 or above
+  8 throws `ArgumentOutOfRangeException`. Every leaf owns a real canvas with its own spatial index
+  and render layers, so the cap is what stops a `Rows` assigned from a computed value asking for
+  thousands of them.
+- **Each cell pans and zooms independently.** Zoom in, zoom out, zoom-to-fit and a live zoom
+  percentage appear in a small panel over whichever cell the pointer is over — which also answers
+  "which cell am I pointing at". Middle-drag pans that cell; the wheel zooms it.
+- **A cell that survives a resize keeps its pan and zoom**, so re-running your code — which
+  re-declares the same layout — does not throw your views away. Assigning `Rows` or `Columns` the
+  value they already have changes nothing at all.
+
+### Uneven layouts: subdivide a cell
+
+There is no row-span or column-span. Any cell can be split again, which is how an uneven layout is
+expressed, and the rules are identical at every depth:
+
+```csharp
+Viewports.Columns = 2;                 // one big view on the left...
+
+Viewport right = Viewports[0][1];
+right.Rows = 3;                        // ...and a stack of three on the right
+
+new VCircle(new VXYZ(0, 0), 80).Place(Viewports[0][0]);
+new VPolygon(new VXYZ(0, 0), new VXYZ(30, 0), new VXYZ(0, 30)).Place(right[0][0]);
+new VText(new VXYZ(0, 0), "detail", 12).Place(right[1][0]);
+```
+
+Two things follow from cells being ordinary viewports:
+
+- **Placing on a viewport that is later subdivided is not an error.** The shape draws in that
+  viewport's **first cell**, on the reading that the cell stayed where it was and merely got split.
+- **Shrinking the layout re-homes orphans.** Shapes on a cell a later resize removed move to the
+  nearest surviving ancestor's first cell, and the console says how many moved and where (tagged
+  `Geometry`). That is
+  deliberately a message rather than an exception: shrinking your own layout is a legitimate thing
+  to do, and a running animation must not die because a cell went away.
+
+### Sizing rows and columns
+
+`Height` and `Width` take XAML's grid-length spelling as a string: `"*"` for one share of the space,
+`"3*"` for three shares, `"1.5*"`, or a plain number for a fixed size in device pixels. Everything
+starts at `"*"`, so an untouched grid divides the room equally.
+
+```csharp
+Viewports.Rows = 2;
+Viewports.Columns = 3;
+
+Viewports[0].Height = "3*";       // the top row gets three shares to the bottom row's one
+Viewports[0][2].Width = "4*";     // the last column gets four
+Viewports[0][0].Width = "240";    // ...and the first is a fixed 240 pixels wide
+```
+
+**They address the row or the column, not the single cell** — exactly like a XAML `RowDefinition`,
+which is shared by every cell sitting in it. Setting `Viewports[0][0].Width` sets the width of
+column 0, so `Viewports[1][0].Width` reads back the same value. `Viewports[0].Height` says the same
+thing about a row more directly, and is the spelling to prefer.
+
+Reading them back gives you the canonical spelling — `"3*"`, `"*"`, `"240"` — not whatever you
+typed. For the parsed form, `RowHeightAt(row)` and `ColumnWidthAt(column)` return a
+[`ViewportLength`](#viewportlength).
+
+Two edges worth knowing:
+
+- **The root has no `Height` or `Width`.** It always fills the pane, so there is nothing to size it
+  within, and reading or setting either on it throws `InvalidOperationException`. Since
+  `Viewports[0][0]` *is* the root on a 1x1 layout, that includes `Viewports[0][0].Height = "3*"`
+  written before you have divided anything — divide first, then size the cells.
+- **`"Auto"` is rejected by name**, with an `ArgumentException` explaining why: a canvas has no
+  natural size of its own, so an auto-sized viewport would collapse to nothing and look as though
+  the drawing had vanished. So are empty strings, and anything that is not a number, a number
+  followed by `*`, or a bare `*`.
+
+### Mouse handlers know which cell
+
+Handlers are registered once for the whole drawing — a pointer has one `onmousemove`, so there is no
+per-cell registration. `MouseInfo.Viewport` is how a handler tells cells apart:
+
+```csharp
+Viewports.Columns = 2;
+
+var readout = new VText(new VXYZ(-100, 100), "", 14) { Name = "readout" };
+readout.Place(Viewports[0][0]);
+
+Mouse.OnMove(e =>
+{
+    readout.Content = e.Viewport == Viewports[0][1]
+        ? $"right cell: {e.X:F1}, {e.Y:F1}"
+        : $"left cell: {e.X:F1}, {e.Y:F1}";
+});
+```
+
+It is compared by **reference**, and a viewport keeps its identity across every resize that does not
+remove it, so holding one in a variable and comparing against it later works. On an undivided
+drawing it is always the root — which is every drawing that never sets `Rows` or `Columns`.
+`e.Position`, `e.X` / `e.Y` and `e.Scale` are all in the world and the zoom of the cell the event
+came from, so they mean what you expect with no conversion.
+
+### Viewport members
+
+`Viewport` is a sealed class in `C2VGeometry`. `Viewports` is the root instance of it.
+
+**Statics**
+
+| Member | Type | Description |
+|--------|------|-------------|
+| `Viewport.Root` | `Viewport` | The whole drawing surface — the same object `Viewports` names |
+| `Viewport.MaxDimension` | `const int` | `8`. The most rows or columns one viewport may be split into |
+| `Viewport.Reset()` | `void` | Puts the layout back to a single undivided viewport. The app calls it between runs; you rarely need it |
+| `Viewport.Leaves()` | `IReadOnlyList<Viewport>` | Every drawing cell, depth-first and left to right — the order they appear on screen |
+| `Viewport.LayoutChanged` | `event Action?` | Raised when a `Rows`, `Columns`, `Height` or `Width` assignment actually changed something, and after `Reset()`. **May arrive on a thread-pool thread**, since `Main()` runs off the UI thread |
+
+**Instance members**
+
+| Member | Type | Description |
+|--------|------|-------------|
+| `Rows` | `int` | How many rows this viewport is split into. `1` (the default) means it is a leaf and draws. Throws `ArgumentOutOfRangeException` outside 1–`MaxDimension` |
+| `Columns` | `int` | The same for columns |
+| `this[int row]` | `ViewportRow` | One row, so `vp[row][column]` reads two-dimensionally. Throws `ArgumentOutOfRangeException` for a row that does not exist |
+| `IsLeaf` | `bool` | True when this viewport is undivided, and therefore owns a canvas of its own |
+| `Parent` | `Viewport?` | The viewport this one subdivides; `null` for the root |
+| `Depth` | `int` | `0` for the root, `1` for its cells, and so on |
+| `RowIndex` / `ColumnIndex` | `int` | Which row and column of its parent this viewport occupies; `-1` for the root |
+| `Path` | `string` | How this viewport is written in code — `"Viewports[0][1]"`, or `"Viewports[0][1][1][0]"` when nested |
+| `IsAttached` | `bool` | False once a resize or a `Reset()` took this viewport out of the tree. A detached viewport still answers questions about itself, but is nowhere on screen |
+| `Height` / `Width` | `string` | The height of this viewport's **row** and the width of its **column**, in XAML grid-length spelling. Throws `InvalidOperationException` on the root |
+| `RowHeightAt(int row)` | `ViewportLength` | The parsed height of one of *this* viewport's rows |
+| `ColumnWidthAt(int column)` | `ViewportLength` | The parsed width of one of *this* viewport's columns |
+| `FirstLeaf()` | `Viewport` | Itself when it is a leaf, otherwise its first descendant leaf — where a shape placed on it actually draws |
+| `ResolveVisible()` | `Viewport` | The leaf this viewport's shapes are visible in *now*: up to the nearest surviving ancestor if it was detached, then down to the first leaf. Falls back to the current root after a `Reset()` |
+| `ToString()` | `string` | Same as `Path` |
+
+```csharp
+Viewports.Rows = 2;
+Viewports.Columns = 2;
+Viewports[0][1].Rows = 2;                       // subdivide the top-right cell
+
+foreach (Viewport leaf in Viewport.Leaves())
+    VizConsole.Log($"{leaf.Path}  depth {leaf.Depth}  row {leaf.RowIndex} col {leaf.ColumnIndex}");
+
+// Viewports[0][0]        depth 1  row 0 col 0
+// Viewports[0][1][0][0]  depth 2  row 0 col 0
+// Viewports[0][1][1][0]  depth 2  row 1 col 0
+// Viewports[1][0]        depth 1  row 1 col 0
+// Viewports[1][1]        depth 1  row 1 col 1
+```
+
+#### ViewportRow
+
+What `Viewports[row]` returns. It exists so `Viewports[row][column]` reads the way a grid index
+should, and so that a row can be given a height directly.
+
+| Member | Type | Description |
+|--------|------|-------------|
+| `this[int column]` | `Viewport` | The cell at this row and that column. Throws `ArgumentOutOfRangeException` for a column that does not exist |
+| `Height` | `string` | How tall this row is, in XAML grid-length spelling: `Viewports[1].Height = "2*";` |
+
+#### ViewportLength
+
+A parsed row height or column width — a `readonly struct` in `C2VGeometry`. You get one from
+`RowHeightAt` / `ColumnWidthAt`; the `Height` / `Width` properties take and return the string form.
+
+| Member | Type | Description |
+|--------|------|-------------|
+| `ViewportLength.Star` | `static readonly ViewportLength` | One share of the remaining space — the default for every row and column, and what `"*"` parses to |
+| `ViewportLength.Parse(string)` | `static ViewportLength` | Reads `"*"`, `"3*"`, `"1.5*"`, or a plain number of pixels such as `"240"`. Throws `ArgumentException` on anything else, `"Auto"` included |
+| `IsStar` | `bool` | True for the `*` forms, false for a fixed pixel size |
+| `Value` | `double` | The number of shares when `IsStar`, otherwise the size in device pixels |
+| `ToString()` | `string` | The canonical spelling — `"*"`, `"3*"`, `"240"` |
+
+It also implements `IEquatable<ViewportLength>` and defines `==` / `!=`, so two sizes compare by
+value.
+
+```csharp
+Viewports.Columns = 2;
+Viewports[0][0].Width = "3*";
+
+ViewportLength w = Viewports.ColumnWidthAt(0);
+VizConsole.Log($"{w}  star={w.IsStar}  value={w.Value}");        // 3*  star=True  value=3
+
+VizConsole.Log(ViewportLength.Parse("240").IsStar.ToString());   // False — a fixed 240 pixels
+```
+
+### What divided drawings do elsewhere
+
+- **Export** is tiled, as it appears on screen — see
+  [Exporting a divided drawing](#exporting-a-divided-drawing).
+- **Selection, the drawing tools and the measuring tape** act on the cell the pointer last entered,
+  so they behave exactly as they always have; the rest of the drawing is simply not involved.
+- **`Canvas.Clear()`, `Shape.Remove()` and the shape ID counter** are drawing-wide, not per cell.
+
+---
+
 ## Canvas Features
 
 ### Interactive Controls
@@ -2597,10 +2855,12 @@ If a layout ever misbehaves, deleting `%APPDATA%\DoodleSharp\layout.xml` restore
 - **Middle-Click Drag**: Pan the canvas view
 - **Grid Toggle**: Show/hide reference grid lines (View menu)
 - **Auto Zoom Extents**: Fits all shapes after each run — enable *Zoom to fit on run* in Settings (off by default); double-clicking empty canvas does it on demand
+- **Zoom Controls**: Hover a canvas and a small panel appears at its top-right — zoom in, zoom out, zoom to fit, and the current zoom percentage
+- **Several canvases at once**: [`Viewports`](#viewports--dividing-the-drawing-surface) divides the pane into a grid, and each cell zooms and pans on its own. All of the above then apply to the cell under the pointer
 
 > **While your code has a mouse handler registered**, the canvas hands those gestures to you: wheel
-> zoom, click-to-select and double-click-zoom-to-fit are suppressed and floating zoom buttons appear
-> at the top-right instead. Middle-click drag still pans. See
+> zoom, click-to-select and double-click-zoom-to-fit are suppressed, and the hover zoom controls are
+> how you navigate instead. Middle-click drag still pans. See
 > [Mouse and pointer events](#mouse-and-pointer-events).
 
 ### Coordinate System
@@ -2921,7 +3181,9 @@ The Outliner hover highlight can be customized in the Settings tab (Application 
 - **Highlight Opacity**: Adjust transparency from 10% to 100% (default: 40%)
 
 ### Zoom To Shape
-Use **View > Zoom To Shape** (or `Ctrl+G`) to zoom to a specific shape by entering its ID.
+Use **View > Zoom To Shape** (or `Ctrl+G`) to zoom to a specific shape by entering its ID. On a
+[divided drawing](#viewports--dividing-the-drawing-surface) every cell is searched, and the one
+holding the shape zooms to it and becomes the active cell.
 
 ---
 
@@ -3011,7 +3273,9 @@ File > Export Video (MP4) exports animations as H.264 MP4 video files. The expor
 File > Export > DXF exports shapes to AutoCAD DXF format (R12 ASCII):
 - Compatible with AutoCAD, LibreCAD, and other CAD software
 - Supports all shape types (lines, circles, arcs, polygons, text, etc.)
-- Preserves geometry with high precision
+- Preserves geometry with high precision — **unless the drawing is
+  [divided into viewports](#exporting-a-divided-drawing)**, in which case the coordinates in the
+  file are screen distances rather than your own
 
 ### PDF Export
 File > Export > PDF exports shapes to vector PDF format:
@@ -3029,6 +3293,29 @@ File > Export > SVG exports shapes to SVG (Scalable Vector Graphics) format:
   `LineWeight = 2` would come out two *world* units thick and vanish on a large drawing — and
   `LineType` is written as a `stroke-dasharray` taken from the same
   [`LineTypePatterns`](#line-types) table the canvas uses, so a dashed line exports dashed
+
+### Exporting a divided drawing
+
+A drawing split into [viewports](#viewports--dividing-the-drawing-surface) exports **tiled, as it
+appears on screen** — the cells, their sizes, and each cell's own pan and zoom. Nothing is asked of
+you; the exporters notice for themselves.
+
+| Format | What comes out |
+|--------|----------------|
+| **PNG**, **GIF**, **MP4** | The whole container is captured, cells and all — the same picture as the screen, minus the on-screen chrome (zoom controls, selection handles, snap markers, the `F10` readout) |
+| **SVG**, **PDF** | Each cell becomes a **clipped, transformed group** at its own zoom, laid out on the page the way it is laid out on screen. Vector throughout, so it stays sharp |
+| **DXF** | Every cell is scaled by its own zoom and moved into a single model space, with a frame drawn round each. R12 DXF has no viewport concept, so there is nowhere else for them to go |
+
+> **The DXF caveat, plainly.** Because the cells are baked into one model space, **the coordinates in
+> the file are screen distances, not the drawing's own** — measure something in a CAD package and you
+> will get the tiled number, not the number your code produced. If you want true coordinates, export
+> an **undivided** viewport. (The console says so at export time as well, so it is hard to miss.)
+
+**An undivided drawing exports exactly as it always did**, through the untouched code path — no
+behaviour changed for a drawing that never touches `Viewports`. This matters most for SVG, where the
+two paths genuinely produce different pictures: the historical export fits the *shapes* with padding
+and ignores your view entirely, while a tiled export reproduces the *view*. The single-cell case
+keeps the historical one.
 
 ### Exporting from your own code
 
@@ -3068,6 +3355,25 @@ an empty shape list still produces a valid document sized from `width` and `heig
 | `PdfExporter.Export` | `DoodleSharp.Export` | `void Export(IReadOnlyList<IDrawable> shapes, string filePath, double pageWidthMm, double pageHeightMm, double scaleMmPerUnit, double marginMm)` — `0` for either page dimension auto-sizes it; `scaleMmPerUnit` is how many millimetres one drawing unit becomes on paper |
 | `DxfExporter.Export` | `DoodleSharp.Export` | `void Export(IReadOnlyList<IDrawable> shapes, string filePath)` — writes an AutoCAD R12 ASCII DXF. Circles and arcs stay native `CIRCLE`/`ARC` entities rather than being flattened to chords; ellipses are polygonised, because R12 has no `ELLIPSE` |
 | `DxfExporter.ExportToString` | `DoodleSharp.Export` | `string ExportToString(IReadOnlyList<IDrawable> shapes)` — the same content as a string, for when you want to post-process it or write it somewhere other than a file |
+
+The tiled forms are the same exporters given one entry per cell. You will not usually call them —
+File > Export builds the tiles from the live layout for you — but they are public, and they are what
+makes a divided drawing reproducible from your own code:
+
+| Member | Namespace | Signature |
+|--------|-----------|-----------|
+| `SvgExporter.SvgTile` | `DoodleSharp.Canvas` | `readonly record struct SvgTile(Rect PageRect, double Scale, double PanX, double PanY, IEnumerable<IDrawable> Shapes)` — one cell: where it sits on the page, its zoom, its pan, and what is in it |
+| `SvgExporter.ExportTiled` | `DoodleSharp.Canvas` | `static string ExportTiled(IReadOnlyList<SvgTile> tiles, double width, double height)` — each tile becomes a clipped, transformed `<g>` |
+| `SvgExporter.SaveTiledToFile` | `DoodleSharp.Canvas` | `static void SaveTiledToFile(string filePath, IReadOnlyList<SvgTile> tiles, double width, double height)` |
+| `PdfExporter.PdfTile` | `DoodleSharp.Export` | `readonly record struct PdfTile(Rect PageRect, double Scale, double PanX, double PanY, IReadOnlyList<IDrawable> Shapes)` |
+| `PdfExporter.ExportTiled` | `DoodleSharp.Export` | `void ExportTiled(IReadOnlyList<PdfTile> tiles, string filePath, double containerWidth, double containerHeight, double marginMm = 10)` — one page holding every tile, sized from the container |
+
+`Rect` here is `System.Windows.Rect`, in device pixels relative to the container's top-left, and
+`Scale` is that cell's zoom in **screen pixels per world unit** (the same quantity as
+`MouseInfo.Scale`). Note
+`PdfExporter.ExportTiled` takes no page size or `scaleMmPerUnit`: "one unit is N millimetres" has no
+single answer once the cells are at different zooms, so a tiled PDF reproduces the screen rather
+than a plotted scale. There is no tiled DXF entry point — DXF flattens instead, as described above.
 
 ```csharp
 using DoodleSharp.Export;   // PdfExporter
@@ -3858,6 +4164,11 @@ using DoodleSharp.Animation;   // Animator, Frame, Mouse, DrawAnimation, MoveAni
 using DoodleSharp.Console;     // VizConsole.Log()
 ```
 
+One more name is in scope without any `using` of yours: **`Viewports`**, the root
+[viewport](#viewports--dividing-the-drawing-surface). The compiler injects
+`global using static C2VGeometry.ViewportRoot;` into every compilation, so `Viewports.Rows = 2;`
+and `Place(Viewports[0][1])` compile in any file of the project with nothing to import.
+
 ### Names that would hide the API
 
 Those namespaces are imported into every file, and **C# searches your own declarations before it
@@ -3880,7 +4191,8 @@ Mouse is a keyword. try another name
 reported **on the declaration itself** — not on the line that failed to compile — and once per name,
 however many uses it broke. Rename the declaration and the uses resolve again. The names to steer
 around are the type names in the namespaces above: `Mouse`, `Frame`, `Canvas`, `Shape`, `Console`,
-`Math`, `List`, and every `V*` shape type. An ordinary typo against the real API still reports as an
+`Math`, `List`, every `V*` shape type, and the viewport names `Viewport`, `ViewportRow`,
+`ViewportLength` and `Viewports` itself. An ordinary typo against the real API still reports as an
 ordinary typo.
 
 ### Auto Save
@@ -4095,7 +4407,7 @@ lists.
 | `CurveGeometry.DistanceToSegment(point, a, b)` | double | Shortest distance to the segment `[a, b]`. A degenerate (zero-length) segment measures to the point itself |
 | `CurveGeometry.DistanceToPath(point, vertices, closed = false)` | double | Nearest of every segment through `vertices`. `closed: true` adds the closing edge. Empty list returns `double.PositiveInfinity` |
 | `CurveGeometry.DistanceToCurve(point, curve, samples = 96)` | double | Samples any `ICurve` into a polyline and measures to that |
-| `CurveGeometry.IsOnStroke(distance, curveExtent)` | bool | Whether a distance counts as "on" a stroke of that size — tolerance is `max(1e-9, |curveExtent| × 1e-6)` |
+| `CurveGeometry.IsOnStroke(distance, curveExtent)` | bool | Whether a distance counts as "on" a stroke of that size — tolerance is `max(1e-9, \|curveExtent\| × 1e-6)` |
 
 ### ControlPoint
 
@@ -4682,7 +4994,7 @@ VLine MakeEdge(VXYZ a, VXYZ b) =>
     new VLine(a, b) { Color = "Gold", Name = "edge" };
 ```
 
-When this happens, the console will log a warning naming the count and per-type breakdown — e.g. `Warning: 178 unnamed shape(s) hidden (178 VLine). To keep them visible, assign to a var ... or set Name explicitly in the initializer.` Calling `shape.Place()` also keeps it visible (it sets `IsExplicitlyDrawn = true`); `shape.Draw()` is the historical name for the same call.
+When this happens, the console will log a warning naming the count and per-type breakdown — e.g. `Warning: 178 unnamed shape(s) hidden (178 VLine). To keep them visible, assign to a var ... or set Name explicitly in the initializer.` Calling `shape.Place()` also keeps it visible (it sets `IsExplicitlyDrawn = true`); `shape.Draw()` is the historical name for the same call, and `shape.Place(Viewports[0][1])` does the same while also choosing the [cell](#viewports--dividing-the-drawing-surface) it draws in.
 
 ---
 

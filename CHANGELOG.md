@@ -9,6 +9,89 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+### Added
+- **Viewports — split the canvas into a grid, and draw into any cell.** The canvas pane can now hold
+  several independent views instead of one. `Viewports.Rows` and `Viewports.Columns` divide it (both
+  default to 1, so nothing changes until you ask for it), and a shape goes to a particular cell by
+  naming it:
+
+  ```csharp
+  Viewports.Rows = 2;
+  Viewports.Columns = 3;
+
+  new VCircle(new VXYZ(0, 0), 10).Place(Viewports[0][0]);
+  new VLine(a, b).Place(Viewports[1][2]);
+  new VRectangle(...).Place();              // no argument — the first cell, as always
+  ```
+
+  Indices are 0-based, row first. Each cell pans and zooms on its own, has its own selection and its
+  own tools, and keeps its view when you press F5 — so you can leave one cell zoomed into a detail
+  while another shows the whole drawing. Zoom in / out / fit buttons appear over a cell while the
+  pointer is over it, rather than sitting on screen permanently.
+
+  The container is what docks, not the individual views: the pane is still one panel titled "Canvas",
+  and floating or rearranging it works exactly as before.
+
+- **Any cell can be subdivided again**, which is how uneven layouts are expressed — one large view
+  beside a column of small ones is just a divided cell:
+
+  ```csharp
+  Viewports.Columns = 2;
+  Viewport right = Viewports[0][1];
+  right.Rows = 3;
+  new VPolygon(...).Place(right[1][0]);
+  ```
+
+- **Row heights and column widths, written the way XAML writes them.** `"*"` is one share of the
+  space, `"3*"` is three shares, and a plain number is a fixed size in pixels:
+
+  ```csharp
+  Viewports[0].Height = "3*";        // the top row takes three quarters
+  Viewports[0][2].Width = "4*";      // the last column takes four sixths
+  Viewports[0][0].Width = "240";     // ...or a fixed 240 pixels
+  ```
+
+  A height belongs to the row and a width to the column, exactly as in a XAML `Grid`. `"Auto"` is
+  rejected with an explanation: a canvas has no natural size, so an auto-sized cell would collapse to
+  nothing.
+
+- **`MouseInfo.Viewport`** tells a mouse handler which cell an event came from. Handlers are still
+  registered once for the whole drawing, so this is how you tell cells apart:
+  `if (e.Viewport == Viewports[0][1]) { ... }`.
+
+### Changed
+- **Export covers the whole container, tiled as it appears on screen.** PNG, GIF and MP4 capture
+  every cell in its place. SVG and PDF put each cell in its own clipped group at its own zoom. A
+  drawing you have not divided exports exactly as it always did, through the same code path — for
+  SVG that distinction matters, because the existing export frames the *shapes* with padding while a
+  tiled one reproduces the *view*.
+- **DXF tiles into model space, and says so.** DXF has no concept of a viewport, so a divided drawing
+  is flattened: each cell is scaled by its own zoom and moved into place. Distances in the resulting
+  file are therefore screen distances, not the drawing's own — the console says this on every tiled
+  DXF export. Export an undivided viewport when you need true coordinates.
+- **The layout resets to a single view on every run**, like shape IDs do, so what is on screen always
+  matches what the code asks for. Deleting a `Viewports.Rows = 2;` line takes effect on the next run
+  rather than lingering until restart.
+- Indexing a cell that does not exist — `Viewports[2][3]` on a 2×2 grid — now reports the error with
+  the current size and the valid ranges, instead of failing obscurely. The usual cause is indexing
+  before setting `Rows`.
+
+### Removed
+- **The "Auto-update Canvas" and "Auto-Draw Shapes" settings are gone. Code runs on F5 / Run only.**
+  The canvas no longer re-runs your code a moment after you stop typing. Shapes still appear as soon
+  as they are constructed, which is unchanged; what has gone is the setting that could switch that
+  off, and the debounced re-run that could execute a half-finished edit. Both keys are dropped from
+  `appsettings.json` automatically the next time settings are saved — nothing to do by hand.
+
+### Known limitations
+- With the renderer forced to **GPU** in Settings, only the cell you are working in — and one other —
+  use it; the rest fall back to the software renderer, so that a large grid cannot exhaust the
+  graphics device.
+- The frame-timing readout (F10) is drawn on the active cell only. Its numbers cover the whole frame,
+  which is one cost however many cells there are.
+- All cells share one canvas background colour.
+
+
 ## [2026.8.7] - 2026-08-19
 
 ### Added
