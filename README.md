@@ -2622,13 +2622,14 @@ immediately — no restart — and is saved globally for all projects.
 | Setting | What draws the scene | When you would choose it |
 |---------|----------------------|--------------------------|
 | **Auto (recommended)** *(default)* | Picks per frame between Legacy and Managed — it switches to the rasterizer when the previous frame took too long, and back when few shapes are on screen | Leave it here. It is faster than either fixed choice, because a drawing's cost changes as you pan and zoom |
-| **Legacy (WPF vector)** | WPF throughout | You want one renderer for the whole session, or you need exact creation-order layering (see below) |
+| **Legacy (WPF vector)** | WPF throughout | You want one renderer for the whole session, or you need exact `ZIndex` layering, including a label drawn *under* geometry (see below) |
 | **Managed (software rasterizer)** | A CPU rasterizer draws the line work into a bitmap; text, dimensions and canvas chrome are drawn over it by WPF | A consistently dense drawing. It pays a fixed cost per frame (clearing and copying a full-window bitmap) in exchange for a much cheaper per-shape cost |
 | **GPU (Direct3D 11)** | Direct3D 11. Geometry is uploaded once in world coordinates, so panning and zooming rewrite one small transform instead of re-submitting the drawing | Very large drawings, high-resolution displays, or when navigation rather than the first frame is what feels heavy. Opt-in only — Auto never selects it |
 
 **Four things to know before you change it.** Managed and GPU draw in two layers, so annotation
-(text, dimensions) always composites **above** geometry, whatever order the shapes were created in;
-Legacy honours creation order throughout. They also **outline arrowheads rather than filling them**,
+(text, dimensions) always composites **above** geometry, whatever their [`ZIndex`](#draw-order)
+says; Legacy honours `ZIndex` ordering throughout, including a label placed under geometry on
+purpose. They also **outline arrowheads rather than filling them**,
 on arrows and dimensions alike — the head keeps its size, angle and position, but a solid triangle
 under Legacy becomes a hollow one (see [Arrowhead geometry](#arrowhead-geometry)). Neither of them
 reads `LineWeight` — both draw one-pixel hairlines — which is why Auto stays on Legacy while

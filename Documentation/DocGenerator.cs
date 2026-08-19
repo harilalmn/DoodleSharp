@@ -378,6 +378,21 @@ namespace DoodleSharp.Documentation
                 .Where(m => !m.IsSpecialName && m.DeclaringType != typeof(object)) // Exclude getter/setter internal methods and Object methods
                 .ToArray();
 
+            // DeclaredOnly on an INTERFACE means exactly that: an interface has no BaseType chain
+            // to walk, so a member declared only on an extended interface (IDrawable.Draw/Place,
+            // reached through ICurve) never appeared here even though ICurve.Draw/ICurve.Place
+            // already had descriptions written — the page simply never showed the members those
+            // keys were for. Fold in each extended interface's own declared methods so a reference
+            // typed as this interface shows the whole contract it actually exposes.
+            if (type.IsInterface)
+            {
+                var declaredNames = methods.Select(m => m.Name).ToHashSet();
+                var inheritedInterfaceMethods = type.GetInterfaces()
+                    .SelectMany(i => i.GetMethods(MemberFlags))
+                    .Where(m => !m.IsSpecialName && m.DeclaringType != typeof(object) && !declaredNames.Contains(m.Name));
+                methods = methods.Concat(inheritedInterfaceMethods).ToArray();
+            }
+
             if (methods.Length > 0)
             {
                 AddSectionHeader(doc, "Methods");
@@ -1529,7 +1544,7 @@ var b = new VPolygon(new VXYZ(50, 50), new VXYZ(150, 50), new VXYZ(150, 150));
 a.Color = ""Tomato""; a.FillColor = ""#40FF6347"";
 
 VPolygon? merged = a.Union(b);   // a method result: unnamed, default styling
-a.CopyStyleTo(merged);           // copy Color/FillColor/LineWeight/LineType/LineTypeScale
+a.CopyStyleTo(merged);           // copy Color/FillColor/LineWeight/LineType/LineTypeScale/ZIndex
 merged?.Place();                 // ...and keep it past the post-run cleanup
 // Draw() is the historical name for Place() and does exactly the same thing.
 
@@ -3437,6 +3452,278 @@ if (lifted != null) { lifted.Move(new VXYZ(0, -80)); lifted.Color = ""Magenta"";
 
 // A glyph with holes (O, A, 8) comes back as a VGroup of contour polylines;
 // a simple glyph comes back as a single closed VPolyline." },
+
+                // ---- C2VGeometry.Rendering: the shape-to-primitive seam. Renderer plumbing --
+                // to draw a shape, just construct it -- but public, and the floor a custom
+                // exporter or a custom analysis pass (measuring, counting, reducing) is built on.
+
+                { "ShapeTessellator", @"// ShapeTessellator is the one place a Shape becomes primitives -- polylines,
+// filled loops, points and text -- pushed into an IPrimitiveSink. Construct
+// one and reuse it across shapes; it holds scratch buffers and is
+// deliberately NOT thread-safe, so give each thread its own.
+// Add `using C2VGeometry.Rendering;` at the top of the file.
+
+var tessellator = new ShapeTessellator();
+var bounds = new BoundsPrimitiveSink();      // any IPrimitiveSink will do here
+
+var disc = new VCircle(0, 0, 50) { Name = ""disc"" };
+
+// Tessellate RETURNS BOOL, and the value is not optional: false means the
+// sink declined the shape, or this tessellator has no primitives for it at
+// all -- ignoring it is how dimensions and construction lines silently
+// vanish from a custom export.
+bool handled = tessellator.Tessellate(disc, bounds);
+VizConsole.Log(handled
+    ? $""bounds ({bounds.MinX:F0}, {bounds.MinY:F0}) to ({bounds.MaxX:F0}, {bounds.MaxY:F0})""
+    : ""declined"");
+
+// The curve-flattening rule it uses, exposed so a caller can match it.
+int segments = ShapeTessellator.SegmentsForRadius(radiusPixels: 40);" },
+
+                { "IPrimitiveSink", @"// IPrimitiveSink is where ShapeTessellator sends the primitives it produces --
+// implement it to consume the geometry library's output in your own format.
+// Renderer plumbing, not scripting API: to draw a shape, just construct it.
+// Add `using C2VGeometry.Rendering;` at the top of the file.
+
+// Declare the class at file scope - C# has no local classes, so this goes
+// outside Main() (in StartViz.cs or any other .cs file in the project).
+class PrimitiveCounter : IPrimitiveSink
+{
+    public int Strokes, Fills, Points;
+    public TessellationHints Hints { get; } = new TessellationHints { Scale = 1.0 };
+
+    public bool BeginShape(Shape shape, in PenSpec pen) => true;   // accept every shape
+    public void EndShape() { }
+    public void EmitPolyline(IReadOnlyList<VXYZ> points, bool closed) => Strokes++;
+    public void EmitFilledLoops(IReadOnlyList<IReadOnlyList<VXYZ>> loops, FillRule rule) => Fills++;
+    public void EmitPoint(VXYZ point) => Points++;
+    public void EmitText(VText text) { }
+    // TryEmitNative is a default interface member returning false -- leave it
+    // alone unless this sink has a native form of its own for some shape.
+}
+
+// ... and in Main():
+var counter = new PrimitiveCounter();
+new ShapeTessellator().Tessellate(new VCircle(0, 0, 40), counter);
+VizConsole.Log($""{counter.Strokes} strokes, {counter.Fills} fills, {counter.Points} points"");" },
+
+                { "PenSpec", @"// PenSpec is everything a renderer needs to paint one shape, lifted out of it
+// so a sink never has to reach back into Shape. Build one with
+// PenSpec.From(shape), not the constructor.
+// Add `using C2VGeometry.Rendering;` at the top of the file.
+
+var ring = new VCircle(0, 0, 50) { Color = ""Cyan"", FillColor = ""Transparent"" };
+var pen = PenSpec.From(ring);
+VizConsole.Log($""{pen.Color}, weight {pen.LineWeight}, filled={pen.HasFill}"");   // filled=False
+
+// HasFill treats """", ""Transparent"" and ""None"" (case-insensitively) as no
+// fill -- the check a sink should make before filling anything.
+var disc = new VCircle(120, 0, 50) { FillColor = ""#4000FFFF"" };
+VizConsole.Log($""filled={PenSpec.From(disc).HasFill}"");   // filled=True" },
+
+                { "FillRule", @"// FillRule decides what counts as 'inside' a filled outline, for
+// IPrimitiveSink.EmitFilledLoops. It only affects how a SINK paints what it
+// is given -- not the library's own boolean operations, which pick a fill
+// rule for themselves internally (PolygonClipper).
+// Add `using C2VGeometry.Rendering;` at the top of the file.
+
+FillRule outerPlusHoles = FillRule.EvenOdd;   // the default (0): a loop inside
+                                               // a loop is always a hole
+FillRule byWinding      = FillRule.NonZero;   // (1): a hole only if it winds
+                                               // opposite to the outer loop
+
+VizConsole.Log($""{(int)outerPlusHoles} {(int)byWinding}"");   // 0 1" },
+
+                { "TessellationHints", @"// TessellationHints controls how finely curves are flattened, carried on
+// every IPrimitiveSink.
+// Add `using C2VGeometry.Rendering;` at the top of the file.
+
+var hints = new TessellationHints
+{
+    // World units per device pixel. Segment counts are chosen from a shape's
+    // size in PIXELS, so a radius-1 circle needs more segments zoomed in
+    // (small Scale) than zoomed out (large Scale).
+    Scale = 2.0,
+
+    // Set by a sink that can express a circle AS a circle (DXF, SVG, PDF):
+    // when true, the tessellator offers TryEmitNative first and only
+    // flattens what the sink declines.
+    PreferNative = true,
+};
+
+int segments = ShapeTessellator.SegmentsForRadius(radiusPixels: 30 / hints.Scale);" },
+
+                { "BoundsPrimitiveSink", @"// BoundsPrimitiveSink measures instead of drawing: feed shapes through
+// ShapeTessellator and it accumulates a bounding box over everything it
+// sees. This is exactly what zoom-to-extents uses -- measuring through the
+// tessellator sees precisely what the renderer draws.
+// Add `using C2VGeometry.Rendering;` at the top of the file.
+
+var sink = new BoundsPrimitiveSink();
+var tessellator = new ShapeTessellator();
+
+Shape[] scene = { new VCircle(-60, 0, 30), new VRectangle(20, -20, 80, 60) };
+foreach (var shape in scene)
+{
+    if (!tessellator.Tessellate(shape, sink))
+        sink.IncludeBounds(shape);   // fold in a shape the tessellator declined,
+                                      // using the shape's own GetBounds()
+}
+
+if (sink.HasBounds)   // false until something has actually been added
+    VizConsole.Log($""({sink.MinX:F0}, {sink.MinY:F0}) to ({sink.MaxX:F0}, {sink.MaxY:F0})"");
+
+sink.Reset();   // ready to reuse for the next query
+
+// For a single shape, prefer shape.GetBounds() -- this is for measuring a set." },
+
+                { "PolylineFallbackSink", @"// PolylineFallbackSink reduces any shape to plain polylines and filled loops --
+// the floor a custom exporter falls back to for a type it has no native
+// form for. It is what each shape is reduced to when nothing more specific
+// applies; the exporter's own switch stays responsible for its native forms
+// (a circle should stay a CIRCLE entity in DXF, not become sixty-four chords).
+// Add `using C2VGeometry.Rendering;` at the top of the file.
+
+var sink = new PolylineFallbackSink();
+sink.OnPolyline = (points, closed, pen)
+    => VizConsole.Log($""{points.Count} points, closed={closed}, color={pen.Color}"");
+sink.OnFilled = (loops, pen)
+    => VizConsole.Log($""{loops.Count} loop(s) filled with {pen.FillColor}"");
+
+var tessellator = new ShapeTessellator();
+var wedge = new VPolygon(new VXYZ(0, 0), new VXYZ(80, 0), new VXYZ(40, 60))
+{
+    FillColor = ""#4000FFFF""
+};
+
+if (!tessellator.Tessellate(wedge, sink))
+    sink.Unhandled.Add(wedge);   // the sink does NOT fill this in for you --
+                                  // the caller appends whenever Tessellate returns false
+
+VizConsole.Log(sink.Unhandled.Count == 0 ? ""export complete"" : $""{sink.Unhandled.Count} shape(s) dropped"");
+sink.Reset();   // clears Unhandled between runs" },
+
+                // ---- DoodleSharp.Console: the collector behind the console panel.
+
+                { "ConsoleOutput", @"// ConsoleOutput is the singleton behind the console panel -- the collector
+// VizConsole.Log writes into. You almost never construct or call this
+// directly; VizConsole.Log is the scripting API and captures the calling
+// file/line for you, which this does not.
+// Add `using DoodleSharp.Console;` at the top of the file.
+
+VizConsole.Log(""first line"");
+VizConsole.Log(""second line"");
+
+var log = ConsoleOutput.Instance;
+foreach (var entry in log.GetEntries())
+    VizConsole.Log($""[{entry.ModuleName}:{entry.LineNumber}] {entry.Message}"");
+
+// A custom entry with a clickable source location:
+log.AddEntry(""custom note"", filePath: @""C:\proj\StartViz.cs"", lineNumber: 12);
+
+string dump = log.GetFormattedOutput();   // handy for copying a run's log elsewhere
+log.Flush();                              // force the panel to catch up right now
+// log.Clear();                           // wipes the panel" },
+
+                { "ConsoleEntry", @"// ConsoleEntry is one line in the console panel -- plain data, returned from
+// ConsoleOutput.GetEntries() rather than constructed directly.
+// Add `using DoodleSharp.Console;` at the top of the file.
+
+VizConsole.Log(""hello"");
+ConsoleOutput.Instance.WriteError(""StartViz"", 42, ""oops"");   // rendered in the error colour
+
+foreach (ConsoleEntry entry in ConsoleOutput.Instance.GetEntries())
+{
+    string kind = entry.IsError ? ""ERROR"" : ""info"";
+    VizConsole.Log($""{kind} {entry.ModuleName}:{entry.LineNumber} {entry.Message}"");
+
+    // IsClickable is COMPUTED, not set -- true only when both a FilePath and
+    // a LineNumber > 0 are present, which is what makes a console line jump
+    // to the code when you click it.
+    if (entry.IsClickable)
+        VizConsole.Log($""  -> {entry.FilePath}:{entry.LineNumber}"");
+}" },
+
+                // ---- DoodleSharp.Export: file formats, reached in the app through
+                // File > Export. Callable directly for a scripted batch export.
+
+                { "DxfExporter", @"// DxfExporter writes AutoCAD-compatible DXF (R12 ASCII). Shapes with a
+// native DXF equivalent keep it -- a VCircle becomes a CIRCLE entity, not
+// sixty-four chords -- and everything else is decomposed into polylines
+// rather than being silently dropped.
+// Add `using DoodleSharp.Export;` and `using DoodleSharp.Canvas;`.
+
+new VCircle(0, 0, 50) { Name = ""hole"" };
+new VRectangle(-80, -60, 160, 120) { Name = ""frame"" };
+
+var shapes = CanvasRenderer.Instance.GetShapes();   // IReadOnlyList<IDrawable>
+
+var dxf = new DxfExporter();
+dxf.Export(shapes, @""C:\temp\drawing.dxf"");         // one drawing unit = one DXF unit, Y up
+
+string text = dxf.ExportToString(shapes);           // ...or get the DXF text itself
+VizConsole.Log($""{text.Length} characters of DXF for {shapes.Count} shapes"");" },
+
+                { "PdfExporter", @"// PdfExporter writes real vector PDF (via PdfSharp) -- colours, line weights
+// and dash patterns all survive, unlike a screenshot.
+// Add `using DoodleSharp.Export;` and `using DoodleSharp.Canvas;`.
+
+new VCircle(0, 0, 50) { Color = ""Tomato"", Name = ""disc"" };
+new VRectangle(-80, -60, 160, 120) { Name = ""frame"" };
+
+var shapes = CanvasRenderer.Instance.GetShapes();
+
+var pdf = new PdfExporter();
+pdf.Export(shapes, @""C:\temp\drawing.pdf"");   // page auto-sized to the drawing
+
+// Or choose the sheet yourself. Everything is an argument -- there is no
+// PageSize or Margin property: page size in mm (0 for either = auto-size to
+// content), the plot scale as mm of paper per drawing unit, and the margin.
+pdf.Export(shapes, @""C:\temp\a4.pdf"",
+    pageWidthMm: 297, pageHeightMm: 210, scaleMmPerUnit: 1.0, marginMm: 10);" },
+
+                { "GifEncoder", @"// GifEncoder writes an animated GIF, one frame at a time, to any Stream.
+// Frame delay and looping are CONSTRUCTOR ARGUMENTS, not properties, and the
+// file only becomes a valid GIF once Dispose() runs -- always wrap it in a
+// using statement. Every frame must match the width/height given here.
+// Add `using DoodleSharp.Export;` and
+// `using System.Windows.Media.Imaging;` at the top of the file.
+
+using var stream = System.IO.File.Create(@""C:\temp\loop.gif"");
+using var gif = new GifEncoder(stream, width: 200, height: 200, frameDelayMs: 80, repeat: true);
+
+for (int i = 0; i < 10; i++)
+{
+    var frame = new RenderTargetBitmap(200, 200, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+    // ... render your own visual into `frame` here, in order, one call per frame ...
+    gif.AddFrame(frame);
+}
+// Dispose() (the `using` above) writes the trailer -- nothing is a valid GIF
+// on disk before that runs.
+
+// In practice you reach this through File > Export > GIF in the app, which
+// drives the per-frame capture for you." },
+
+                { "VideoExporter", @"// VideoExporter writes MP4 via the Windows Media Foundation H.264 encoder --
+// no external tools to install. Implements IDisposable, so wrap it in a
+// using statement to finalise the file.
+// Add `using DoodleSharp.Export;` and
+// `using System.Windows.Media.Imaging;` at the top of the file.
+
+using var video = new VideoExporter(@""C:\temp\clip.mp4"", width: 640, height: 480, fps: 30, bitrateMbps: 5);
+
+for (int i = 0; i < 60; i++)   // two seconds at 30 fps
+{
+    var frame = new RenderTargetBitmap(640, 480, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+    // ... render your own visual into `frame` here, in order, one call per frame ...
+    video.AddFrame(frame);
+}
+// Dispose() (the `using` above) finalises the container -- the file is not
+// playable before that runs.
+
+// In practice you reach this through File > Export > Video, which offers
+// resolution presets (Canvas Size, 720p, 1080p, 4K, Custom), 15-60 FPS and
+// 1-20 Mbps, and drives the frame capture for you." },
             };
         }
 
@@ -4046,7 +4333,7 @@ if (lifted != null) { lifted.Move(new VXYZ(0, -80)); lifted.Color = ""Magenta"";
                 // Shape base class methods
                 { "Shape.Place", "Puts the shape on the canvas and keeps it there: registers it with Shape.DefaultRegistry and sets IsExplicitlyDrawn = true, which exempts it from the pass that hides unnamed shapes after Main() returns. Idempotent — calling it twice, or on a shape that is already placed, is harmless — and Remove() is the inverse. A shape you construct yourself needs no Place() call, because construction already registered it. Reach for it when the shape did not come from a plain `new`: results of boolean ops, ArrayOps and Chart (registered but unnamed, so otherwise swept away — setting Name does the same job); the query results that deliberately do not draw their answer (GeometryHelper.IntersectLineLine and friends, VRay.ToFiniteLine, VRay.ToXLine, VXLine.ToFiniteLine); and anything built while Shape.AutoRegister was false." },
                 { "Shape.Draw", "The historical name for Place(), and exactly equivalent to it — a one-line forward, pinned by a test so the two cannot drift apart. It appears throughout older projects and samples, and the canvas drawing tools still emit it in the code they generate, so it is in no way discouraged; there is nothing to migrate. New code reads better with Place(), which says what actually happens: shapes render because they are registered, not because something was 'drawn'." },
-                { "Shape.CopyStyleTo", "Copies this shape's styling onto another shape and returns that target, so the call chains. Copies exactly five members — Color, FillColor, LineWeight, LineType, LineTypeScale — and touches nothing else: geometry, Name, Id, IsVisible and placement are all left alone. It is a no-op (returning the argument unchanged) when the target is null or is this same shape, which is what makes it comfortable to use on a boolean-op result that may legitimately be null. The motivating case is restyling a computed shape to match the input it came from: a.CopyStyleTo(a.Union(b))." },
+                { "Shape.CopyStyleTo", "Copies this shape's styling onto another shape and returns that target, so the call chains. Copies six members — Color, FillColor, LineWeight, LineType, LineTypeScale, ZIndex — and touches nothing else: geometry, Name, Id, IsVisible and placement are all left alone. It is a no-op (returning the argument unchanged) when the target is null or is this same shape, which is what makes it comfortable to use on a boolean-op result that may legitimately be null. The motivating case is restyling a computed shape to match the input it came from: a.CopyStyleTo(a.Union(b))." },
                 { "Shape.Remove", "Unregisters the shape from the canvas — the inverse of Place(). Unlike Hide(), the shape is gone from the collection, not merely unrendered." },
                 { "Shape.Name", "Optional label for the shape, default an empty string. Also load-bearing for visibility: after Main() returns, shapes whose Name is empty and which were never explicitly drawn are hidden as construction leftovers." },
                 { "Shape.Opacity", "Transparency multiplier from 0 (invisible) to 1 (opaque). Default 1.0. Applied on top of any alpha already present in Color or FillColor." },

@@ -65,6 +65,8 @@ DoodleSharp is a desktop application that enables users to visualize 2D geometri
 | FR-024 | Opacity | Done | Transparency support |
 | FR-025 | Line Weight Render Mode | Done | Stroke thickness relative to zoom (world units, default) or absolute screen pixels |
 | FR-026 | Line Type Scale Render Mode | Done | Dash/gap lengths relative to zoom (world units, default) or absolute screen pixels |
+| FR-027 | Draw Order | Done | `ZIndex` on every shape — global, higher on top, ties keep creation order, negatives behind |
+| FR-028 | Text Mask | Done | Solid plate behind text so a label reads over geometry; on by default, coloured from the canvas background |
 
 ### 2.3 Canvas Features
 
@@ -267,7 +269,13 @@ DoodleSharp is a desktop application that enables users to visualize 2D geometri
 - **The render backend is selectable from Settings** — it had no interface at all and could only be changed by hand-editing the settings file. All four choices are now listed, including a GPU option the code had always honoured but nothing documented.
 - **Region union respects the curve precision it is given** — every other region boolean honoured the `segmentsPerCurve` argument when folding a collection; union ignored it, so a union of curve-bounded regions could come back coarser than an intersection of the same inputs.
 
-### Version 2026.8.7 (Implemented) — DoodleSharp on the Web + Slice Correctness
+### Version 2026.8.7 (Implemented) — Text Masks, Draw Order, Alphabetical IntelliSense
+- **Text is masked by default** — every `VText` fills a rectangle behind its glyphs in the canvas background colour, so a label crossing the geometry it describes stays readable: invisible over empty canvas, a clean interruption over anything it crosses. The colour follows the canvas background live (change the background and every label follows), the padding is a fraction of the text height so a small and a large label look alike, and the plate is neither a shape nor part of the text's bounding box. Over a *filled* shape it punches a canvas-coloured hole — turn it off there with `Mask = false`.
+- **`ZIndex` decides draw order, for the whole drawing** — higher draws on top, shapes sharing a value keep the order they were created in, negatives push a backdrop behind everything, and hit-testing follows the same order. It replaces `BringAbove`/`SendBehind`, which settled an argument between two shapes and were undone by the very next shape constructed, so "this label is always on top" could not be said at all.
+- **The IntelliSense list is alphabetical** — what you type still filters it and matched characters are still bold, but the surviving items are in plain A–Z order instead of a five-key ranking that ended in *name length*, which listed a `VLine`'s members as End, Flip, Move, Clone, Scale, Start, Divide, Offset. Snippets still sit at the top and are still what `Tab` expands.
+- **A rotation-unit trap was closed** — `VXYZ.AngleTo` answers in radians while every rotation API here takes degrees, so a label rotated by the angle between its line and the X axis came out 3.14° crooked instead of turned right round, on exactly the half of a drawing whose lines pointed the other way. `AngleToDegrees` and `AngleToRadians` say which they are; the old name is deprecated, not redefined.
+
+### Version 2026.8.5 (Implemented) — DoodleSharp on the Web + Slice Correctness
 - **The JavaScript web app was deleted** — it was a parallel reimplementation of the geometry that drifted for four months across 150 commits, ending with a polygon union that returned the convex hull of both inputs and called points outside either one "inside". Sharing the library instead of duplicating it is the whole point of the replacement, and a standing web-parity instruction now makes divergence a reportable event rather than a silent one.
 - **Slicing a polygon no longer loses most of it** — cutting a concave parcel whose notch straddled the line returned two thin slivers totalling 12,945 out of an area of 225,561; the body of the parcel was dropped, and because the slivers were valid polygons nothing reported an error. `Slice` is now **area-preserving**: the pieces always add back up to the original. A concave polygon crossed more than twice correctly returns three or more pieces, so code that assumed exactly two results should check the count.
 - **Undo after deleting a shape on the canvas works** — removing the code counts as an edit, which starts the automatic canvas update, and every run used to wipe the undo history including the entry for the delete that had just caused it.
