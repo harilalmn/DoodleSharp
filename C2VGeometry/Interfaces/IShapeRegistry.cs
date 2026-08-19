@@ -32,12 +32,16 @@ public interface IShapeRegistry
     void Clear();
 
     /// <summary>
-    /// Moves a shape so it renders above (after) another shape in the draw order.
+    /// Called when a shape's <see cref="Shape.ZIndex"/> changes, so the host knows the draw order
+    /// it is holding is stale and has to be re-derived before the next paint.
+    ///
+    /// <para>
+    /// This replaced the old <c>MoveAbove</c>/<c>MoveBehind</c> pair. Those reordered the host's
+    /// list directly, which meant the answer to "what is on top" depended on the order the calls
+    /// happened to be made in and was undone by the next shape to be created. Order is now a
+    /// property of the shape (<c>ZIndex</c>, ascending, creation order breaking ties) and the
+    /// registry is merely told to re-sort.
+    /// </para>
     /// </summary>
-    void MoveAbove(Shape shape, Shape referenceShape);
-
-    /// <summary>
-    /// Moves a shape so it renders behind (before) another shape in the draw order.
-    /// </summary>
-    void MoveBehind(Shape shape, Shape referenceShape);
+    void NotifyOrderChanged(Shape shape);
 }

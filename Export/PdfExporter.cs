@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Media;
@@ -503,6 +503,17 @@ public class PdfExporter
         if (text.Angle != 0)
             gfx.RotateTransform(text.Angle); // Outer scale(1,-1) makes RotateTransform CCW in world coords.
         gfx.TranslateTransform(anchorOffsetX, anchorOffsetY);
+
+        // The mask is drawn before the un-flip, so its rectangle is in world (Y-up) coordinates
+        // running from the text baseline upward, and before the glyphs so it renders underneath
+        // them. Padding is a fraction of the text height, matching the canvas.
+        if (text.Mask)
+        {
+            var pad = text.MaskOffset * measuredHeight;
+            gfx.DrawRectangle(new XSolidBrush(ParseColor(text.MaskColor)),
+                -pad, -pad, measuredWidth + 2 * pad, measuredHeight + 2 * pad);
+        }
+
         gfx.ScaleTransform(1, -1); // Un-flip for text
         gfx.DrawString(text.Content ?? "", font, brush, 0, 0);
         gfx.Restore();

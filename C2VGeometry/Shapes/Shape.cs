@@ -204,6 +204,38 @@ public abstract class Shape : IDrawable
     /// </summary>
     public double LineTypeScale { get; set; }
 
+    /// <summary>
+    /// Draw order for the whole drawing. Higher renders on top; the default is 0.
+    ///
+    /// <para>
+    /// This is a <b>global</b> ordering key, not a relationship between two shapes: everything on
+    /// the canvas is drawn in ascending <c>ZIndex</c>, and shapes sharing a value keep the order
+    /// they were created in. So <c>label.ZIndex = 10;</c> puts that label above every default shape
+    /// no matter what is added afterwards, which is what the old <c>BringAbove</c>/<c>SendBehind</c>
+    /// pair could not do — they reordered a list once, and the next shape to be created landed on
+    /// top again.
+    /// </para>
+    ///
+    /// <para>
+    /// Negative values are fine and are the natural way to push a background behind everything.
+    /// Assigning it tells the registry the draw order changed, so it takes effect on the next
+    /// repaint without any further call. Inside a <see cref="VGroup"/> the children are drawn in the
+    /// order the group holds them; the group's own <c>ZIndex</c> places the group as a whole.
+    /// </para>
+    /// </summary>
+    public int ZIndex
+    {
+        get => _zIndex;
+        set
+        {
+            if (_zIndex == value) return;
+            _zIndex = value;
+            DefaultRegistry?.NotifyOrderChanged(this);
+        }
+    }
+
+    private int _zIndex;
+
     #endregion
 
     #region Animation Properties
@@ -429,22 +461,6 @@ public abstract class Shape : IDrawable
 
 
     /// <summary>
-    /// Moves this shape above the specified shape in the draw order (renders on top).
-    /// </summary>
-    public void BringAbove(Shape otherShape)
-    {
-        DefaultRegistry?.MoveAbove(this, otherShape);
-    }
-
-    /// <summary>
-    /// Moves this shape behind the specified shape in the draw order (renders underneath).
-    /// </summary>
-    public void SendBehind(Shape otherShape)
-    {
-        DefaultRegistry?.MoveBehind(this, otherShape);
-    }
-
-    /// <summary>
     /// Shows this shape on the canvas (sets IsVisible to true).
     /// </summary>
     public void Show()
@@ -635,8 +651,10 @@ public abstract class Shape : IDrawable
 
     /// <summary>
     /// Copies this shape's styling — <see cref="Color"/>, <see cref="FillColor"/>,
-    /// <see cref="LineWeight"/>, <see cref="LineType"/> and <see cref="LineTypeScale"/> — onto
-    /// another shape. Geometry, name, id and visibility are not touched.
+    /// <see cref="LineWeight"/>, <see cref="LineType"/>, <see cref="LineTypeScale"/> and
+    /// <see cref="ZIndex"/> — onto another shape. Geometry, name, id and visibility are not
+    /// touched. <c>ZIndex</c> is included so a <c>Clone()</c> lands on the same layer as its
+    /// original rather than dropping to the default 0.
     ///
     /// <para>
     /// This existed as a <c>protected</c> helper for <c>Clone()</c> implementations and was public
@@ -655,6 +673,7 @@ public abstract class Shape : IDrawable
         target.LineWeight = LineWeight;
         target.LineType = LineType;
         target.LineTypeScale = LineTypeScale;
+        target.ZIndex = ZIndex;
 
         return target;
     }

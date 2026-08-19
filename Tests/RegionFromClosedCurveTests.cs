@@ -20,8 +20,7 @@ public class RegionFromClosedCurveTests : IDisposable
         public void Register(Shape s) => Shapes.Add(s);
         public void Unregister(Shape s) => Shapes.Remove(s);
         public void Clear() => Shapes.Clear();
-        public void MoveAbove(Shape s, Shape r) { }
-        public void MoveBehind(Shape s, Shape r) { }
+        public void NotifyOrderChanged(Shape s) { }
     }
 
     private readonly CountingRegistry _reg = new();

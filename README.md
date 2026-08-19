@@ -136,6 +136,7 @@ Inherited from `Shape`, so they work on all of the types above.
 | `LineType` | LineType | `Continuous` | Dash pattern (8 values) |
 | `LineTypeScale` | double | `1.0` | Stretches or compresses the dash pattern. Always a fixed **on-screen** size — it does not follow Display Line Weight, and does not change with zoom or with `LineWeight` |
 | `Opacity` | double | `1.0` | 0 = invisible, 1 = opaque; multiplies any alpha in the colors |
+| `ZIndex` | int | `0` | Draw order for the whole drawing — higher renders on top, ties keep creation order, negatives push behind everything. See [Draw order](#draw-order) |
 | `Name` | string | `""` | Label — also keeps the shape from being auto-hidden after `Main()` |
 | `Id` | long | auto | Unique, read-only; the counter restarts each run |
 | `IsVisible` | bool | `true` | `Hide()` / `Show()` toggle it; hidden shapes stay in the collection |
@@ -166,8 +167,9 @@ touch them to change behaviour deliberately.
 | `Shape.ResetDefaults()` | void | Puts the five `Default*` values back to the above |
 | `Shape.ResetIdCounter()` | void | Restarts `Id` at 1. Called automatically at the start of each run, which is why IDs are stable between runs |
 
-Ordering and lifetime methods on an individual shape: `Place()`, `Remove()`, `Show()` / `Hide()`,
-`BringAbove(other)` and `SendBehind(other)`. To take shapes off *en masse* there is the static
+Lifetime methods on an individual shape: `Place()`, `Remove()`, `Show()` / `Hide()`. Draw order is
+the `ZIndex` property rather than a method — see [Draw order](#draw-order). To take shapes off
+*en masse* there is the static
 [`Canvas`](#redrawing-from-a-handler) class — `Canvas.Clear()` and `Canvas.Remove(a, b)`. Plus
 `Invalidate()`, which bumps `Revision` — the one call you need after editing a vertex list in place:
 
@@ -219,9 +221,38 @@ merged?.Place();
 ```
 
 Copies the five styling members — `Color`, `FillColor`, `LineWeight`, `LineType`, `LineTypeScale` —
-and nothing else: geometry, `Name`, `Id` and visibility are left alone. It returns the target, so it
+plus `ZIndex`, and nothing else: geometry, `Name`, `Id` and visibility are left alone. `ZIndex` is
+included so a `Clone()` lands on the same layer as its original rather than dropping to 0. It returns the target, so it
 chains, and it is a no-op when the target is `null` or is the source itself. That null-safety is what
 makes it comfortable with boolean results, which legitimately come back `null`.
+
+#### Draw order
+
+```csharp
+var backdrop = new VRectangle(new VXYZ(-200, -200), 400, 400) { ZIndex = -1 };
+var geometry = new VCircle(0, 0, 100);              // ZIndex 0 — the default
+var label    = new VText(0, 0, "always on top", 20) { ZIndex = 10 };
+```
+
+Every shape has a `ZIndex`. The whole drawing is painted in **ascending** order, shapes sharing a
+value keep the order they were created in, and negatives are the natural way to put a backdrop
+underneath everything. Hit-testing follows the same order, so the shape you click is the one you see
+on top.
+
+It is a **global** ordering key, and that is the point. It replaced `BringAbove(other)` and
+`SendBehind(other)`, which have been **removed**: those settled an argument between two shapes by
+reordering the list once, so the answer depended on the order the calls happened to be made in, and
+the very next shape you constructed landed on top again. "This label is always on top" was simply not
+sayable. With `ZIndex` it is one assignment, and nothing created later disturbs it.
+
+Assigning it is enough — the canvas is told the order is stale and re-sorts before the next paint,
+including from a `Mouse` or `Frame` callback. Inside a `VGroup` the children draw in the order the
+group holds them; the group's own `ZIndex` places the group as a whole.
+
+One caveat: on the **Managed** and **GPU** [render backends](#render-backends) text is drawn in a
+layer above the rasterised geometry, so a `VText` is always on top of geometry there no matter what
+its `ZIndex` says. Text against text, and geometry against geometry, order correctly on every
+backend — only "put this label *underneath* that polygon" needs the Legacy backend.
 
 #### Host seams
 
@@ -231,7 +262,7 @@ plumbing is not a mystery.
 
 | Interface | Set through | Members | Purpose |
 |-----------|-------------|---------|---------|
-| `IShapeRegistry` | `Shape.DefaultRegistry` | `Register(shape)`, `Unregister(shape)`, `MoveAbove(shape, reference)`, `MoveBehind(shape, reference)` | What a constructor calls, so shapes appear without an explicit placement call. `Place()`, `Remove()`, `BringAbove()` and `SendBehind()` are thin wrappers over these four |
+| `IShapeRegistry` | `Shape.DefaultRegistry` | `Register(shape)`, `Unregister(shape)`, `Clear()`, `NotifyOrderChanged(shape)` | What a constructor calls, so shapes appear without an explicit placement call. `Place()` and `Remove()` are thin wrappers over the first two; assigning `ZIndex` calls the last, which tells the host its draw order is stale |
 | `IGlyphOutlineProvider` | `VText.GlyphOutlineProvider` | `GetCharContours(text, charIndex)` → `List<List<VXYZ>>?` | Turns a character into closed contours in world coordinates, honouring font, height, anchor and rotation. One inner list per contour (an `O` has two). Returns null for whitespace — and with no provider set, `ToCharShape` / `LiftChar` / `LiftChars` all return null |
 
 The third seam is `GeometryDiagnostics.Sink` — see [Why a Union returned null](#why-a-union-returned-null).
@@ -254,7 +285,7 @@ Beyond the constructors above and the `ICurve` members every curve shares.
 | **VArrow** | `Start` / `End` (settable), `MidPoint`, `HeadLength` (default 15 world units — each wing's length from the tip), `HeadAngle` (default 30 — degrees off the shaft, so the head spans `2 × HeadAngle`, 60° by default), `DoubleEnded` (default false — a head at `Start` as well), `GetStartArrowhead()` / `GetEndArrowhead()` → the two wing tips as a `(VXYZ, VXYZ)` tuple, `GetArrowheadPoints(tip, from)` for an arbitrary tip, and the static `VArrow.ArrowheadWings(tip, from, headLength, headAngleDegrees)`. Not an `ICurve` |
 | **VRay** | `Origin`, `Direction`, `RenderExtent` (default 10000 — how far it is drawn, how its bounds are computed and how far `Intersect` reaches, since it is infinite), `GetPointAtDistance(d)`, `ContainsPoint(p)`, `ToFiniteLine()` → `VLine`, `ToXLine()` → `VXLine`. Statics: `AtAngle(origin, angleDegrees)`, `HorizontalRight(origin)`, `HorizontalLeft(origin)`, `VerticalUp(origin)`, `VerticalDown(origin)` — all methods taking the origin, not properties |
 | **VXLine** | `BasePoint`, `Direction`, `RenderExtent` (default 10000, applied each way from `BasePoint`; it bounds `Intersect` as well as the drawing), `GetPointAtParameter(t)` (unclamped — negative `t` goes backwards), `GetTwoPoints()` → `(VXYZ, VXYZ)` (handy for `VPolygon.Slice`), `ToFiniteLine()` → `VLine`. Statics: `Horizontal(y)`, `Vertical(x)` |
-| **VText** | `Content`, `Location`, `Height`, `Width`, `Font`, `FontWeight`, `Anchor`, `Angle`, `ToCharShape(i)`, `LiftChar(i)`, indexer `text[i]`, `LiftChars(start, count)`, `BlankChar(i)`, `GetAnchorOffset(w, h)` → the `(dx, dy)` the anchor applies. Static `GlyphOutlineProvider` is the font seam the host fills in |
+| **VText** | `Content`, `Location`, `Height`, `Width`, `Font`, `FontWeight`, `Anchor`, `Angle`, `Mask`/`MaskColor`/`MaskOffset` (a solid background so a label reads over other geometry), `ToCharShape(i)`, `LiftChar(i)`, indexer `text[i]`, `LiftChars(start, count)`, `BlankChar(i)`, `GetAnchorOffset(w, h)` → the `(dx, dy)` the anchor applies. Static `GlyphOutlineProvider` is the font seam the host fills in |
 | **VGroup** | `Shapes`, `Count`, indexer `group[i]`, `Add`, `AddRange`, `Remove(shape)`, `RemoveAt(i)`, `Clear()`, `ContainsShape`, `Flatten()`, `ForEach`, `Where`, `GetShapesOfType<T>()`, `GetCenter()`, `SetOpacity`, `ApplyStyle` / `ApplyColor` / `ApplyFillColor` / `ApplyLineWeight` |
 | **VGrid** | `Points`, `Count`, indexers `grid[i]` and `grid[col, row]`, `GetRow` / `GetColumn`, `GetCenter()`, `Location`, `XCount` / `YCount`, `XSpacing` / `YSpacing`, `Centered`, `ApplyStyle()` |
 | **VSpatialGrid** | `Cells`, `Count`, indexers `grid[i]` and `grid[col, row]`, `GetRow` / `GetColumn`, `GetCenter()`, `GetCellAt(point)`, `GetClosestCell(point)`, `FindPath(start, end)`, `Location`, `XCount` / `YCount`, `CellSize`, `ApplyStyle()` |
@@ -710,8 +741,38 @@ header.Anchor = VTextAnchor.TopCenter;
 | `FontWeight` | VFontWeight | Normal | Normal or Bold |
 | `Anchor` | VTextAnchor | BottomLeft | Which point of the text is placed at Location |
 | `Angle` | double | 0 | Rotation in degrees, CCW around Location (Excel-style block rotation) |
+| `Mask` | bool | false | Paint a solid rectangle behind the glyphs — see [Text mask](#text-mask) |
+| `MaskColor` | string | `"Black"` | Colour of that rectangle. Any colour name or hex, like `Color` |
+| `MaskOffset` | double | 0.15 | Padding around the text as a **fraction of the text height**. Clamped to 0–1 |
 
 **VFont values**: Arial, TimesNewRoman, CourierNew, Verdana, Georgia, Tahoma, TrebuchetMS, Consolas, Calibri, Cambria, SegoeUI, ComicSansMS, Impact, LucidaConsole
+
+### Text mask
+
+A label crossing the geometry it describes is hard to read. `Mask` fills a rectangle behind the
+glyphs first:
+
+```csharp
+var dim = new VText(new VXYZ(0, 40), "433.5", 14);
+dim.Anchor = VTextAnchor.MiddleCenter;
+dim.Mask = true;             // off by default
+dim.MaskColor = VColor.Black; // or "#202020", or any colour name
+dim.MaskOffset = 0.25;        // padding = 25% of the text height on every side
+```
+
+`MaskOffset` is a **fraction of the text height**, not a number of drawing units: `0` hugs the
+glyphs, `1` pads by a full text height on every side, and anything outside `[0, 1]` is clamped on
+assignment. Expressing it as a fraction is what keeps a 2-unit label and a 200-unit one looking
+alike at any zoom.
+
+The mask belongs to the text rather than being a shape of its own. It is drawn immediately before the
+glyphs, so it can never cover them, it never turns up in the shape list, and it does **not** change
+`GetBounds()` — zoom-extents and culling see the same box as an unmasked label. To decide what the
+whole masked label sits above, use [`ZIndex`](#draw-order).
+
+All three canvas backends honour it (text always goes through the vector layer), as do the SVG and
+PDF exporters. **DXF does not**: the R12 format this app writes has no equivalent of a background
+fill, so a masked label exports there as plain text.
 
 ### Text Rotation
 
@@ -3598,10 +3659,9 @@ DoodleSharp includes a full-featured code editor with VSCode-like intellisense p
 - **Automatic**: Triggered on typing `.`, `(`, `<`, `{`, `[`, or `Ctrl+Space`
 - **Fuzzy matching**: Type partial names (e.g., "clr" matches "Color", "VPt" matches "VPoint") with intelligent scoring that rewards prefix matches, camelCase alignment, and consecutive character runs
 - **Context-aware**: Completions adapt to context -- object initializer properties, generic type arguments, attribute types, and more
-- **Scope-prioritized**: Local variables and parameters appear first, followed by class members, then imported types
+- **Alphabetical**: Once filtered, the list is in plain A–Z order, so a member you already know the name of is where the alphabet says it is. Snippets stay above it
 - **Documentation sidecar**: A documentation panel appears beside the completion list showing the signature, summary, parameters, and return type of the selected item
 - **Incremental compilation**: Uses a cached Roslyn workspace that incrementally updates only changed files, keeping completions responsive even in large projects
-- **Recently-used tracking**: Recently selected completions are boosted in future rankings
 - **Signature Help**: Parameter info displayed when typing method calls
 - **Snippets**: Code snippets for common C# patterns (`if`, `for`, `foreach`, `try`, `class`, …) and for the geometry types — `circle`, `vline`, `vlinea`, `vrect`, `vellipse`, `varc`, `vpoint`, `vpoly`, `vbezier`, `vspline`, `varrow`, `vtext`, `vdim`, `vgroup`, plus the composite `shapegrid`, `radial`, `spiral`, `star` and `wave`, and `frame` and `mouse` for the two interaction seams. Every shape template ends with `.Place()`, so a snippet-inserted shape survives the post-run cleanup. **A matching snippet sorts to the top of the completion list and is the selected item, so `Tab` expands it** — see below
 
@@ -3625,6 +3685,13 @@ DoodleSharp includes a full-featured code editor with VSCode-like intellisense p
 The list opens by itself as you type an identifier (from the second character), immediately after
 `new`, `is` or `as`, and after a `.`. It commits the highlighted item on `(` `[` `{` `;` `,` `)`, as
 well as on Enter and Tab.
+
+**The list is alphabetical.** What you type still filters it — fuzzy matching decides what appears
+and which characters are shown in bold — but among what survives the filter, order is plain A–Z and
+nothing else. It used to be ranked by expected type, then match-score band, then type-vs-member, then
+scope, then *name length*, which is an order with no rule you can see: the members of a `VLine` came
+out End, Flip, Move, Clone, Scale, Start, Divide, Offset, so finding a member you already knew meant
+reading every row.
 
 **Snippets sort above symbols and start out selected**, so typing `for` and pressing `Tab` writes the
 whole loop — the snippet is one keystroke away rather than something you have to scroll to. Because
@@ -3935,8 +4002,7 @@ Shape piece = shape.Intersect(other);
 shape.Hide();                    // Hide shape from canvas
 shape.Show();                    // Show hidden shape
 shape.Remove();                  // Take it off the canvas entirely
-shape.BringAbove(otherShape);   // Render on top of otherShape
-shape.SendBehind(otherShape);   // Render behind otherShape
+shape.ZIndex = 10;               // Draw order — higher is on top (see "Draw order")
 
 // Interactive-editing handles (what the canvas drags)
 List<ControlPoint> handles = shape.GetControlPoints();

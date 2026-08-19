@@ -262,8 +262,6 @@ public class PolygonSliceTests
 
         public void Clear() => Registered.Clear();
 
-        public void MoveAbove(Shape shape, Shape referenceShape) { }
-
-        public void MoveBehind(Shape shape, Shape referenceShape) { }
+        public void NotifyOrderChanged(Shape shape) { }
     }
 }

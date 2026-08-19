@@ -45,8 +45,7 @@ public class CanvasApiTests : IDisposable
         public void Register(Shape s) => Shapes.Add(s);
         public void Unregister(Shape s) => Shapes.Remove(s);
         public void Clear() { ClearCalls++; Shapes.Clear(); }
-        public void MoveAbove(Shape s, Shape r) { }
-        public void MoveBehind(Shape s, Shape r) { }
+        public void NotifyOrderChanged(Shape s) { }
     }
 
     [Fact]

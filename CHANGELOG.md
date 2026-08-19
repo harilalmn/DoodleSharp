@@ -9,6 +9,36 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+### Added
+- **`VText.Mask` — a solid background behind a label.** A dimension label sitting on the line it
+  measures is hard to read; set `Mask = true` and the text gets an opaque rectangle underneath it.
+  `MaskColor` is any colour name or hex (default `"Black"`, the canvas background) and `MaskOffset`
+  is the padding around the glyphs as a *fraction of the text height* — `0` hugs them, `1` pads by a
+  full text height on every side, default `0.15`, clamped to that range. The mask never appears as a
+  shape of its own and does not change the text's bounding box, so zoom-extents is unaffected.
+  Honoured on the canvas and in SVG and PDF exports; DXF has no background fill in the R12 format
+  DoodleSharp writes, so a masked label exports there as plain text.
+- **`Shape.ZIndex` — global draw order.** Every shape now has an `int ZIndex`: the drawing is painted
+  in ascending order, shapes sharing a value keep the order they were created in, and negatives push
+  a backdrop behind everything. Hit-testing follows the same order, so the shape you click is the one
+  you see on top. Assigning it is enough — the canvas re-sorts before the next paint, including from
+  a `Mouse` or `Frame` callback.
+
+### Changed
+- **The IntelliSense list is alphabetical.** What you type still filters it, and matched characters
+  are still shown in bold, but among what survives the filter the order is plain A–Z. It used to be
+  ranked by expected type, match-score band, type-vs-member, scope and then *name length*, which put
+  the members of a `VLine` in the order End, Flip, Move, Clone, Scale, Start, Divide, Offset — an
+  order with no rule a reader could see. Snippets still sit at the top and are still what `Tab`
+  expands.
+
+### Removed
+- **`Shape.BringAbove(other)` and `Shape.SendBehind(other)`**, replaced by `ZIndex`. They reordered
+  the shape list pairwise, so the result depended on the order the calls were made in and was undone
+  by the next shape constructed — "this label is always on top" could not be expressed. Rewrite
+  `label.BringAbove(x)` as `label.ZIndex = 1;`. The `IShapeRegistry.MoveAbove`/`MoveBehind` pair
+  behind them is replaced by a single `NotifyOrderChanged(shape)`.
+
 ## [2026.8.6] - 2026-08-18
 
 ### Fixed

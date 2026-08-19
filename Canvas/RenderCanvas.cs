@@ -2891,6 +2891,23 @@ public class RenderCanvas : FrameworkElement
         if (applyRotation)
             dc.PushTransform(new RotateTransform(-text.Angle, screenPos.X, screenPos.Y));
 
+        // The mask goes down inside the same rotation, immediately before the glyphs, so it always
+        // sits under its own text and over whatever the text crosses. Its padding is a fraction of
+        // the font size rather than a fixed number of pixels, so a label keeps the same visual
+        // breathing room at any height or zoom. It is deliberately drawn at full width even while
+        // DrawFactor is revealing the characters — the layout is already pinned to the full text
+        // size a few lines above, and a mask that grew with the reveal would slide the background
+        // out from under the letters already on screen.
+        if (text.Mask)
+        {
+            var pad = text.MaskOffset * fontSize;
+            dc.DrawRectangle(GetCachedBrush(text.MaskColor), null, new Rect(
+                drawX - pad,
+                drawY - pad,
+                formattedText.Width + 2 * pad,
+                formattedText.Height + 2 * pad));
+        }
+
         if (text.DrawFactor < 1.0)
         {
             int visibleCount = (int)Math.Floor(text.DrawFactor * text.Content.Length);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace C2VGeometry;
@@ -63,6 +63,42 @@ public class VText : Shape
     /// Characters rotate with the block (Excel-style). 0 = horizontal, 90 = reads bottom-to-top.
     /// </summary>
     public double Angle { get; set; } = 0;
+
+    /// <summary>
+    /// When true, a solid rectangle is painted behind the text so it stays legible over whatever
+    /// it crosses — the dimension-label "mask" a CAD package draws. Default is false.
+    ///
+    /// <para>
+    /// The mask is part of the text, not a separate shape: it is drawn immediately before the
+    /// glyphs, so it never hides them and never appears on its own in the shape list. Use
+    /// <see cref="Shape.ZIndex"/> to decide what the masked text sits above.
+    /// </para>
+    /// </summary>
+    public bool Mask { get; set; } = false;
+
+    /// <summary>
+    /// The colour of the <see cref="Mask"/> rectangle — a colour name or hex string, exactly like
+    /// <see cref="Shape.Color"/>, so <c>VColor.Black</c> and <c>"#202020"</c> both work. Defaults
+    /// to <c>"Black"</c>, which is the canvas background.
+    /// </summary>
+    public string MaskColor { get; set; } = "Black";
+
+    /// <summary>
+    /// How far the <see cref="Mask"/> extends beyond the text's bounding box, as a fraction of the
+    /// text height: 0 hugs the box exactly, 1 pads it by a full text height on every side. Default
+    /// is 0.15. Values are clamped to [0, 1].
+    /// </summary>
+    /// <remarks>
+    /// Expressed as a fraction rather than in drawing units so a label keeps the same visual
+    /// breathing room whatever its height — a 2-unit label and a 200-unit one look alike.
+    /// </remarks>
+    public double MaskOffset
+    {
+        get => _maskOffset;
+        set => _maskOffset = Math.Clamp(value, 0.0, 1.0);
+    }
+
+    private double _maskOffset = 0.15;
 
     /// <summary>
     /// Optional provider that converts this text's glyphs into vector outlines.
@@ -132,7 +168,10 @@ public class VText : Shape
             Font = Font,
             FontWeight = FontWeight,
             Anchor = Anchor,
-            Angle = Angle
+            Angle = Angle,
+            Mask = Mask,
+            MaskColor = MaskColor,
+            MaskOffset = MaskOffset
         };
         CopyStyleTo(clone);
         return clone;

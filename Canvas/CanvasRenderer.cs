@@ -12,6 +12,11 @@ public class CanvasRenderer : ICanvasRenderer, C2VGeometry.IShapeRegistry
     private readonly List<C2VGeometry.IDrawable> _shapes = new();
 
     /// <summary>
+    /// The shapes in draw order, or null when it has to be re-derived. See <see cref="GetShapes"/>.
+    /// </summary>
+    private IReadOnlyList<C2VGeometry.IDrawable>? _drawOrder;
+
+    /// <summary>
     /// The currently active timeline for animation playback.
     /// Internal use only - users should use the Animator class.
     /// </summary>
@@ -74,11 +79,7 @@ public class CanvasRenderer : ICanvasRenderer, C2VGeometry.IShapeRegistry
     // VLine.ICurve.StartPoint: one name, two audiences.
     void C2VGeometry.IShapeRegistry.Clear() => ClearShapes();
 
-    void C2VGeometry.IShapeRegistry.MoveAbove(Shape shape, Shape referenceShape)
-        => MoveShapeAbove(shape, referenceShape);
-
-    void C2VGeometry.IShapeRegistry.MoveBehind(Shape shape, Shape referenceShape)
-        => MoveShapeBehind(shape, referenceShape);
+    void C2VGeometry.IShapeRegistry.NotifyOrderChanged(Shape shape) => InvalidateDrawOrder();
 
     #endregion
 
@@ -91,7 +92,7 @@ public class CanvasRenderer : ICanvasRenderer, C2VGeometry.IShapeRegistry
             s.IsPlaced = true;
         }
         _shapes.Add(shape);
-        RegistryVersion++;
+        InvalidateDrawOrder();
     }
 
     /// <summary>
@@ -103,7 +104,7 @@ public class CanvasRenderer : ICanvasRenderer, C2VGeometry.IShapeRegistry
         {
             s.IsPlaced = false;
         }
-        if (_shapes.Remove(shape)) RegistryVersion++;
+        if (_shapes.Remove(shape)) InvalidateDrawOrder();
     }
 
     /// <summary>
@@ -119,39 +120,49 @@ public class CanvasRenderer : ICanvasRenderer, C2VGeometry.IShapeRegistry
                 s.IsPlaced = false;
             }
         }
-        if (_shapes.RemoveAll(s => shapeSet.Contains(s)) > 0) RegistryVersion++;
+        if (_shapes.RemoveAll(s => shapeSet.Contains(s)) > 0) InvalidateDrawOrder();
     }
 
     /// <summary>
-    /// Moves a shape so it renders above (after) the reference shape in the draw order.
+    /// Every registered shape, <b>in draw order</b>: ascending <see cref="Shape.ZIndex"/>, with
+    /// registration order breaking ties. This is the order the renderer, the cull index, the
+    /// exporters and hit-testing all consume, so "what is on top" has one answer everywhere.
+    ///
+    /// <para>
+    /// The ordering is derived here rather than kept in <c>_shapes</c> because <c>_shapes</c> is
+    /// append-ordered and a <c>ZIndex</c> can change at any time, including from a mouse handler.
+    /// It is cached and invalidated by <see cref="InvalidateDrawOrder"/>, and the sort is skipped
+    /// entirely — the append-ordered list is handed straight back — when every shape is still at
+    /// the default 0, which is the overwhelmingly common case.
+    /// </para>
     /// </summary>
-    public void MoveShapeAbove(IDrawable shape, IDrawable referenceShape)
+    public IReadOnlyList<IDrawable> GetShapes()
     {
-        if (shape == referenceShape) return;
-        int refIndex = _shapes.IndexOf(referenceShape);
-        if (refIndex < 0) return;
-        if (!_shapes.Remove(shape)) return;
-        // Re-find reference index after removal (it may have shifted)
-        refIndex = _shapes.IndexOf(referenceShape);
-        _shapes.Insert(refIndex + 1, shape);
-        RegistryVersion++;
+        if (_drawOrder != null) return _drawOrder;
+
+        bool needsSort = false;
+        foreach (var drawable in _shapes)
+        {
+            if (drawable is Shape s && s.ZIndex != 0) { needsSort = true; break; }
+        }
+
+        // OrderBy is a stable sort, which is what keeps creation order inside a ZIndex band.
+        _drawOrder = needsSort
+            ? _shapes.OrderBy(d => d is Shape s ? s.ZIndex : 0).ToList()
+            : _shapes.AsReadOnly();
+        return _drawOrder;
     }
 
     /// <summary>
-    /// Moves a shape so it renders behind (before) the reference shape in the draw order.
+    /// Drops the cached draw order and bumps <see cref="RegistryVersion"/> so the per-frame paths
+    /// re-snapshot rather than merely re-indexing (note 96). Called on every set change and
+    /// whenever a shape's <see cref="Shape.ZIndex"/> is assigned.
     /// </summary>
-    public void MoveShapeBehind(IDrawable shape, IDrawable referenceShape)
+    private void InvalidateDrawOrder()
     {
-        if (shape == referenceShape) return;
-        int refIndex = _shapes.IndexOf(referenceShape);
-        if (refIndex < 0) return;
-        if (!_shapes.Remove(shape)) return;
-        refIndex = _shapes.IndexOf(referenceShape);
-        _shapes.Insert(refIndex, shape);
+        _drawOrder = null;
         RegistryVersion++;
     }
-
-    public IReadOnlyList<IDrawable> GetShapes() => _shapes.AsReadOnly();
 
     /// <summary>
     /// The between-runs reset: removes every shape, rewinds the shape id counter and stops any
@@ -190,18 +201,19 @@ public class CanvasRenderer : ICanvasRenderer, C2VGeometry.IShapeRegistry
 
         _shapes.Clear();
 
-        // Bumped so the host notices the set changed and re-snapshots rather than re-indexing —
-        // RenderCanvas keeps its own list, so without this the display would keep the old shapes
-        // (note 96).
-        RegistryVersion++;
+        // Invalidated (and the version bumped) so the host notices the set changed and re-snapshots
+        // rather than re-indexing — RenderCanvas keeps its own list, so without this the display
+        // would keep the old shapes (note 96).
+        InvalidateDrawOrder();
     }
 
     public void RenderTo(RenderCanvas canvas)
     {
-        canvas.Render(_shapes);
+        var shapes = GetShapes();
+        canvas.Render(shapes);
         if (DoodleSharp.ApplicationSettings.Instance.ZoomToFitOnRun)
         {
-            canvas.ZoomExtents(_shapes);
+            canvas.ZoomExtents(shapes);
         }
     }
 }

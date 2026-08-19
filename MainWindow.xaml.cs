@@ -139,10 +139,9 @@ public partial class MainWindow : Window
     // Hierarchy Provider
     private Editor.HierarchyProvider? _hierarchyProvider;
 
-    // IntelliSense: Cached compilation workspace, documentation sidecar, recently-used symbols
+    // IntelliSense: Cached compilation workspace and documentation sidecar
     private Editor.CachedCompilationWorkspace? _completionWorkspace;
     private Editor.DocumentationSidecar? _docSidecar;
-    private readonly LinkedList<string> _recentlyUsedSymbols = new();
 
     // Find and Replace
     private FindReplaceService _findReplaceService = new();
@@ -1774,21 +1773,22 @@ public partial class MainWindow : Window
              List<ICompletionData> completions;
              bool isAfterNew;
              string prefix;
-             string? expectedType;
 
              if (_completionWorkspace != null && _activeFile != null)
              {
                  // Use cached workspace for incremental compilation (Phase 1)
                  var fileId = _activeFile.FileName;
                  var service = new Editor.RoslynCompletionService(_completionWorkspace);
-                 (completions, isAfterNew, prefix, expectedType) = await service.GetCompletionsAsync(code, offset, _completionWorkspace, fileId);
+                 // The fourth value is the expected type at the caret. The list is alphabetical, so
+                 // nothing ranks by it any more and it is deliberately discarded.
+                 (completions, isAfterNew, prefix, _) = await service.GetCompletionsAsync(code, offset, _completionWorkspace, fileId);
              }
              else
              {
                  // Fallback: create fresh compilation
                  var service = new Editor.RoslynCompletionService(_compiler.GetReferences());
                  var otherFiles = GetOtherProjectFiles();
-                 (completions, isAfterNew, prefix, expectedType) = await service.GetCompletionsAsync(code, offset, otherFiles);
+                 (completions, isAfterNew, prefix, _) = await service.GetCompletionsAsync(code, offset, otherFiles);
              }
 
              // The Roslyn query is awaited, and the user keeps typing during it. If the caret has
@@ -1804,8 +1804,8 @@ public partial class MainWindow : Window
              if (completions.Count == 0)
                  return;
 
-             // Sort completions: expected type first, then types when after 'new', then by match quality
-             var sortedCompletions = SortCompletions(completions, prefix, isAfterNew, expectedType);
+             // Fuzzy-filter (and score, for the match highlighting), then order alphabetically.
+             var sortedCompletions = SortCompletions(completions, prefix);
 
              // Snippets are not symbols, so they survive a position where Roslyn resolves nothing —
              // which is exactly the half-typed state the user is in when they want `for`. Building
@@ -1879,14 +1879,6 @@ public partial class MainWindow : Window
                      _docSidecar?.Close();
                  };
 
-                 // Track recently-used symbol when an item is committed
-                 window.CompletionList.InsertionRequested += (s, args) =>
-                 {
-                     var selectedItem = window.CompletionList.SelectedItem;
-                     if (selectedItem != null)
-                         TrackRecentlyUsedSymbol(selectedItem.Text);
-                 };
-
                  _completionWindow = window;
                  ShowCompletionWindowWithSelection();
              }
@@ -1906,14 +1898,11 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Sorts completions using fuzzy matching, scope priority, and context awareness.
-    /// Uses FuzzyMatcher for subsequence scoring (Phase 2), scope classification (Phase 5),
-    /// and recently-used symbol boosting.
+    /// Filters completions to what the typed prefix fuzzy-matches (tagging each with its score and
+    /// match positions, which is what the list renders in bold), then orders them alphabetically.
     /// </summary>
-    private List<ICompletionData> SortCompletions(List<ICompletionData> completions, string prefix, bool isAfterNew, string? expectedType)
+    private List<ICompletionData> SortCompletions(List<ICompletionData> completions, string prefix)
     {
-        var expectedTypeLower = expectedType?.ToLowerInvariant();
-
         // Score all items with fuzzy matcher and tag match positions
         foreach (var c in completions)
         {
@@ -1921,10 +1910,6 @@ public partial class MainWindow : Window
             {
                 cd.MatchScore = Editor.FuzzyMatcher.Score(prefix, c.Text);
                 cd.MatchPositions = Editor.FuzzyMatcher.GetMatchPositions(prefix, c.Text);
-
-                // Recently-used boost
-                if (_recentlyUsedSymbols.Contains(c.Text))
-                    cd.MatchScore = (cd.MatchScore ?? 0) + 5;
             }
         }
 
@@ -1942,43 +1927,19 @@ public partial class MainWindow : Window
             });
         }
 
+        // Alphabetical, and nothing else. The list used to be ranked — expected type, fuzzy score
+        // band, type-vs-member, scope, then *name length* — which produced an order with no visible
+        // rule at all: a member list on a VLine opened End, Flip, Move, Clone, Scale, Start, Divide,
+        // Offset, so finding a known member meant reading every row instead of jumping to where the
+        // alphabet says it is. A predictable order beats a clever one for a list you scan by eye,
+        // and it costs nothing in speed, because the fuzzy prefix filter above has already thrown
+        // out everything that does not match what was typed.
+        //
+        // Snippets are not in this list at all: the caller adds them ahead of these items, which is
+        // what keeps them at the top and selected (note 101).
         return filtered
-            .OrderBy(c =>
-            {
-                var textLower = c.Text.ToLowerInvariant();
-                var item = c as Editor.CompletionData;
-                var isType = item?.Kind == Editor.CompletionKind.Type;
-
-                // Priority -1: Expected type from left-hand side (e.g., VPoint p1 = new |)
-                if (expectedTypeLower != null && textLower == expectedTypeLower)
-                    return -1;
-
-                // Priority 0: High fuzzy score items (exact/prefix matches)
-                if (item?.MatchScore is > 30)
-                    return 0;
-
-                // Priority 1: Good fuzzy matches
-                if (item?.MatchScore is > 10)
-                {
-                    if (isAfterNew && isType) return 1;
-                    return isType ? 2 : 3;
-                }
-
-                // Priority 2: Weaker fuzzy matches
-                if (item?.MatchScore != null)
-                {
-                    if (isAfterNew && isType) return 4;
-                    return isType ? 5 : 6;
-                }
-
-                // Priority 3: No prefix typed - sort types first when after 'new'
-                if (isAfterNew && isType) return 7;
-                return isType ? 8 : 9;
-            })
-            .ThenBy(c => (c as Editor.CompletionData)?.Scope ?? Editor.SymbolScope.Global) // Local scope first (Phase 5)
-            .ThenByDescending(c => (c as Editor.CompletionData)?.MatchScore ?? 0) // Higher score first
-            .ThenBy(c => c.Text.Length) // Shorter names first
-            .ThenBy(c => c.Text) // Alphabetical
+            .OrderBy(c => c.Text, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(c => c.Text, StringComparer.Ordinal) // deterministic tie-break for A/a pairs
             .ToList();
     }
 
@@ -2074,21 +2035,6 @@ public partial class MainWindow : Window
         {
             System.Diagnostics.Debug.WriteLine($"Failed to update workspace references: {ex.Message}");
         }
-    }
-
-    /// <summary>
-    /// Tracks a recently-used symbol name for completion priority boosting.
-    /// Maintains a bounded list of the last 50 symbols used.
-    /// </summary>
-    private void TrackRecentlyUsedSymbol(string symbolName)
-    {
-        // Remove if already present (to move to front)
-        _recentlyUsedSymbols.Remove(symbolName);
-        _recentlyUsedSymbols.AddFirst(symbolName);
-
-        // Trim to max 50
-        while (_recentlyUsedSymbols.Count > 50)
-            _recentlyUsedSymbols.RemoveLast();
     }
 
     /// <summary>

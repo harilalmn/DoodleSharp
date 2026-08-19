@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using C2VGeometry;
 using Xunit;
 
@@ -177,7 +177,6 @@ public class ShapeIntersectionTests
         public void Register(Shape shape) => Count++;
         public void Unregister(Shape shape) { }
         public void Clear() { }
-        public void MoveAbove(Shape shape, Shape referenceShape) { }
-        public void MoveBehind(Shape shape, Shape referenceShape) { }
+        public void NotifyOrderChanged(Shape shape) { }
     }
 }

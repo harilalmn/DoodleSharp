@@ -170,9 +170,37 @@ public static class SvgExporter
     private static string TextToSvg(VText t)
     {
         var inner = $"<text x=\"{F(t.Location.X)}\" y=\"{F(t.Location.Y)}\" fill=\"{t.Color}\" font-size=\"{F(t.Height)}\" transform=\"scale(1,-1)\">{EscapeXml(t.Content)}</text>";
+        if (t.Mask) inner = MaskToSvg(t) + inner;
         if (t.Angle == 0) return inner;
         // World Angle is CCW (Y-up); parent group's scale(1,-1) flips Y, so we negate to keep CCW visually.
         return $"<g transform=\"rotate({F(-t.Angle)}, {F(t.Location.X)}, {F(t.Location.Y)})\">{inner}</g>";
+    }
+
+    /// <summary>
+    /// The rectangle behind a masked <see cref="VText"/>, emitted before the glyphs so it renders
+    /// underneath them.
+    /// </summary>
+    /// <remarks>
+    /// SVG has no way to measure a string, so the width is the same estimate <c>VText.GetBounds</c>
+    /// uses (0.6 em per character) rather than a real measurement — a mask exported to SVG is a
+    /// close fit, not an exact one. It is positioned against the text's <b>drawn</b> box, which
+    /// means it ignores <c>Anchor</c> exactly as the exported text element does, so the two stay
+    /// glued together whatever the anchor. The rect is written in the document's own flipped-Y
+    /// space (the enclosing group applies <c>scale(1,-1)</c>), which is why its Y is negated here
+    /// while the text element carries its own <c>scale(1,-1)</c> instead.
+    /// </remarks>
+    private static string MaskToSvg(VText t)
+    {
+        var width = t.Width > 0 ? t.Width : t.Height * (t.Content?.Length ?? 0) * 0.6;
+        var pad = t.MaskOffset * t.Height;
+
+        var minX = t.Location.X - pad;
+        var minY = t.Location.Y - pad;
+        var w = width + 2 * pad;
+        var h = t.Height + 2 * pad;
+
+        // y is negated (and the top edge used) because the parent group flips Y.
+        return $"<rect x=\"{F(minX)}\" y=\"{F(-(minY + h))}\" width=\"{F(w)}\" height=\"{F(h)}\" fill=\"{t.MaskColor}\" stroke=\"none\" />";
     }
 
     private static string ArcToSvg(VArc arc)

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -1330,16 +1330,17 @@ namespace DoodleSharp.Editor
                 List<ICompletionData> completions = new List<ICompletionData>();
                 bool isAfterNew = false;
                 string prefix = "";
-                string? expectedType = null;
 
                 // Semantic completion driven by the cached workspace: it carries the right
                 // references, and `activeFile` is the workspace's file-id key, so the correct
-                // syntax tree and semantic model are used. Gives fuzzy matching, scope and
-                // expected-type sorting, the doc sidecar, and noise filtering.
+                // syntax tree and semantic model are used. Gives fuzzy matching, the doc sidecar,
+                // and noise filtering.
                 if (workspace != null)
                 {
                     var service = new RoslynCompletionService(workspace);
-                    (completions, isAfterNew, prefix, expectedType) = await service.GetCompletionsAsync(code, offset, workspace, activeFile);
+                    // The fourth value is the expected type at the caret; the list is alphabetical,
+                    // so nothing ranks by it and it is deliberately discarded.
+                    (completions, isAfterNew, prefix, _) = await service.GetCompletionsAsync(code, offset, workspace, activeFile);
                 }
 
                 if (completions.Count > 0)
@@ -1348,22 +1349,31 @@ namespace DoodleSharp.Editor
                     _completionWindow.StartOffset = offset - prefix.Length;
                     var data = _completionWindow.CompletionList.CompletionData;
 
-                    // Fuzzy-filter + rank (scope priority, expected-type/after-new boosting, score).
-                    var sorted = SortCompletions(completions, prefix, isAfterNew, expectedType);
+                    // Fuzzy-filter, then order alphabetically.
+                    var sorted = SortCompletions(completions, prefix);
 
-                    foreach (var item in sorted)
-                    {
-                        data.Add(item);
-                    }
-
-                    // Add snippets
+                    // Snippets are added FIRST. AvalonEdit renders items in insertion order and
+                    // never consults Priority for it, and the initial selection is item 0 — so
+                    // appending them (as this did) left `for`/`foreach` below every symbol in the
+                    // list, where a snippet can be neither discovered nor taken with one key. Same
+                    // rule the main window follows (note 101); this is the parallel implementation
+                    // of the same editor (note 43), so it has to follow it too.
                     var isMemberAccess = offset > prefix.Length && code.Length > offset - prefix.Length - 1 && code[offset - prefix.Length - 1] == '.';
                     if (!isAfterNew && !isMemberAccess)
                     {
                         foreach (var (trigger, description) in CodeSnippets.GetAll())
                         {
+                            if (!string.IsNullOrEmpty(prefix) &&
+                                !trigger.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                                continue;
+
                             data.Add(new SnippetCompletionData(trigger, description, CodeSnippets.GetSnippet(trigger)!));
                         }
+                    }
+
+                    foreach (var item in sorted)
+                    {
+                        data.Add(item);
                     }
 
                     StyleCompletionWindow(_completionWindow);
@@ -1399,23 +1409,25 @@ namespace DoodleSharp.Editor
             }
         }
 
-        private List<ICompletionData> SortCompletions(List<ICompletionData> completions, string prefix, bool isAfterNew, string? expectedType)
+        /// <summary>
+        /// Filters completions to what the typed prefix fuzzy-matches, then orders them
+        /// alphabetically — the ranked order it used to produce had no rule a reader could see.
+        /// Mirrors the main window's implementation (note 43).
+        /// </summary>
+        private List<ICompletionData> SortCompletions(List<ICompletionData> completions, string prefix)
         {
             var matchQuality = new Dictionary<ICompletionData, int?>();
             foreach (var item in completions)
             {
-                matchQuality[item] = string.IsNullOrEmpty(prefix) 
-                    ? 0 
+                matchQuality[item] = string.IsNullOrEmpty(prefix)
+                    ? 0
                     : FuzzyMatcher.Score(prefix, item.Text);
             }
 
             return completions
                 .Where(item => string.IsNullOrEmpty(prefix) || matchQuality[item] != null)
-                .OrderByDescending(item => item.Text.Equals(expectedType, StringComparison.OrdinalIgnoreCase))
-                .ThenByDescending(item => isAfterNew && item is CompletionData cd && cd.Kind == CompletionKind.Type)
-                .ThenByDescending(item => item is CompletionData cd2 ? (int)cd2.Scope == 0 : false)
-                .ThenByDescending(item => matchQuality[item] ?? 0)
-                .ThenBy(item => item.Text, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(item => item.Text, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.Text, StringComparer.Ordinal)
                 .ToList();
         }
 
