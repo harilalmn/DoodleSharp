@@ -9,6 +9,52 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+## [2026.8.9] - 2026-08-20
+
+### Added
+- **Auto-Run — re-run the project every 500 ms.** A checkbox beside the **Run** button. Tick it and
+  the code re-executes twice a second, exactly as if you kept pressing Run; untick it and nothing
+  runs until you ask again.
+
+  It is **off unless a project turns it on**, and the setting is **saved in the `.vizproj`**, so a
+  project you armed comes back armed on the next session and every other project is unaffected. A
+  tick that arrives while the previous run is still going is dropped rather than queued, so a project
+  that takes longer than 500 ms to compile runs as fast as it can instead of stacking runs up. A tick
+  recompiles only when you have actually changed something — an unchanged tick re-invokes the code
+  already compiled, which is milliseconds rather than a few hundred, so a time-dependent drawing keeps
+  updating without the canvas flickering.
+  Errors go to the status bar and the editor squiggles, not to a dialog, so a syntax error mid-edit
+  does not interrupt you.
+
+  This is not the old "Auto-update Canvas" returning: that ran on every keystroke, was on by default
+  and applied to every project. This one is opt-in, per project, and driven by a timer rather than by
+  typing.
+
+### Fixed
+- **F1 Help now describes constructors.** Constructors reflect as `.ctor`, so the description lookup
+  never matched one: **101 of 108** public constructors rendered a blank cell, while seven
+  carefully-written entries — including the two explaining that `VRay`'s and `VXLine`'s second `VXYZ`
+  argument is a **direction, not a second point** — were unreachable. All 108 are now written and
+  keyed by the signature the page prints, with a test in both directions so a mistyped key fails the
+  build instead of silently blanking a cell.
+- **`Sketch` has a Help page.** The class every sketch project derives from was missing from the F1
+  tree entirely — no page, no example, no member descriptions. All twelve public members are
+  documented, including honest entries for `KeyPressed` and `LastKey`, which have no writer anywhere
+  and are permanently `false`/`""`.
+- **`VArc` no longer claims an angle normalisation it never had.** The Help text said the constructor
+  added 360° when `EndAngle <= StartAngle` so the sweep was always positive. It does not: the sign of
+  `EndAngle - StartAngle` picks the direction, so `new VArc(c, r, 90, 0)` is a *clockwise* quarter,
+  not a 270° counter-clockwise one. The code was right and the documentation was invented.
+- **Wheel zoom survives a mouse handler.** Registering any `Mouse.*` handler used to take the wheel
+  away from the canvas, so a sketch that merely watched clicks or moves lost the main way to navigate
+  a drawing larger than the viewport — the floating zoom buttons were the only way left. The canvas
+  now keeps its wheel zoom until user code explicitly claims the wheel with `Mouse.OnWheel`, and
+  passing `null` to that handler hands zoom straight back. Everything else about interactive mode is
+  unchanged: click-to-select and double-click-zoom-to-fit are still suppressed while any handler is
+  registered. `Mouse.HasWheelHandler` reports the wheel claim separately from `Mouse.HasHandlers`.
+- **Switching projects through the New/Open dialog reloads the Settings tab.** It kept showing the
+  previous project's values, because that path never re-read them.
+
 ## [2026.8.8] - 2026-08-19
 
 ### Added

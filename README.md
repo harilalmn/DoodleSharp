@@ -12,7 +12,7 @@ DoodleSharp is a visual programming environment that lets you write C# code to c
 
 ## Features
 
-- **Run on Demand**: Press `F5` (or Run) to compile and draw — your code runs when you ask it to, never while you are still typing it
+- **Run on Demand**: Press `F5` (or Run) to compile and draw — your code runs when you ask it to, never while you are still typing it. **Auto-Run** is the opt-in exception: one checkbox beside Run re-executes the project every 500 ms, saved with the project so it stays armed across sessions. See [Auto-Run](#auto-run)
 - **No Placement Call Required**: Shapes appear automatically when created
 - **Viewports**: Split the drawing surface into a grid of independent canvases with `Viewports.Rows`/`Viewports.Columns`, place shapes into a cell with `Place(Viewports[0][1])`, and subdivide any cell again for uneven layouts. Each cell pans and zooms on its own. See [Viewports](#viewports--dividing-the-drawing-surface)
 - **C# Code Editor**: Roslyn-powered IntelliSense, semantic highlighting, refactoring, and squiggle diagnostics
@@ -24,7 +24,7 @@ DoodleSharp is a visual programming environment that lets you write C# code to c
 - **Global Parameters**: Declare named values once with `GlobalParameters.Set(...)`, read them anywhere, and tune them live from a sidebar of sliders and checkboxes — the canvas re-runs as you drag and the new value is written back into your code
 - **Animation System**: Create timeline-based animations with draw, move, rotate, flip, and fade effects — seekable and exportable to GIF/MP4
 - **Per-Frame Callbacks**: `Frame.Request(callback)` is the `requestAnimationFrame` model — the callback asks for the next frame to keep going, which is all open-ended or procedural motion needs
-- **Mouse Events**: Assign a callback per event — `Mouse.OnMove/OnDown/OnClick/OnDrag/OnWheel/…` — and get world coordinates, modifier keys and the shape under the cursor, in the shape JavaScript uses. Registering one hands the canvas's gestures to your code
+- **Mouse Events**: Assign a callback per event — `Mouse.OnMove/OnDown/OnClick/OnDrag/OnWheel/…` — and get world coordinates, modifier keys and the shape under the cursor, in the shape JavaScript uses. Registering one hands the canvas's gestures to your code — except the wheel, which stays yours to zoom with until you claim it with `Mouse.OnWheel`
 - **Interactive Canvas**: Zoom with mouse wheel, pan with middle-click, toggle grid display
 - **Dockable Windows**: Every panel drags, tabs and floats — put the editor on one monitor and the canvas on another; `Ctrl+R` restores the default arrangement. See [Window Layout](#window-layout)
 - **Scales to large drawings**: three renderers — WPF, a built-in software rasterizer, and a Direct3D 11 backend — with per-frame automatic selection, plus a frame-timing readout on `F10`. See [Render Backends](#render-backends)
@@ -72,14 +72,39 @@ namespace MyProject          // your project's name
 ### 3. Run It
 
 Press **`F5`** (or `Ctrl+Enter`, or the **Run** button) to compile and draw. Code runs only when you
-ask it to — there is no background re-run while you type, so a half-written statement never reaches
-the canvas and a long-running drawing is never started behind your back.
+ask it to — nothing re-runs while you type, so a half-written statement never reaches the canvas and a
+long-running drawing is never started behind your back.
 
 - **Every run starts clean**: shape IDs rewind to 1, the [viewport layout](#viewports--dividing-the-drawing-surface)
   goes back to a single undivided canvas, and the drawing is rebuilt from your code. Delete a line
   and the next run reflects it — nothing lingers until restart
 - **No explicit placement needed**: Shapes appear when created. `Place()` is there for the ones that don't come from a plain `new` — method results, query results, anything built while `Shape.AutoRegister` was off. (`Draw()` is the historical name for the same call and still works.)
 - **`Place(viewport)`** is the same call aimed at one cell of a divided drawing — see [Viewports](#viewports--dividing-the-drawing-surface)
+
+#### Auto-Run
+
+**Auto-Run** is the opt-in exception to "runs only when you ask". Tick the **Auto-Run** checkbox
+beside the **Run** button and the project re-runs every 500 ms, exactly as if you kept pressing Run —
+each tick clears the canvas and the console and rebuilds the drawing from your code.
+
+- **Off unless you turn it on**, and **saved with the project**, as `AutoRun` in the `.vizproj`. A
+  project you armed comes back armed the next time you open it, and every other project is
+  unaffected. The checkbox is disabled while no project is open
+- **A tick that arrives while the previous run is still going is dropped**, not queued. A project
+  that takes longer than 500 ms simply runs as fast as it can instead of stacking runs up
+- **It recompiles only when the code has actually changed.** An unchanged tick re-invokes the
+  already-compiled assembly — a few milliseconds instead of a few hundred — which is what keeps a
+  `DateTime.Now` clock or any other time-dependent drawing updating smoothly. Recompiling every tick
+  would leave the canvas blank for most of each interval, because a full run clears it *before*
+  Roslyn starts. **The consequence worth knowing: `static` state in your own code is reset when a
+  tick recompiles — that is, after you edit — not on every tick**
+- **Errors go to the status bar and the editor squiggles, never a dialog**, so a half-typed statement
+  does not interrupt you; the canvas keeps showing the last drawing that compiled
+- **The status bar says `Auto-Run` on every tick** — `Auto-Run: 12 shapes` when the run succeeded,
+  `Auto-Run: 2 errors` when it did not — so you can always tell a tick's output from a manual Run's.
+  The label is the same whether the tick recompiled or re-invoked the already-compiled assembly
+- **It does not save anything to disk.** Auto-Run flushes the editor into the in-memory file so the
+  right text is compiled; writing to disk is [Auto Save](#auto-save)'s job and is a separate setting
 
 ---
 
@@ -1880,17 +1905,40 @@ shapes the next run has already replaced.
 **Registering any handler puts the canvas into interactive mode**, which is how your handlers get to
 see every gesture. While at least one handler is registered:
 
-- **click-to-select, wheel zoom and double-click-zoom-to-fit are suppressed** — the click, the wheel
-  and the double click are yours;
-- **the zoom controls at a cell's top-right are how you navigate instead** — zoom in, zoom out, zoom
-  to fit, and a live zoom percentage. They are revealed by hovering over a cell, in every mode, not
-  only this one;
+- **click-to-select and double-click-zoom-to-fit are suppressed** — the click and the double click
+  are yours;
+- **the wheel is the exception: you keep zooming with it unless you register `Mouse.OnWheel`.**
+  Claiming the wheel is opt-in on its own, because it is the main way to move around a drawing larger
+  than the viewport and a sketch that only watches clicks should not lose it. Register a wheel handler
+  and the canvas stops zooming; pass `null` to that handler and zoom comes straight back;
+- **the zoom controls at a cell's top-right are there too** — zoom in, zoom out, zoom to fit, and a
+  live zoom percentage. They are revealed by hovering over a cell, in every mode, not only this one;
 - **the properties panel is hidden and `F4` is inert**, because it edits the *selected* shape and there
   is no longer a selection. It comes back by itself the next time you run something that registers
   nothing;
 - **middle-button drag still pans.** It is the only way to pan, so it stays the canvas's own gesture.
 
 A project that registers no handlers behaves exactly as it always has — nothing was taken away.
+
+Claiming the wheel is one call, and so is giving it back:
+
+```csharp
+var readout = new VText(new VXYZ(-100, 100), "wheel: 0", 14) { Name = "readout" };
+double turns = 0;
+
+// From this line on the canvas stops zooming on the wheel — every turn is yours.
+Mouse.OnWheel(e =>
+{
+    turns += e.WheelNotches;                 // +1.0 per detent away from you
+    readout.Content = $"wheel: {turns:F0}  (claimed: {Mouse.HasWheelHandler})";
+});
+
+// Mouse.OnWheel(null);   // ...and this hands wheel zoom straight back to the canvas
+```
+
+`Mouse.HasWheelHandler` reports that claim on its own, separately from `Mouse.HasHandlers`. The
+status bar says which of the two you are in: **Mouse: your code | Scroll: Zoom | Middle-click: Pan**
+while the canvas still owns the wheel, and the `Scroll: Zoom` part disappears once you take it.
 
 **The drawing tools (`P`/`L`/`C`/`R`) and the measuring tape (`Ctrl+M`) keep priority while armed.**
 Your handlers do not fire at all until you leave the tool with `Esc`. Code cannot override that: those
@@ -2033,11 +2081,12 @@ Every registration method takes `Action<MouseInfo>?` and returns `void`. Passing
 | `Mouse.OnClick(handler)` | synthesised down-and-up-in-the-same-place, dispatched after `OnUp` |
 | `Mouse.OnDoubleClick(handler)` | second click of a double click, **in place of** `OnDown` |
 | `Mouse.OnDrag(handler)` | pointer moved with a button held, **in place of** `OnMove` |
-| `Mouse.OnWheel(handler)` | wheel turned; read `e.WheelNotches`. The canvas does not zoom on the wheel in interactive mode |
+| `Mouse.OnWheel(handler)` | wheel turned; read `e.WheelNotches`. **Registering this is what stops the canvas zooming on the wheel** — no other handler does |
 | `Mouse.OnEnter(handler)` | pointer entered the canvas |
 | `Mouse.OnLeave(handler)` | pointer left the canvas |
 | `Mouse.Clear()` | detaches every handler, which also leaves interactive mode |
 | `Mouse.HasHandlers` | `bool` — whether anything is registered, i.e. whether the canvas is in interactive mode |
+| `Mouse.HasWheelHandler` | `bool` — whether the wheel specifically is claimed. The canvas keeps its own wheel zoom unless this is true |
 | `Mouse.X` / `Mouse.Y` | `double` — last known pointer position in world coordinates. Tracked **even with no handler registered** |
 | `Mouse.IsDown` | `bool` — whether any button is held over the canvas. Likewise always tracked |
 | `Mouse.CallbackFailed` | `event Action<Exception>` raised when a handler throws. The app subscribes for you and prints to the console; you rarely need it |
@@ -2858,10 +2907,11 @@ VizConsole.Log(ViewportLength.Parse("240").IsStar.ToString());   // False — a 
 - **Zoom Controls**: Hover a canvas and a small panel appears at its top-right — zoom in, zoom out, zoom to fit, and the current zoom percentage
 - **Several canvases at once**: [`Viewports`](#viewports--dividing-the-drawing-surface) divides the pane into a grid, and each cell zooms and pans on its own. All of the above then apply to the cell under the pointer
 
-> **While your code has a mouse handler registered**, the canvas hands those gestures to you: wheel
-> zoom, click-to-select and double-click-zoom-to-fit are suppressed, and the hover zoom controls are
-> how you navigate instead. Middle-click drag still pans. See
-> [Mouse and pointer events](#mouse-and-pointer-events).
+> **While your code has a mouse handler registered**, the canvas hands those gestures to you:
+> click-to-select and double-click-zoom-to-fit are suppressed. **Wheel zoom is not** — you keep it
+> until your code claims the wheel with `Mouse.OnWheel`, because it is the main way to move around a
+> drawing larger than the viewport. Middle-click drag still pans, and the hover zoom controls are
+> always there. See [Mouse and pointer events](#mouse-and-pointer-events).
 
 ### Coordinate System
 DoodleSharp uses a **mathematical coordinate system**:
@@ -3874,6 +3924,9 @@ XY direction returns `null` / `false` rather than throwing.
 | `F5` | Run code |
 | `Ctrl+Enter` | Run code |
 
+There is no shortcut for **Auto-Run** — it is a checkbox beside the **Run** button, saved with the
+project. See [Auto-Run](#auto-run).
+
 ### Layout
 | Shortcut | Action |
 |----------|--------|
@@ -3942,7 +3995,7 @@ All cursors are visually indicated with white caret lines, and selections are hi
 ### Canvas & Tools
 | Shortcut | Action |
 |----------|--------|
-| `Mouse Wheel` | Zoom |
+| `Mouse Wheel` | Zoom — kept even in [interactive mode](#interactive-mode), unless your code registers `Mouse.OnWheel` |
 | `Middle Click` | Pan |
 | `Double-click` (empty space) | Zoom to fit all shapes |
 | `Delete` | Delete selected shapes (and their code) |
