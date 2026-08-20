@@ -66,11 +66,11 @@ public static class DurableFile
                 // original file's attributes and ACLs across, which a fresh file would not inherit.
                 // ignoreMetadataErrors keeps a file on a share, or one whose ACLs cannot be copied,
                 // from failing a save that would otherwise have succeeded.
-                File.Replace(temporary, path, destinationBackupFileName: null, ignoreMetadataErrors: true);
+                Retrying(() => File.Replace(temporary, path, destinationBackupFileName: null, ignoreMetadataErrors: true));
             }
             else
             {
-                File.Move(temporary, path);
+                Retrying(() => File.Move(temporary, path));
             }
         }
         catch
@@ -78,6 +78,50 @@ public static class DurableFile
             // The original is untouched either way; all that is left is not to litter beside it.
             TryDelete(temporary);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Runs the final rename, retrying briefly while the destination is held by something else.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// On Windows the last step of an atomic write is the one most likely to lose a race it did not
+    /// enter. A sync client (OneDrive is the common one — the default projects folder lives under
+    /// it), an indexer, or a virus scanner opens the destination for a few hundred milliseconds
+    /// after it changes, and <c>File.Replace</c> then fails with ERROR_UNABLE_TO_REMOVE_REPLACED
+    /// (0x80070497) or a sharing violation. Nothing is wrong with the write; the file is simply
+    /// busy, and it will not be busy shortly.
+    /// </para>
+    ///
+    /// <para>
+    /// This cost a crash rather than a failed save: the exception escaped
+    /// <c>MainWindow.AutoRunCheck_Changed</c>, which had no handler, reached the WPF dispatcher and
+    /// took the process down while the user was only unticking Auto-Run.
+    /// </para>
+    ///
+    /// <para>
+    /// Only <see cref="IOException"/> is retried, and only for a fraction of a second. A read-only
+    /// or ACL-denied destination raises <see cref="UnauthorizedAccessException"/> and still fails
+    /// immediately, which is what the caller wants: no amount of waiting fixes it.
+    /// </para>
+    /// </remarks>
+    private static void Retrying(Action rename)
+    {
+        const int attempts = 6;
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                rename();
+                return;
+            }
+            catch (IOException) when (attempt < attempts)
+            {
+                // 20, 40, 80, 160, 320 ms — about half a second in total, well inside the window a
+                // sync client holds a file for, and short enough not to stall the UI thread visibly.
+                System.Threading.Thread.Sleep(10 * (1 << attempt));
+            }
         }
     }
 

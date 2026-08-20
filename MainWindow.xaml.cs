@@ -136,6 +136,9 @@ public partial class MainWindow : Window
     private string? _lastAutoRunSignature;   // source as of the last full compile; unchanged -> resident re-run
     private const int AutoRunIntervalMs = 500;
 
+    // Console panel: bound once in InitializeConsole and updated in place by RefreshConsole.
+    private readonly ObservableCollection<Console.ConsoleEntry> _consoleEntries = new();
+
     // Code Lens
     private Editor.CodeLensGenerator? _codeLensGenerator;
 
@@ -545,6 +548,10 @@ public partial class MainWindow : Window
 
     private void InitializeConsole()
     {
+        // Bound once and then updated in place. Reassigning ItemsSource regenerates every row, which
+        // under Auto-Run meant tearing down and rebuilding the whole panel twice a second.
+        ConsoleListBox.ItemsSource = _consoleEntries;
+
         Console.ConsoleOutput.Instance.OutputChanged += (s, e) =>
         {
             Dispatcher.Invoke(RefreshConsole);
@@ -608,13 +615,40 @@ public partial class MainWindow : Window
         CodeEditor.ContextMenuOpening += CodeEditor_ContextMenuOpening;
     }
 
+    /// <summary>
+    /// Brings the console panel level with <see cref="Console.ConsoleOutput"/>, touching only the
+    /// rows that actually changed.
+    /// </summary>
+    /// <remarks>
+    /// Console output is append-only within a run, so the new list almost always shares a prefix
+    /// with the displayed one; entries are the same objects, so the shared part is found by
+    /// reference. Keeping those rows leaves their containers, selection and scroll position alone,
+    /// and a refresh that changes nothing does nothing at all — which is the common case when
+    /// Auto-Run re-runs a program the user is not editing.
+    /// </remarks>
     private void RefreshConsole()
     {
-        ConsoleListBox.ItemsSource = Console.ConsoleOutput.Instance.GetEntries();
-        // Defer scroll to after WPF finishes rendering the new items.
-        if (ConsoleListBox.Items.Count > 0)
+        var entries = Console.ConsoleOutput.Instance.GetEntries();
+
+        int shared = 0;
+        while (shared < _consoleEntries.Count && shared < entries.Count &&
+               ReferenceEquals(_consoleEntries[shared], entries[shared]))
         {
-            var lastItem = ConsoleListBox.Items[ConsoleListBox.Items.Count - 1];
+            shared++;
+        }
+
+        if (shared == _consoleEntries.Count && shared == entries.Count) return;
+
+        while (_consoleEntries.Count > shared)
+            _consoleEntries.RemoveAt(_consoleEntries.Count - 1);
+
+        for (int i = shared; i < entries.Count; i++)
+            _consoleEntries.Add(entries[i]);
+
+        // Defer scroll to after WPF finishes rendering the new items.
+        if (_consoleEntries.Count > 0)
+        {
+            var lastItem = _consoleEntries[_consoleEntries.Count - 1];
             Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
             {
                 ConsoleListBox.ScrollIntoView(lastItem);
@@ -3512,13 +3546,56 @@ public partial class MainWindow : Window
 
         var enabled = AutoRunCheck.IsChecked == true;
         _currentProject.ProjectFile.Settings.AutoRun = enabled ? true : null;
-        _currentProject.SaveProjectFile();
 
+        // Deliberately before the save: the toggle has to take effect even if remembering it does
+        // not, and stopping the timer is the half the user is watching for.
         _autoRunTimer?.Stop();
         if (enabled) _autoRunTimer?.Start();
 
-        SetStatus(enabled ? $"Auto-Run on - re-running every {AutoRunIntervalMs} ms" : "Auto-Run off", isError: false);
         Journal.Info("MW.AUTORUN.TOGGLE", "Auto-Run toggled", $"enabled={enabled}");
+
+        if (TrySaveProjectFile("Auto-Run setting"))
+        {
+            SetStatus(enabled ? $"Auto-Run on - re-running every {AutoRunIntervalMs} ms" : "Auto-Run off", isError: false);
+        }
+    }
+
+    /// <summary>
+    /// Writes the <c>.vizproj</c>, reporting a failure instead of letting it escape. Returns whether
+    /// the file was written.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every caller is a UI event handler, and an exception out of one of those reaches the WPF
+    /// dispatcher and ends the process — note 134's rule, which until now only <c>async void</c>
+    /// handlers were held to. It is not a hypothetical: unticking Auto-Run closed the app, because
+    /// OneDrive had the project file open for the moment the atomic rename needed it and the
+    /// <see cref="IOException"/> had nowhere to go. <c>DurableFile</c> now retries that rename, so
+    /// this should be rare — but "rare" is not a reason to keep a path from a settings checkbox to a
+    /// dead process.
+    /// </para>
+    ///
+    /// <para>
+    /// Only for the project's own settings, which are a preference: the setting is already applied
+    /// in memory and the worst case is that it is forgotten by the next session. Saving the user's
+    /// source is a different matter and keeps its loud failure.
+    /// </para>
+    /// </remarks>
+    private bool TrySaveProjectFile(string what)
+    {
+        if (_currentProject == null) return false;
+
+        try
+        {
+            _currentProject.SaveProjectFile();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Journal.Error("MW.PROJ.SAVE_FAIL", "Could not save the project file", ex, $"what={what}");
+            SetStatus($"{what} applied, but could not be saved to the project file: {ex.Message}", isError: true);
+            return false;
+        }
     }
 
     /// <summary>
@@ -4678,7 +4755,7 @@ public partial class MainWindow : Window
                 } catch { }
             }
 
-            _currentProject.SaveProjectFile();
+            TrySaveProjectFile("Settings");
         }
 
         // 2. Save Application Settings

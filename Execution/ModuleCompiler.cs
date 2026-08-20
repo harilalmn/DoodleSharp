@@ -308,7 +308,11 @@ public class ModuleCompiler
         DoodleSharp.Animation.Mouse.Clear();
 
         CanvasRenderer.Instance.Clear();
-        ConsoleOutput.Instance.Clear();
+
+        // Not Clear(): this path runs twice a second under Auto-Run, and clearing the console and
+        // writing the same lines straight back made the panel blink (ConsoleOutput.BeginRewrite has
+        // the full account). Staging the output means an unchanged program redraws nothing at all.
+        ConsoleOutput.Instance.BeginRewrite();
 
         var previousDirectory = Environment.CurrentDirectory;
         if (!string.IsNullOrEmpty(_residentWorkingDirectory) && Directory.Exists(_residentWorkingDirectory))
@@ -325,6 +329,9 @@ public class ModuleCompiler
         }
         finally
         {
+            // Unconditional: a run that threw still has to give the console back, or the panel stays
+            // frozen on the last good output for the rest of the session.
+            ConsoleOutput.Instance.EndRewrite();
             Environment.CurrentDirectory = previousDirectory;
         }
     }
