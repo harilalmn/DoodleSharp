@@ -9,6 +9,8 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+## [2026.8.11] - 2026-08-20
+
 ### Added
 - **`VText.Justify`** lines the rows of a multi-line label up with each other — `Left` (default),
   `Center` or `Right`, via the new `VTextJustify`. It composes with `Anchor` rather than competing
