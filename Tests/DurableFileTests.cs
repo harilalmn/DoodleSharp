@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using DoodleSharp.Project;
 using Xunit;
 
@@ -131,6 +132,82 @@ public class DurableFileTests
 
             Assert.Equal("AC1009", File.ReadAllText(path));
             Assert.Equal(6, new FileInfo(path).Length);   // no byte-order mark
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    /// <summary>
+    /// The rename is the step that loses races it did not enter, and losing one must not fail the
+    /// save.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The default projects folder on this developer's machine lives under OneDrive, and OneDrive
+    /// opens a file for a moment after it changes. <c>File.Replace</c> hitting that window fails with
+    /// ERROR_UNABLE_TO_REMOVE_REPLACED (0x80070497) even though the write itself was fine, and it
+    /// took the whole app down: the exception escaped <c>MainWindow.AutoRunCheck_Changed</c>, which
+    /// had no handler, and reached the WPF dispatcher — the user was only unticking Auto-Run.
+    /// </para>
+    ///
+    /// <para>
+    /// A file held open for 120 ms is that situation exactly, and the retry has about half a second
+    /// to spend on it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task RetriesTheRenameWhileTheDestinationIsBrieflyHeldOpen()
+    {
+        var dir = TempDir();
+        try
+        {
+            var path = Path.Combine(dir, "held.vizproj");
+            File.WriteAllText(path, "the previous settings");
+
+            var holder = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            var release = Task.Run(async () => { await Task.Delay(120); holder.Dispose(); });
+
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            DurableFile.WriteAllText(path, "the new settings");
+            clock.Stop();
+            await release;
+
+            Assert.Equal("the new settings", File.ReadAllText(path));
+            Assert.Single(Directory.GetFiles(dir));   // and no temporary file left over
+
+            // Proof that the retry is what carried it, rather than the lock never biting: a first
+            // attempt that succeeded would have returned long before the file was let go.
+            Assert.True(clock.ElapsedMilliseconds >= 100, $"finished in {clock.ElapsedMilliseconds} ms");
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    /// <summary>
+    /// The retry is for a file that is <em>busy</em>. A destination that cannot be written at all
+    /// still fails at once — waiting does not make a read-only file writable, and a save dialog that
+    /// hangs for half a second before saying no is worse than one that says no.
+    /// </summary>
+    [Fact]
+    public void DoesNotRetryAFailureThatWaitingCannotFix()
+    {
+        var dir = TempDir();
+        try
+        {
+            var path = Path.Combine(dir, "locked-down.cs");
+            File.WriteAllText(path, "the user's work");
+            File.SetAttributes(path, FileAttributes.ReadOnly);
+
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                Assert.ThrowsAny<Exception>(() => DurableFile.WriteAllText(path, "replacement"));
+            }
+            finally
+            {
+                File.SetAttributes(path, FileAttributes.Normal);
+            }
+
+            // The full retry budget is ~620 ms; this must not have spent any of it.
+            Assert.True(clock.ElapsedMilliseconds < 300, $"took {clock.ElapsedMilliseconds} ms");
         }
         finally { Directory.Delete(dir, true); }
     }

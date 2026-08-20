@@ -267,6 +267,8 @@ number, and gets **both** a body in `docs/NOTES.md` and a line here.
 133. `DurableFile` — every write to a file the **user** owns is atomic; auto-save rewrites their source on a timer.
 134. An `async void` that lets an exception escape **closes the app**; all of them are guarded and a Roslyn test keeps them that way.
 135. One **line-spacing constant** (`VText.LineSpacing`); the canvas, DXF, SVG and PDF had each stacked a label's lines by their own figure.
+136. A resident re-run **stages** its console output (`BeginRewrite`/`EndRewrite`) instead of clearing it; `RefreshConsole` updates in place. An unchanged program redraws nothing.
+137. A **synchronous** handler crashes the app just as an `async void` one does (the sibling of note 134); `DurableFile` retries the rename and `TrySaveProjectFile` guards the call.
 
 ## Keyboard Shortcuts (Key Bindings)
 

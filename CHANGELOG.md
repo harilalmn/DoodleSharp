@@ -9,6 +9,24 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The console no longer flickers while Auto-Run is on.** Every re-run cleared the console and
+  wrote the same lines back, so the panel emptied and refilled twice a second for a program nobody
+  was editing — and because the unnamed-shape warning is written after `Main()` returns, that one
+  line blinked visibly out of step with the rest. A re-run now builds its output to one side and
+  swaps it in only if the text actually changed, so re-running an unchanged program redraws nothing
+  at all. The panel also updates row by row instead of being rebuilt, which keeps your scroll
+  position and selection where you left them.
+
+- **Unticking Auto-Run could close the app.** Saving the `.vizproj` finishes with an atomic rename,
+  and if something else had the file open for that instant — OneDrive is the usual culprit, since
+  the default projects folder lives under it — the failure escaped the checkbox handler and ended
+  the process. The rename is now retried for about half a second, which covers a sync client's
+  hold, and a save that still fails reports itself in the status bar instead. Your setting is
+  applied either way; at worst it is forgotten next session. The same guard covers the Settings
+  panel's Save and the Add Reference dialog.
+
 ## [2026.8.12] - 2026-08-20
 
 A correctness pass over geometry, rendering, export and file handling. Most of what follows was

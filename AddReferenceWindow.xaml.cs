@@ -124,7 +124,22 @@ public partial class AddReferenceWindow : Window
             });
         }
 
-        _project.SaveProjectFile();
+        // A throw here would reach the dispatcher and end the process (note 134). The references the
+        // user just added are real content, so an unwritable project file keeps the dialog open to
+        // be retried rather than closing over a silent loss.
+        try
+        {
+            _project.SaveProjectFile();
+        }
+        catch (Exception ex)
+        {
+            DoodleSharp.Diagnostics.Journal.Error("ADDREF.SAVE_FAIL", "Could not save the project file", ex);
+            MessageBox.Show(this,
+                $"The references could not be written to the project file:\n\n{ex.Message}",
+                "Add Reference", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
         DialogResult = true;
         Close();
     }
