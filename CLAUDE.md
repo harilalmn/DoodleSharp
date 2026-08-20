@@ -255,6 +255,9 @@ number, and gets **both** a body in `docs/NOTES.md` and a line here.
 121. **Auto-Run** is a per-project 500 ms timer — opt-in, `.vizproj`-persisted, ticks dropped while one is in flight, and it recompiles only when the source changed (a full run blanks the canvas while Roslyn works). Not note 120 coming back.
 122. The completion list **opens on the expected type**; the order is still alphabetical (note 115 stands), a snippet at row 0 still wins, and the selected row must be scrolled into view.
 123. A cell's `OwningViewport` is routinely **detached** by the run's `Viewport.Reset()`; `GetShapes(Viewport)` must resolve it with `ResolveVisible()` or the canvas draws nothing.
+124. The completion filter **anchors the first typed character to a word start**; an empty filtered list opens no window. Open-time only — an already-open list is AvalonEdit's own looser filter.
+125. `VText.Justify` is the ragged edge **inside** the block, `Anchor` is where the block sits; `TextAlignment` needs `MaxTextWidth` or it is inert; exporters do not lay multi-line text out.
+126. A DXF group value is **a whole line**, so a multi-line `VText` is written as one TEXT entity per line — writing it as one value corrupted the file. `Justify` is deliberately not honoured there.
 
 ## Keyboard Shortcuts (Key Bindings)
 

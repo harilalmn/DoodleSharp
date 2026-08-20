@@ -767,6 +767,51 @@ header.Anchor = VTextAnchor.TopCenter;
 | **Middle** | `MiddleLeft` | `MiddleCenter` | `MiddleRight` |
 | **Bottom** | `BottomLeft` (default) | `BottomCenter` | `BottomRight` |
 
+### Text Justification (multi-line)
+
+`Anchor` places the text **block**; `Justify` decides how the **lines inside that block** line up
+with each other. The two compose rather than compete: a four-line label with `Anchor = MiddleCenter`
+is centred on its point either way, but with `Justify = Center` its short lines are also centred
+against its long ones instead of hanging off to the left.
+
+Lines come only from `\n` in `Content` — there is no automatic wrapping, and `Width` does not create
+one. So `Justify` has **no visible effect on single-line text**: a one-line block is exactly as wide
+as its line, and all three values put that line in the same place.
+
+```csharp
+// Three lines, because of the \n -- nothing wraps on its own
+string body = "θ = 13\nRadius r = 1\nx = r * Cos(θ) = 0.9074";
+
+// Default: every line starts at the same x, ragged edge on the right
+var left = new VText(-200, 0, body, 12);
+
+// Anchor centres the block on (0, 0); Justify centres the lines on each
+// other. Two different jobs, both applied.
+var centred = new VText(0, 0, body, 12);
+centred.Anchor  = VTextAnchor.MiddleCenter;
+centred.Justify = VTextJustify.Center;
+
+// Every line ends at the same x -- what lines a column of values up
+var right = new VText(200, 0, body, 12);
+right.Justify = VTextJustify.Right;
+```
+
+| `VTextJustify` | Effect |
+|---|---|
+| `Left` (default) | Lines share a left edge; the ragged edge is on the right |
+| `Center` | Lines are centred on the block's vertical midline; both edges are ragged |
+| `Right` | Lines share a right edge; the ragged edge is on the left |
+
+Justification shuffles lines **inside** the block and does nothing else: it never moves or resizes
+the block, so `GetBounds()` — and with it zoom-extents, culling and selection — is identical whatever
+you set. All three canvas backends honour it, because text always goes through the vector layer.
+
+> **Multi-line text does not survive export.** The PDF and SVG exporters write `Content` as a single
+> run and DXF writes a single `TEXT` entity, so a `\n` never becomes a second line out there and
+> justification has nothing to line up. This is a pre-existing limitation of those exporters with
+> multi-line text rather than anything `Justify` introduced — if the drawing has to leave the canvas,
+> build the label from one `VText` per line.
+
 ### VText Properties
 
 | Property | Type | Default | Description |
@@ -778,6 +823,7 @@ header.Anchor = VTextAnchor.TopCenter;
 | `Font` | VFont | Arial | Font family enum |
 | `FontWeight` | VFontWeight | Normal | Normal or Bold |
 | `Anchor` | VTextAnchor | BottomLeft | Which point of the text is placed at Location |
+| `Justify` | VTextJustify | Left | How the lines of a **multi-line** label line up with each other — see [Text justification](#text-justification-multi-line). No effect on one line; does not change `GetBounds()` |
 | `Angle` | double | 0 | Rotation in degrees, CCW around Location (Excel-style block rotation) |
 | `Mask` | bool | **true** | Paint a solid rectangle behind the glyphs — see [Text mask](#text-mask) |
 | `MaskColor` | string? | `null` | Colour of that rectangle; `null` means **the canvas background**. Any colour name or hex, like `Color` |

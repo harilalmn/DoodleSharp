@@ -380,6 +380,13 @@ Nine issues reported from hands-on use of the Phase-34 build. Diagnosed by probi
 - [x] **Tests** — `RefactoringProviderTests` (8), `CompletionServiceTests` (7), `EditorWorkspaceTests` (4). Suite: 254 → 273 passing.
 - [x] **Verified end to end in the live GUI** on the reported repro via UI Automation: the action reads "Generate method 'DrawVector' in VectorManager", writes a correctly indented `public static void DrawVector(VXYZ arg0)` into VectorManager.cs leaving StartViz.cs untouched, and the following auto-run reports the stub's `NotImplementedException` instead of CS0117.
 
+### Phase: The Blank Canvas, the Completion Filter, and Multi-Line Justification (2026-08-20)
+- [x] **`CanvasRenderer.GetShapes(Viewport)` resolves a detached leaf** — `Viewport.Reset()` installs a new root on every run, `ViewportHost.Sync()` re-keys the cells at `DispatcherPriority.Render`, and the render runs first on a Normal-priority await continuation, so the render path routinely asked for a viewport that had left the tree and got `Array.Empty` back. Result: a blank canvas on a stock layout, every run, while the status bar counted `GetShapes()` with no viewport and reported success. `ResolveVisible()` instead of `FirstLeaf()`. `Tests/ViewportPlacementTests.ADetachedLeafStillSeesTheScene` (+ the `_byViewport` sibling). Note 123.
+- [x] **`FuzzyMatcher` anchors the first typed character to a word start** — `IsWordStart` (index 0, after `_`/`.`, or a capital opening a camelCase hump, including the last capital of an acronym run). Later characters stay a free subsequence. Kills the several-hundred-row popup that one letter used to open, without touching abbreviation matching. Only the earliest qualifying anchor is tried — a later anchor's remainder is a suffix of the earlier one's, so scanning on is provably wasted. 15 new xUnit cases. Note 124.
+- [x] **`SharedEditorController` tests the filtered completion count** before building the window, so an empty popup can no longer reach the screen. Matches `MainWindow` (note 43).
+- [x] **`VText.Justify` / `VTextJustify`** — multi-line line alignment inside the text block, orthogonal to `Anchor`. `RenderCanvas.ApplyJustification` sets `MaxTextWidth` to the measured natural width first, because `TextAlignment` alone is inert; the `DrawFactor` reveal aligns inside the full block width so finished characters do not slide. Bounds are provably unaffected. `Tests/TextJustifyTests.cs` (6). Note 125.
+- [x] **Verified in the running app and offscreen** — the canvas fix confirmed live on the reported project, and the three justifications rendered through the note 69 offscreen harness rather than argued about.
+
 ---
 
 ## Implementation Statistics
