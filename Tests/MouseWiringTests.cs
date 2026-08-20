@@ -56,6 +56,21 @@ public class MouseWiringTests
     }
 
     [Fact]
+    public void WheelZoomIsSuppressedOnlyWhenUserCodeClaimsTheWheel()
+    {
+        // Interactive mode used to take the wheel wholesale, so a script that merely watched clicks
+        // lost the only way to navigate a drawing larger than the viewport. The gate must name the
+        // wheel handler specifically, and the zoom must still be reachable below it.
+        var body = MethodBody(ReadRepoFile(Path.Combine("Canvas", "RenderCanvas.cs")), "private void OnMouseWheel(");
+
+        Assert.Contains("UserMouse.HasWheelHandler", body);
+        Assert.Contains("ZoomAtPoint", body);
+
+        // A bare `if (AllowUserMouse)` would return before the zoom for any handler at all.
+        Assert.DoesNotContain("if (AllowUserMouse)", body);
+    }
+
+    [Fact]
     public void TheCanvasSubscribesToEnterAndLeave()
     {
         // Neither existed before this feature; a hover handler and the "a drag that leaves the canvas

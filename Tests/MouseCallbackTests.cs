@@ -100,6 +100,37 @@ public class MouseCallbackTests : IDisposable
     }
 
     [Fact]
+    public void HasWheelHandlerTracksOnlyTheWheelSlot()
+    {
+        // This is what decides whether the canvas keeps its wheel zoom. Every other handler must
+        // leave it alone: a sketch that watches clicks still needs to navigate the drawing.
+        Assert.False(Mouse.HasWheelHandler);
+
+        Mouse.OnMove(_ => { });
+        Mouse.OnDown(_ => { });
+        Mouse.OnDrag(_ => { });
+        Assert.True(Mouse.HasHandlers);
+        Assert.False(Mouse.HasWheelHandler);
+
+        Mouse.OnWheel(_ => { });
+        Assert.True(Mouse.HasWheelHandler);
+
+        Mouse.OnWheel(null);
+        Assert.False(Mouse.HasWheelHandler);
+        Assert.True(Mouse.HasHandlers);
+    }
+
+    [Fact]
+    public void ClearDropsTheWheelClaim()
+    {
+        Mouse.OnWheel(_ => { });
+        Assert.True(Mouse.HasWheelHandler);
+
+        Mouse.Clear();
+        Assert.False(Mouse.HasWheelHandler);
+    }
+
+    [Fact]
     public void ClearDetachesEveryHandler()
     {
         var runs = 0;

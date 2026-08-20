@@ -96,10 +96,44 @@ public class AutoUpdateRemovalTests
         var code = Read("MainWindow.xaml.cs");
 
         Assert.DoesNotContain("AutoRunCodeAsync", code, StringComparison.Ordinal);
-        Assert.Contains("private async Task RunSilentlyAsync()", code, StringComparison.Ordinal);
+        Assert.Contains("private async Task RunSilentlyAsync(string label)", code, StringComparison.Ordinal);
 
-        // Exactly the two Global Parameters callers: no resident assembly, and after a write-back.
-        Assert.Equal(2, Regex.Matches(code, @"await RunSilentlyAsync\(\);").Count);
+        // Three callers, and the count is pinned so a fourth has to be argued for here. Two are the
+        // Global Parameters paths (no resident assembly, and after a write-back); the third is the
+        // Auto-Run tick.
+        //
+        // Auto-Run is NOT the removed feature coming back, and the difference is the whole point of
+        // this file: auto-update ran on every keystroke, was on by default, and was application-wide,
+        // so code ran behind the user's back in every project. Auto-Run is off unless a project asks
+        // for it, is armed by an explicit checkbox, and fires on a fixed timer rather than on typing.
+        Assert.Equal(3, Regex.Matches(code, @"await RunSilentlyAsync\(").Count);
+        Assert.Matches(@"private async void AutoRunTimer_Tick[\s\S]{0,900}await RunSilentlyAsync\(", code);
+    }
+
+    /// <summary>
+    /// Auto-Run must stay opt-in and per-project. The failure mode it is closest to is the one this
+    /// file exists to prevent, so the two properties that keep them apart are pinned: nothing declares
+    /// the checkbox checked in markup (note 103 — <c>InitializeComponent</c> would persist that value
+    /// over the project's), and the flag lives on the project rather than on the application.
+    /// </summary>
+    [Fact]
+    public void AutoRunIsOptInAndBelongsToTheProject()
+    {
+        var xaml = Read("MainWindow.xaml");
+
+        var checkbox = Regex.Match(xaml, @"<CheckBox\b[^>]*?x:Name=""AutoRunCheck""[^>]*?>", RegexOptions.Singleline);
+        Assert.True(checkbox.Success, "the Auto-Run checkbox is gone");
+        Assert.DoesNotContain("IsChecked=", checkbox.Value, StringComparison.Ordinal);
+
+        // The setting is on the project file, not on ApplicationSettings.
+        Assert.Contains("public bool? AutoRun { get; set; }",
+            Read(Path.Combine("Project", "VizProjectFile.cs")), StringComparison.Ordinal);
+        Assert.DoesNotContain("AutoRun", Read("ApplicationSettings.cs"), StringComparison.Ordinal);
+
+        // And the toggle is guarded like every other settings handler.
+        var handler = Regex.Match(Read("MainWindow.xaml.cs"),
+            @"private void AutoRunCheck_Changed[\s\S]{0,400}?\{[\s\S]{0,200}?SettingsUiBusy");
+        Assert.True(handler.Success, "AutoRunCheck_Changed does not check SettingsUiBusy");
     }
 
     /// <summary>

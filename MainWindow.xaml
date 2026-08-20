@@ -635,6 +635,20 @@
                                 Text="&#x2192;" />
                         </StackPanel>
                     </Button>
+                    <!--
+                        Auto-Run. No IsChecked here on purpose: the value belongs to the project file,
+                        and a value in markup would be persisted over the loaded one the moment
+                        InitializeComponent raised Checked (see CLAUDE.md note 103).
+                    -->
+                    <CheckBox
+                        x:Name="AutoRunCheck"
+                        Margin="0,0,12,0"
+                        VerticalAlignment="Center"
+                        Checked="AutoRunCheck_Changed"
+                        Content="Auto-Run"
+                        Foreground="{StaticResource ForegroundBrush}"
+                        Unchecked="AutoRunCheck_Changed"
+                        ToolTip="Re-runs the code every 500 ms, as if you kept pressing Run. Saved with the project." />
                     <Button
                         x:Name="RunButton"
                         Padding="16,6"
