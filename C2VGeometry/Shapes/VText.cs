@@ -58,6 +58,25 @@ public class VText : Shape
     public VFont Font { get; set; } = VFont.Arial;
     public VFontWeight FontWeight { get; set; } = VFontWeight.Normal;
     public VTextAnchor Anchor { get; set; } = VTextAnchor.BottomLeft;
+
+    /// <summary>
+    /// How the lines of a multi-line label line up with each other inside the text block —
+    /// <see cref="VTextJustify.Left"/> by default.
+    ///
+    /// <para>
+    /// Composes with <see cref="Anchor"/> rather than competing with it: the anchor puts the block
+    /// on the drawing, this decides the shape of the ragged edge inside it. Single-line text is
+    /// unaffected, because the block is then exactly as wide as its only line.
+    /// </para>
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// var label = new VText(0, 0, "θ = 13\nRadius r = 1\nx = 0.9074");
+    /// label.Anchor = VTextAnchor.MiddleCenter;   // the block is centred on (0, 0)
+    /// label.Justify = VTextJustify.Center;       // and its lines are centred on each other
+    /// </code>
+    /// </example>
+    public VTextJustify Justify { get; set; } = VTextJustify.Left;
     /// <summary>
     /// Rotation of the text block in degrees, counterclockwise around <see cref="Location"/>.
     /// Characters rotate with the block (Excel-style). 0 = horizontal, 90 = reads bottom-to-top.
@@ -197,6 +216,7 @@ public class VText : Shape
             Font = Font,
             FontWeight = FontWeight,
             Anchor = Anchor,
+            Justify = Justify,
             Angle = Angle,
             Mask = Mask,
             MaskColor = MaskColor,

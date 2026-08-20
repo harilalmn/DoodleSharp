@@ -356,6 +356,65 @@ class Test {
         Assert.True(score > 10);
     }
 
+    /// <summary>
+    /// The regression that motivated anchoring: typing one character inside an argument list opened
+    /// a popup of several hundred rows, every one of them a name with the typed letter buried
+    /// somewhere in the middle. A plain subsequence test says all of these match "x".
+    /// </summary>
+    [Theory]
+    [InlineData("AccessViolationException")]
+    [InlineData("ArithmeticException")]
+    [InlineData("BoundingBox")]
+    [InlineData("CollectionExtensions")]
+    [InlineData("ContextStaticAttribute")]
+    [InlineData("DoubleExtensions")]
+    public void FuzzyMatcher_SingleLetterDoesNotMatchItBuriedMidWord(string candidate)
+    {
+        Assert.Null(FuzzyMatcher.Score("x", candidate));
+    }
+
+    /// <summary>
+    /// ...while the things a user typing "x" actually means still match.
+    /// </summary>
+    [Theory]
+    [InlineData("x")]
+    [InlineData("X")]
+    [InlineData("XAxis")]
+    [InlineData("VPoint.X")]
+    [InlineData("max_x")]
+    public void FuzzyMatcher_SingleLetterStillMatchesAtAWordStart(string candidate)
+    {
+        Assert.NotNull(FuzzyMatcher.Score("x", candidate));
+    }
+
+    /// <summary>
+    /// The anchor constrains only the FIRST character; the rest stay a free subsequence, which is
+    /// what keeps the abbreviations the matcher exists for working.
+    /// </summary>
+    [Theory]
+    [InlineData("clr", "Color")]
+    [InlineData("clr", "Clear")]
+    [InlineData("VPt", "VPoint")]
+    [InlineData("p", "VPoint")]          // camelCase hump, previous char also uppercase
+    [InlineData("s", "HTTPServer")]      // last capital of an acronym run
+    [InlineData("l", "max_label")]       // after an underscore
+    public void FuzzyMatcher_AnchorConstrainsOnlyTheFirstCharacter(string pattern, string candidate)
+    {
+        Assert.NotNull(FuzzyMatcher.Score(pattern, candidate));
+    }
+
+    [Theory]
+    [InlineData("Color", 0, true)]
+    [InlineData("VPoint", 1, true)]
+    [InlineData("HTTPServer", 4, true)]
+    [InlineData("HTTPServer", 1, false)] // interior of an acronym run is not a word start
+    [InlineData("BoundingBox", 10, false)]
+    [InlineData("max_label", 4, true)]
+    public void FuzzyMatcher_IsWordStart(string candidate, int index, bool expected)
+    {
+        Assert.Equal(expected, FuzzyMatcher.IsWordStart(candidate, index));
+    }
+
     [Fact]
     public void FuzzyMatcher_NoMatch_ReturnsNull()
     {

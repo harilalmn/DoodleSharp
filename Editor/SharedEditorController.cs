@@ -1323,10 +1323,6 @@ namespace DoodleSharp.Editor
 
                 if (completions.Count > 0)
                 {
-                    _completionWindow = new CompletionWindow(_editor.TextArea);
-                    _completionWindow.StartOffset = offset - prefix.Length;
-                    var data = _completionWindow.CompletionList.CompletionData;
-
                     // Fuzzy-filter, then order alphabetically.
                     var sorted = SortCompletions(completions, prefix);
 
@@ -1337,6 +1333,7 @@ namespace DoodleSharp.Editor
                     // rule the main window follows (note 101); this is the parallel implementation
                     // of the same editor (note 43), so it has to follow it too.
                     var isMemberAccess = offset > prefix.Length && code.Length > offset - prefix.Length - 1 && code[offset - prefix.Length - 1] == '.';
+                    var snippets = new List<ICompletionData>();
                     if (!isAfterNew && !isMemberAccess)
                     {
                         foreach (var (trigger, description) in CodeSnippets.GetAll())
@@ -1345,8 +1342,27 @@ namespace DoodleSharp.Editor
                                 !trigger.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                                 continue;
 
-                            data.Add(new SnippetCompletionData(trigger, description, CodeSnippets.GetSnippet(trigger)!));
+                            snippets.Add(new SnippetCompletionData(trigger, description, CodeSnippets.GetSnippet(trigger)!));
                         }
+                    }
+
+                    // Nothing survived the filter, so there is nothing to offer. The guard above
+                    // counts the UNFILTERED symbols, which is why this is a second check and not a
+                    // tightening of the first: Roslyn nearly always returns something, so building
+                    // the window on that count alone put an empty popup on screen — covering the
+                    // code, swallowing Enter and Tab, and telling the user nothing. The main window
+                    // has always tested the filtered count instead (note 43 — same editor, two
+                    // implementations, and this is the half that was wrong).
+                    if (sorted.Count == 0 && snippets.Count == 0)
+                        return;
+
+                    _completionWindow = new CompletionWindow(_editor.TextArea);
+                    _completionWindow.StartOffset = offset - prefix.Length;
+                    var data = _completionWindow.CompletionList.CompletionData;
+
+                    foreach (var snippet in snippets)
+                    {
+                        data.Add(snippet);
                     }
 
                     foreach (var item in sorted)
