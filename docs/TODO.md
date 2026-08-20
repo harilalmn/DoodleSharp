@@ -1,4 +1,4 @@
-# TODO - DoodleSharp Future Development
+﻿# TODO - DoodleSharp Future Development
 
 ## High Priority (P0) - Interactive Editing
 
@@ -257,6 +257,9 @@ Core timeline playback is implemented; items below are advanced timeline UX poli
 
 ### Curve Operations
 - [x] `ICurve.SetBounds(start, end)` — in-place parameter-range trim for VLine/VArc/VEllipse/VPolyline/VBezier/VSpline (VBezier uses De Casteljau, VSpline dense-resamples); throws on VCircle/VPolygon/VRay/VXLine. Mirrored in C2VGeometry. 17 xUnit tests.
+
+### Recently Completed (2026-08-20) — The Completion List Opens on the Type You Asked For
+- [x] **IntelliSense preselects the expected type** — `VXYZ p1 = new ` opened the list highlighted on `AccessViolationException`, with `VXYZ` several hundred rows below the fold, so the one key press that costs nothing inserted the wrong type. The service had always reported the expected type at the caret; both editor hosts threw it away with `_`. The order is still alphabetical (note 115 stands, and its ordering guard is untouched) — only the row that starts selected changed, which is the same line Visual Studio draws. A snippet at row 0 still wins (note 101), and the selected row is scrolled into view, since setting `SelectedItem` does not do it. `Editor/CompletionPreselect.cs`, both editor implementations (note 43), `Tests/CompletionPreselectTests.cs`. CLAUDE.md note 122.
 
 ### Recently Completed (2026-08-20) — Auto-Run, and the Wheel Interactive Mode Took
 - [x] **Wheel zoom survives a mouse handler** — registering *any* `Mouse.*` handler suppressed selection, double-click-zoom-to-fit **and the wheel** together, so a sketch that merely watched clicks lost the main way to navigate a drawing larger than the viewport. The canvas now gives the wheel up only when user code claims it with `Mouse.OnWheel`; `Mouse.OnWheel(null)` hands zoom back. New public `Mouse.HasWheelHandler` reports that claim separately from `HasHandlers`. The status-bar hint moved with it, because a hint that describes gestures is only worth having while it is true. CLAUDE.md note 95.
