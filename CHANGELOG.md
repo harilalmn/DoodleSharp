@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 All notable user-facing changes to DoodleSharp are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses calendar
@@ -8,6 +8,8 @@ Each GitHub release also carries auto-generated notes built from the commit log 
 tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
+
+## [2026.8.12] - 2026-08-20
 
 A correctness pass over geometry, rendering, export and file handling. Most of what follows was
 silently wrong rather than visibly broken — a shape in the wrong place, a file that exported
