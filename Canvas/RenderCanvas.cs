@@ -2744,6 +2744,24 @@ public class RenderCanvas : FrameworkElement
         if (applyOpacity) dc.Pop();
     }
 
+    /// <summary>
+    /// Draws a <see cref="VEllipse"/>, honouring its sweep, its <see cref="VEllipse.Rotation"/>, the
+    /// move-animation offsets and the draw-animation reveal.
+    /// </summary>
+    /// <remarks>
+    /// This was a bare <c>dc.DrawEllipse</c> on the centre and the two radii, which quietly ignored
+    /// all four. Two of those were visible mismatches rather than merely missing features: the
+    /// tessellator — which is what the Managed and GPU backends and every exporter's fallback go
+    /// through — has always honoured the sweep, so a half ellipse drew as a full one here and as a
+    /// half everywhere else, and note 7's rule that every <c>Draw*</c> applies <c>OffsetX</c> and
+    /// <c>OffsetY</c> was broken, so a <c>MoveAnimation</c> on an ellipse did nothing at all.
+    ///
+    /// <para>
+    /// A whole, unrotated ellipse still takes WPF's own <c>DrawEllipse</c> — that is the common
+    /// case and it renders a true conic rather than a polygon. Anything else is walked as a
+    /// geometry, which is also what gives the reveal something to interpolate along.
+    /// </para>
+    /// </remarks>
     private void DrawEllipse(DrawingContext dc, VEllipse ellipse)
     {
         if (ellipse.DrawFactor <= 0 || ellipse.Opacity <= 0) return;
@@ -2751,13 +2769,52 @@ public class RenderCanvas : FrameworkElement
         var applyOpacity = ellipse.Opacity < 1.0;
         if (applyOpacity) dc.PushOpacity(ellipse.Opacity);
 
-        var centerScreen = WorldToScreen(ellipse.Center.X, ellipse.Center.Y);
-        var screenRadiusX = ellipse.RadiusX * _viewport.Scale;
-        var screenRadiusY = ellipse.RadiusY * _viewport.Scale;
+        var offsetX = ellipse.OffsetX;
+        var offsetY = ellipse.OffsetY;
+
         var fill = GetCachedBrush(ellipse.FillColor);
         var pen = GetShapePen(ellipse.Color, ellipse.LineWeight, ellipse.LineType, ellipse.LineTypeScale);
 
-        dc.DrawEllipse(fill, pen, centerScreen, screenRadiusX, screenRadiusY);
+        var sweep = ellipse.EndAngle - ellipse.StartAngle;
+        var isWhole = Math.Abs(Math.Abs(sweep) - 360.0) < 1e-9 || Math.Abs(sweep) < 1e-9;
+
+        if (isWhole && ellipse.Rotation == 0 && ellipse.DrawFactor >= 1.0)
+        {
+            var centerScreen = WorldToScreen(ellipse.Center.X + offsetX, ellipse.Center.Y + offsetY);
+            dc.DrawEllipse(fill, pen, centerScreen,
+                           ellipse.RadiusX * _viewport.Scale, ellipse.RadiusY * _viewport.Scale);
+            if (applyOpacity) dc.Pop();
+            return;
+        }
+
+        // Segment count follows the on-screen size, the same rule the tessellator uses, so the two
+        // backends agree on how round a circle looks at a given zoom.
+        var radiusPx = Math.Max(Math.Abs(ellipse.RadiusX), Math.Abs(ellipse.RadiusY)) * _viewport.Scale;
+        var segments = C2VGeometry.Rendering.ShapeTessellator.SegmentsForRadius(radiusPx);
+        if (!isWhole)
+            segments = Math.Max(2, (int)(segments * Math.Min(1.0, Math.Abs(sweep) / 360.0)) + 1);
+
+        var visible = Math.Max(1, (int)Math.Ceiling(segments * Math.Clamp(ellipse.DrawFactor, 0, 1)));
+        var effectiveSweep = Math.Abs(sweep) < 1e-9 ? 360.0 : sweep;
+
+        // Only a fully-revealed whole ellipse is a closed figure; a partial sweep is an open curve
+        // and a partly-revealed one is a curve still being drawn, and neither should be filled shut.
+        var closed = isWhole && ellipse.DrawFactor >= 1.0;
+
+        var geometry = new StreamGeometry();
+        using (var ctx = geometry.Open())
+        {
+            var p0 = ellipse.PointAtAngle(ellipse.StartAngle);
+            ctx.BeginFigure(WorldToScreen(p0.X + offsetX, p0.Y + offsetY), closed && fill != null, closed);
+            for (int i = 1; i <= visible; i++)
+            {
+                var angle = ellipse.StartAngle + effectiveSweep * (i / (double)segments);
+                var p = ellipse.PointAtAngle(angle);
+                ctx.LineTo(WorldToScreen(p.X + offsetX, p.Y + offsetY), true, false);
+            }
+        }
+        geometry.Freeze();
+        dc.DrawGeometry(closed ? fill : null, pen, geometry);
 
         if (applyOpacity) dc.Pop();
     }
@@ -2939,7 +2996,10 @@ public class RenderCanvas : FrameworkElement
         var applyOpacity = text.Opacity < 1.0;
         if (applyOpacity) dc.PushOpacity(text.Opacity);
 
-        var screenPos = WorldToScreen(text.Location.X, text.Location.Y);
+        // Note 7: the move-animation offsets are applied by every Draw*, and this one used to be
+        // the exception -- a MoveAnimation on a label ran to completion with the label sitting
+        // exactly where it started, while everything animated alongside it moved.
+        var screenPos = WorldToScreen(text.Location.X + text.OffsetX, text.Location.Y + text.OffsetY);
         var brush = GetCachedBrush(text.Color);
 
         // Scale font size with zoom, but keep it readable -- and keep it inside what WPF will
@@ -3259,6 +3319,16 @@ public class RenderCanvas : FrameworkElement
         var applyOpacity = dim.Opacity < 1.0;
         if (applyOpacity) dc.PushOpacity(dim.Opacity);
 
+        // Note 7: a Draw* that ignores OffsetX/OffsetY makes MoveAnimation a no-op for that shape,
+        // and an annotation that stays put while the geometry it annotates slides away is worse
+        // than one that never moved. Applied as one screen-space translate around the whole method
+        // -- the same shape as DrawGroup's (note 26) -- rather than threaded through the dozen
+        // coordinates built below, so no arrowhead or extension line can be missed.
+        var animateOffset = dim.OffsetX != 0 || dim.OffsetY != 0;
+        if (animateOffset)
+            dc.PushTransform(new TranslateTransform(dim.OffsetX * _viewport.Scale,
+                                                    -dim.OffsetY * _viewport.Scale));
+
         var dimLineColor = dim.DimensionLineColor ?? dim.Color;
         var textColor = dim.TextColor ?? dim.Color;
 
@@ -3334,6 +3404,7 @@ public class RenderCanvas : FrameworkElement
 
         dc.DrawText(formattedText, textOrigin);
 
+        if (animateOffset) dc.Pop();
         if (applyOpacity) dc.Pop();
     }
 
@@ -3343,6 +3414,16 @@ public class RenderCanvas : FrameworkElement
 
         var applyOpacity = dim.Opacity < 1.0;
         if (applyOpacity) dc.PushOpacity(dim.Opacity);
+
+        // Note 7: a Draw* that ignores OffsetX/OffsetY makes MoveAnimation a no-op for that shape,
+        // and an annotation that stays put while the geometry it annotates slides away is worse
+        // than one that never moved. Applied as one screen-space translate around the whole method
+        // -- the same shape as DrawGroup's (note 26) -- rather than threaded through the dozen
+        // coordinates built below, so no arrowhead or extension line can be missed.
+        var animateOffset = dim.OffsetX != 0 || dim.OffsetY != 0;
+        if (animateOffset)
+            dc.PushTransform(new TranslateTransform(dim.OffsetX * _viewport.Scale,
+                                                    -dim.OffsetY * _viewport.Scale));
 
         // Per-element colors: fall back to base Color when specific color is null
         var dimLineColor = dim.DimensionLineColor ?? dim.Color;
@@ -3434,6 +3515,7 @@ public class RenderCanvas : FrameworkElement
 
         dc.DrawText(formattedText, textOrigin);
 
+        if (animateOffset) dc.Pop();
         if (applyOpacity) dc.Pop();
     }
 
@@ -3491,63 +3573,24 @@ public class RenderCanvas : FrameworkElement
     /// Draws a single shape using the appropriate method based on its type.
     /// Used for rendering child shapes within groups.
     /// </summary>
-    private void DrawShape(DrawingContext dc, Shape shape)
-    {
-        switch (shape)
-        {
-            case VPoint point:
-                DrawPoint(dc, point);
-                break;
-            case VLine line:
-                DrawLine(dc, line);
-                break;
-            case VArc arc:
-                DrawArc(dc, arc);
-                break;
-            case VCircle circle:
-                DrawCircle(dc, circle);
-                break;
-            case VRectangle rect:
-                DrawRectangle(dc, rect);
-                break;
-            case VEllipse ellipse:
-                DrawEllipse(dc, ellipse);
-                break;
-            case VPolygon polygon:
-                DrawPolygon(dc, polygon);
-                break;
-            case VPolyline polyline:
-                DrawPolyline(dc, polyline);
-                break;
-            case VText text:
-                DrawText(dc, text);
-                break;
-            case VBezier bezier:
-                DrawBezier(dc, bezier);
-                break;
-            case VSpline spline:
-                DrawSpline(dc, spline);
-                break;
-            case VArrow arrow:
-                DrawArrow(dc, arrow);
-                break;
-            case VRadialDimension radDim:
-                DrawRadialDimension(dc, radDim);
-                break;
-            case VDimension dim:
-                DrawDimension(dc, dim);
-                break;
-            case VGroup nestedGroup:
-                DrawGroup(dc, nestedGroup);
-                break;
-            case Region region:
-                DrawRegion(dc, region);
-                break;
-            case VHatch hatch:
-                DrawHatch(dc, hatch);
-                break;
-        }
-    }
+    /// <summary>
+    /// Draws one child of a <see cref="VGroup"/>.
+    /// </summary>
+    /// <remarks>
+    /// Delegates to <see cref="DispatchShapeDraw"/> rather than switching on the type again. It used
+    /// to be a second, near-identical switch, and the two had already drifted: this one had no
+    /// <c>VRay</c> or <c>VXLine</c> case and no <c>default</c>, so a construction line inside a group
+    /// was silently not drawn at all — no error, no missing-shape warning, just absent geometry. It
+    /// also skipped the animated-rotation transform that <see cref="DispatchShapeDraw"/> applies for
+    /// every shape (note 68), so a <c>RotateAnimation</c> on a grouped shape did nothing while the
+    /// same animation on the same shape ungrouped worked.
+    ///
+    /// <para>
+    /// One switch means the next shape type cannot be added to only half the renderer. Note 87
+    /// reached the same conclusion for the exporters after the same class of disappearance.
+    /// </para>
+    /// </remarks>
+    private void DrawShape(DrawingContext dc, Shape shape) => DispatchShapeDraw(dc, shape);
 
     private void DrawRegion(DrawingContext dc, Region region)
     {
@@ -4132,75 +4175,9 @@ public class RenderCanvas : FrameworkElement
 
         foreach (var shape in shapeList)
         {
-            // Skip hidden shapes
-            if (shape is Shape shp && !shp.IsVisible)
-                continue;
-
-            switch (shape)
-            {
-                case VPoint point:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, point.X, point.Y);
-                    break;
-                case VLine line:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, line.Start.X, line.Start.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, line.End.X, line.End.Y);
-                    break;
-                case VArc arc:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, arc.Center.X - arc.Radius, arc.Center.Y - arc.Radius);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, arc.Center.X + arc.Radius, arc.Center.Y + arc.Radius);
-                    break;
-                case VCircle circle:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, circle.Center.X - circle.Radius, circle.Center.Y - circle.Radius);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, circle.Center.X + circle.Radius, circle.Center.Y + circle.Radius);
-                    break;
-                case VRectangle rect:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, rect.Corner.X, rect.Corner.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, rect.Corner.X + rect.Width, rect.Corner.Y + rect.Height);
-                    break;
-                case VEllipse ellipse:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, ellipse.Center.X - ellipse.RadiusX, ellipse.Center.Y - ellipse.RadiusY);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, ellipse.Center.X + ellipse.RadiusX, ellipse.Center.Y + ellipse.RadiusY);
-                    break;
-                case VPolygon polygon:
-                    foreach (var p in polygon.Points)
-                        UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, p.X, p.Y);
-                    break;
-                case VPolyline polyline:
-                    foreach (var p in polyline.Points)
-                        UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, p.X, p.Y);
-                    break;
-                case VText text:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, text.Location.X, text.Location.Y);
-                    break;
-                case VBezier bezier:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, bezier.P0.X, bezier.P0.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, bezier.P1.X, bezier.P1.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, bezier.P2.X, bezier.P2.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, bezier.P3.X, bezier.P3.Y);
-                    break;
-                case VSpline spline:
-                    foreach (var p in spline.ControlPoints)
-                        UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, p.X, p.Y);
-                    break;
-                case VArrow arrow:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, arrow.Start.X, arrow.Start.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, arrow.End.X, arrow.End.Y);
-                    break;
-                case VRadialDimension radDim:
-                    var radBounds = radDim.GetBounds();
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, radBounds.Min.X, radBounds.Min.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, radBounds.Max.X, radBounds.Max.Y);
-                    break;
-                case VDimension dim:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, dim.Point1.X, dim.Point1.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, dim.Point2.X, dim.Point2.Y);
-                    break;
-                case VGroup group:
-                    var groupBounds = group.GetBounds();
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, groupBounds.Min.X, groupBounds.Min.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, groupBounds.Max.X, groupBounds.Max.Y);
-                    break;
-            }
+            if (!TryGetZoomBounds(shape, out var box)) continue;
+            UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, box.Min.X, box.Min.Y);
+            UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, box.Max.X, box.Max.Y);
         }
 
         var padding = 50.0;
@@ -4225,6 +4202,53 @@ public class RenderCanvas : FrameworkElement
         _viewport.PanY = worldCenterY * _viewport.Scale;
 
         RedrawAll();
+    }
+
+    /// <summary>
+    /// The box zoom-to-fit should reserve for one shape, or false when the shape has no meaningful
+    /// extent to frame.
+    /// </summary>
+    /// <remarks>
+    /// Every shape already knows its own bounds, and this is the only sensible place to ask. The two
+    /// <c>ZoomExtents</c> overloads used to carry a hand-written type switch each — a second and
+    /// third copy of bounds arithmetic that had drifted from <c>GetBounds</c> and from each other.
+    /// Three separate consequences, none of which announced itself:
+    ///
+    /// <list type="bullet">
+    /// <item>Types simply absent from the switch — <c>Region</c>, <c>VHatch</c>, <c>VGrid</c>,
+    /// <c>VCell</c> — contributed nothing, so zoom-to-fit on a drawing built from regions or
+    /// hatches framed empty canvas.</item>
+    /// <item><c>VText</c> contributed its <c>Location</c> and nothing else, so a label had zero
+    /// size and a text-only drawing collapsed to a point.</item>
+    /// <item>A rotated <c>VRectangle</c> was framed by its unrotated box and an arc by its whole
+    /// circle, so the fix to those in the geometry never reached the one feature that most obviously
+    /// showed them.</item>
+    /// </list>
+    ///
+    /// <para>
+    /// Animation offsets are folded in for the same reason the cull index folds them in: a shape
+    /// mid-move is where the offsets say it is, not where its geometry says it is.
+    /// </para>
+    /// </remarks>
+    private static bool TryGetZoomBounds(IDrawable drawable, out BoundingBox box)
+    {
+        box = default!;
+        if (drawable is not Shape shape || !shape.IsVisible) return false;
+
+        // Construction geometry is unbounded in principle and merely very large in practice, so
+        // framing it would zoom the real drawing down to nothing. Excluded by type, exactly as the
+        // cull index excludes it from culling (note 74).
+        if (shape is VRay || shape is VXLine) return false;
+
+        var bounds = shape.GetBounds();
+        var ox = shape.OffsetX;
+        var oy = shape.OffsetY;
+
+        box = ox == 0 && oy == 0
+            ? bounds
+            : new BoundingBox(new VXYZ(bounds.Min.X + ox, bounds.Min.Y + oy),
+                              new VXYZ(bounds.Max.X + ox, bounds.Max.Y + oy));
+        return true;
     }
 
     private static void UpdateBounds(ref double minX, ref double maxX, ref double minY, ref double maxY, double x, double y)
@@ -4270,75 +4294,9 @@ public class RenderCanvas : FrameworkElement
 
         foreach (var shape in shapeList)
         {
-            // Skip hidden shapes
-            if (shape is Shape shp && !shp.IsVisible)
-                continue;
-
-            switch (shape)
-            {
-                case VPoint point:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, point.X, point.Y);
-                    break;
-                case VLine line:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, line.Start.X, line.Start.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, line.End.X, line.End.Y);
-                    break;
-                case VArc arc:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, arc.Center.X - arc.Radius, arc.Center.Y - arc.Radius);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, arc.Center.X + arc.Radius, arc.Center.Y + arc.Radius);
-                    break;
-                case VCircle circle:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, circle.Center.X - circle.Radius, circle.Center.Y - circle.Radius);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, circle.Center.X + circle.Radius, circle.Center.Y + circle.Radius);
-                    break;
-                case VRectangle rect:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, rect.Corner.X, rect.Corner.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, rect.Corner.X + rect.Width, rect.Corner.Y + rect.Height);
-                    break;
-                case VEllipse ellipse:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, ellipse.Center.X - ellipse.RadiusX, ellipse.Center.Y - ellipse.RadiusY);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, ellipse.Center.X + ellipse.RadiusX, ellipse.Center.Y + ellipse.RadiusY);
-                    break;
-                case VPolygon polygon:
-                    foreach (var p in polygon.Points)
-                        UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, p.X, p.Y);
-                    break;
-                case VPolyline polyline:
-                    foreach (var p in polyline.Points)
-                        UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, p.X, p.Y);
-                    break;
-                case VText text:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, text.Location.X, text.Location.Y);
-                    break;
-                case VBezier bezier:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, bezier.P0.X, bezier.P0.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, bezier.P1.X, bezier.P1.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, bezier.P2.X, bezier.P2.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, bezier.P3.X, bezier.P3.Y);
-                    break;
-                case VSpline spline:
-                    foreach (var p in spline.ControlPoints)
-                        UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, p.X, p.Y);
-                    break;
-                case VArrow arrow:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, arrow.Start.X, arrow.Start.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, arrow.End.X, arrow.End.Y);
-                    break;
-                case VRadialDimension radDim2:
-                    var radBounds2 = radDim2.GetBounds();
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, radBounds2.Min.X, radBounds2.Min.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, radBounds2.Max.X, radBounds2.Max.Y);
-                    break;
-                case VDimension dim:
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, dim.Point1.X, dim.Point1.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, dim.Point2.X, dim.Point2.Y);
-                    break;
-                case VGroup group:
-                    var groupBounds = group.GetBounds();
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, groupBounds.Min.X, groupBounds.Min.Y);
-                    UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, groupBounds.Max.X, groupBounds.Max.Y);
-                    break;
-            }
+            if (!TryGetZoomBounds(shape, out var box)) continue;
+            UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, box.Min.X, box.Min.Y);
+            UpdateBounds(ref minX, ref maxX, ref minY, ref maxY, box.Max.X, box.Max.Y);
         }
 
         var padding = 50.0;

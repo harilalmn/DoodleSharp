@@ -1,4 +1,4 @@
-using DoodleSharp.Rendering;
+﻿using DoodleSharp.Rendering;
 using System.Windows;
 using C2VGeometry;
 
@@ -369,14 +369,26 @@ public class SelectionTool
         return minDist;
     }
 
+    /// <summary>
+    /// Hit-tests a label against its own layout box, grown by the pick tolerance.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately delegates to <see cref="VText.GetBounds"/> instead of estimating a box here.
+    /// The estimate this replaced assumed <c>BottomLeft</c>, so every other <c>Anchor</c> was
+    /// hit-tested somewhere the text was not; it ignored <c>Angle</c>, so a rotated label was
+    /// picked in its unrotated position; and it multiplied the whole of <c>Content</c> — newlines
+    /// and all — by the character width, so a multi-line label claimed a strip several times its
+    /// own width and only one line of its height. <c>GetBounds</c> already accounts for all three,
+    /// and it is what <c>Shape.Contains</c> uses for a <c>VText</c>, so picking and every other
+    /// consumer now agree on where the label is.
+    /// </remarks>
     private bool HitTestText(VText text, VXYZ point, double tolerance)
     {
-        // Approximate text bounding box
-        var estimatedWidth = text.Content.Length * text.Height * 0.6;
-        return point.X >= text.Location.X - tolerance &&
-               point.X <= text.Location.X + estimatedWidth + tolerance &&
-               point.Y >= text.Location.Y - tolerance &&
-               point.Y <= text.Location.Y + text.Height + tolerance;
+        var bounds = text.GetBounds();
+        return point.X >= bounds.Min.X - tolerance &&
+               point.X <= bounds.Max.X + tolerance &&
+               point.Y >= bounds.Min.Y - tolerance &&
+               point.Y <= bounds.Max.Y + tolerance;
     }
 
     private bool HitTestDimension(VDimension dim, VXYZ point, double tolerance)

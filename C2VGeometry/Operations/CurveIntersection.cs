@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -282,6 +282,8 @@ public static class CurveIntersection
         var p1 = line.Start;
         var p2 = line.End;
         var center = ellipse.Center;
+        double worldDx = p2.X - p1.X;
+        double worldDy = p2.Y - p1.Y;
         double a = ellipse.RadiusX;
         double b = ellipse.RadiusY;
 
@@ -289,6 +291,19 @@ public static class CurveIntersection
         double dy = p2.Y - p1.Y;
         double fx = p1.X - center.X;
         double fy = p1.Y - center.Y;
+
+        // The closed form below is the axis-aligned one, so a turned ellipse is solved by taking
+        // the line into the ellipse's own frame. Only the direction and the start offset need
+        // rotating: the parameter t that falls out is the same t on the original line, so the
+        // points are still built from the untransformed p1/worldDx/worldDy and nothing has to be
+        // rotated back.
+        if (ellipse.Rotation != 0)
+        {
+            double r = -ellipse.Rotation * Math.PI / 180.0;
+            double rc = Math.Cos(r), rs = Math.Sin(r);
+            (dx, dy) = (dx * rc - dy * rs, dx * rs + dy * rc);
+            (fx, fy) = (fx * rc - fy * rs, fx * rs + fy * rc);
+        }
 
         // Ellipse equation: (x/a)^2 + (y/b)^2 = 1
         // Line: p = p1 + t*(p2-p1)
@@ -311,7 +326,7 @@ public static class CurveIntersection
             double t = -B / (2 * A);
             if (t >= -Tolerance && t <= 1 + Tolerance)
             {
-                result.Points.Add(new VXYZ(p1.X + t * dx, p1.Y + t * dy));
+                result.Points.Add(new VXYZ(p1.X + t * worldDx, p1.Y + t * worldDy));
             }
         }
         else
@@ -322,11 +337,11 @@ public static class CurveIntersection
 
             if (t1 >= -Tolerance && t1 <= 1 + Tolerance)
             {
-                result.Points.Add(new VXYZ(p1.X + t1 * dx, p1.Y + t1 * dy));
+                result.Points.Add(new VXYZ(p1.X + t1 * worldDx, p1.Y + t1 * worldDy));
             }
             if (t2 >= -Tolerance && t2 <= 1 + Tolerance)
             {
-                result.Points.Add(new VXYZ(p1.X + t2 * dx, p1.Y + t2 * dy));
+                result.Points.Add(new VXYZ(p1.X + t2 * worldDx, p1.Y + t2 * worldDy));
             }
         }
 

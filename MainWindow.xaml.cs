@@ -1762,145 +1762,153 @@ public partial class MainWindow : Window
 
     private async void TriggerCompletion(bool autoTrigger)
     {
-        // _completionRunning covers the await below: without it, two triggers arriving before the
-        // first Roslyn query returns (e.g. the auto-popup racing a Ctrl+Space) would each build a
-        // window, and the loser would be orphaned on screen with no way to close it.
-        if (_completionWindow != null || _completionRunning)
-            return;
-
-        _completionRunning = true;
-
-        var offset = CodeEditor.CaretOffset;
-        var code = CodeEditor.Text;
-
         try
         {
-             List<ICompletionData> completions;
-             bool isAfterNew;
-             string prefix;
-             string? expectedType;
+            // _completionRunning covers the await below: without it, two triggers arriving before the
+            // first Roslyn query returns (e.g. the auto-popup racing a Ctrl+Space) would each build a
+            // window, and the loser would be orphaned on screen with no way to close it.
+            if (_completionWindow != null || _completionRunning)
+                return;
 
-             if (_completionWorkspace != null && _activeFile != null)
-             {
-                 // Use cached workspace for incremental compilation (Phase 1)
-                 var fileId = _activeFile.FileName;
-                 var service = new Editor.RoslynCompletionService(_completionWorkspace);
-                 // The fourth value is the expected type at the caret. The list stays alphabetical —
-                 // nothing ranks by it (note 115) — but it decides which row opens highlighted, so
-                 // `VXYZ p = new ` puts Tab on VXYZ instead of on whatever the alphabet put first.
-                 (completions, isAfterNew, prefix, expectedType) = await service.GetCompletionsAsync(code, offset, _completionWorkspace, fileId);
-             }
-             else
-             {
-                 // Fallback: create fresh compilation
-                 var service = new Editor.RoslynCompletionService(_compiler.GetReferences());
-                 var otherFiles = GetOtherProjectFiles();
-                 (completions, isAfterNew, prefix, expectedType) = await service.GetCompletionsAsync(code, offset, otherFiles);
-             }
+            _completionRunning = true;
 
-             // The Roslyn query is awaited, and the user keeps typing during it. If the caret has
-             // moved on, this result describes a position that no longer exists — showing it pops a
-             // list anchored to stale text, which is how a namespace list appeared after a closing
-             // parenthesis. An explicit Ctrl+Space is never stale, so only auto-triggers bail.
-             if (autoTrigger && CodeEditor.CaretOffset != offset)
-                 return;
+            var offset = CodeEditor.CaretOffset;
+            var code = CodeEditor.Text;
 
-             // Nothing to offer. Notably this is how "no completion while naming a new variable"
-             // stays quiet: the service deliberately returns an empty list there, and adding
-             // snippets regardless would put a snippet list over the name being invented.
-             if (completions.Count == 0)
-                 return;
+            try
+            {
+                 List<ICompletionData> completions;
+                 bool isAfterNew;
+                 string prefix;
+                 string? expectedType;
 
-             // Fuzzy-filter (and score, for the match highlighting), then order alphabetically.
-             var sortedCompletions = SortCompletions(completions, prefix);
-
-             // Snippets are not symbols, so they survive a position where Roslyn resolves nothing —
-             // which is exactly the half-typed state the user is in when they want `for`. Building
-             // the item list before deciding whether to open the window is what makes that work;
-             // gating on the symbol count alone meant a broken statement offered nothing at all.
-             var isMemberAccess = offset > prefix.Length &&
-                 code.Length > offset - prefix.Length - 1 &&
-                 code[offset - prefix.Length - 1] == '.';
-
-             var snippets = new List<ICompletionData>();
-             if (!isAfterNew && !isMemberAccess)
-             {
-                 foreach (var (trigger, description) in Editor.CodeSnippets.GetAll())
+                 if (_completionWorkspace != null && _activeFile != null)
                  {
-                     if (!string.IsNullOrEmpty(prefix) &&
-                         !trigger.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                         continue;
-
-                     snippets.Add(new Editor.SnippetCompletionData(trigger, description, Editor.CodeSnippets.GetSnippet(trigger)!));
+                     // Use cached workspace for incremental compilation (Phase 1)
+                     var fileId = _activeFile.FileName;
+                     var service = new Editor.RoslynCompletionService(_completionWorkspace);
+                     // The fourth value is the expected type at the caret. The list stays alphabetical —
+                     // nothing ranks by it (note 115) — but it decides which row opens highlighted, so
+                     // `VXYZ p = new ` puts Tab on VXYZ instead of on whatever the alphabet put first.
+                     (completions, isAfterNew, prefix, expectedType) = await service.GetCompletionsAsync(code, offset, _completionWorkspace, fileId);
                  }
-             }
-
-             // A keyword whose spelling a snippet already occupies is pure duplication now that the
-             // snippet sits above it: `for` listed the loop snippet and then the bare `for` keyword
-             // two rows apart, and the keyword row can no longer be reached by ranking or by a commit
-             // character. Only the ~19 keywords that have a snippet are dropped — the rest (`int`,
-             // `var`, `return`, `float`, …) are why keywords are injected at all, since Roslyn's
-             // LookupSymbols returns declared symbols only and without them `for (int` ranked
-             // IntersectionResult first.
-             if (snippets.Count > 0)
-             {
-                 var triggers = new HashSet<string>(snippets.Select(s => s.Text), StringComparer.Ordinal);
-                 sortedCompletions = sortedCompletions
-                     .Where(c => c is not Editor.CompletionData { Kind: Editor.CompletionKind.Keyword } kw
-                                 || !triggers.Contains(kw.Text))
-                     .ToList();
-             }
-
-             if (sortedCompletions.Count > 0 || snippets.Count > 0)
-             {
-                 // Build the window in a local first and only publish it to the field once it is
-                 // actually on screen. The field is the "completion is busy" gate for every other
-                 // entry point, so assigning it before Show() means any exception in between (a
-                 // sort, a style lookup, a data item) leaves a non-null field for a window that will
-                 // never open and never close — killing IntelliSense for the rest of the session.
-                 var window = new CompletionWindow(CodeEditor.TextArea);
-
-                 // Explicitly set StartOffset based on the prefix length to fix off-by-one replacement bugs
-                 window.StartOffset = offset - prefix.Length;
-
-                 var data = window.CompletionList.CompletionData;
-
-                 // Snippets go first, and the initial selection is CompletionData[0], so a matching
-                 // snippet is what Tab inserts. AvalonEdit renders items in insertion order and never
-                 // consults Priority for it — appending them left `for`/`foreach` below every
-                 // FormatException-shaped type in the list, several scrolls down, which is not a
-                 // place a snippet can be discovered, let alone accepted with one key.
-                 foreach (var snippet in snippets)
+                 else
                  {
-                     data.Add(snippet);
+                     // Fallback: create fresh compilation
+                     var service = new Editor.RoslynCompletionService(_compiler.GetReferences());
+                     var otherFiles = GetOtherProjectFiles();
+                     (completions, isAfterNew, prefix, expectedType) = await service.GetCompletionsAsync(code, offset, otherFiles);
                  }
 
-                 foreach (var item in sortedCompletions)
+                 // The Roslyn query is awaited, and the user keeps typing during it. If the caret has
+                 // moved on, this result describes a position that no longer exists — showing it pops a
+                 // list anchored to stale text, which is how a namespace list appeared after a closing
+                 // parenthesis. An explicit Ctrl+Space is never stale, so only auto-triggers bail.
+                 if (autoTrigger && CodeEditor.CaretOffset != offset)
+                     return;
+
+                 // Nothing to offer. Notably this is how "no completion while naming a new variable"
+                 // stays quiet: the service deliberately returns an empty list there, and adding
+                 // snippets regardless would put a snippet list over the name being invented.
+                 if (completions.Count == 0)
+                     return;
+
+                 // Fuzzy-filter (and score, for the match highlighting), then order alphabetically.
+                 var sortedCompletions = SortCompletions(completions, prefix);
+
+                 // Snippets are not symbols, so they survive a position where Roslyn resolves nothing —
+                 // which is exactly the half-typed state the user is in when they want `for`. Building
+                 // the item list before deciding whether to open the window is what makes that work;
+                 // gating on the symbol count alone meant a broken statement offered nothing at all.
+                 var isMemberAccess = offset > prefix.Length &&
+                     code.Length > offset - prefix.Length - 1 &&
+                     code[offset - prefix.Length - 1] == '.';
+
+                 var snippets = new List<ICompletionData>();
+                 if (!isAfterNew && !isMemberAccess)
                  {
-                     data.Add(item);
+                     foreach (var (trigger, description) in Editor.CodeSnippets.GetAll())
+                     {
+                         if (!string.IsNullOrEmpty(prefix) &&
+                             !trigger.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                             continue;
+
+                         snippets.Add(new Editor.SnippetCompletionData(trigger, description, Editor.CodeSnippets.GetSnippet(trigger)!));
+                     }
                  }
 
-                 window.Closed += (s, args) =>
+                 // A keyword whose spelling a snippet already occupies is pure duplication now that the
+                 // snippet sits above it: `for` listed the loop snippet and then the bare `for` keyword
+                 // two rows apart, and the keyword row can no longer be reached by ranking or by a commit
+                 // character. Only the ~19 keywords that have a snippet are dropped — the rest (`int`,
+                 // `var`, `return`, `float`, …) are why keywords are injected at all, since Roslyn's
+                 // LookupSymbols returns declared symbols only and without them `for (int` ranked
+                 // IntersectionResult first.
+                 if (snippets.Count > 0)
                  {
-                     _completionWindow = null;
-                     _docSidecar?.Close();
-                 };
+                     var triggers = new HashSet<string>(snippets.Select(s => s.Text), StringComparer.Ordinal);
+                     sortedCompletions = sortedCompletions
+                         .Where(c => c is not Editor.CompletionData { Kind: Editor.CompletionKind.Keyword } kw
+                                     || !triggers.Contains(kw.Text))
+                         .ToList();
+                 }
 
-                 _completionWindow = window;
-                 ShowCompletionWindowWithSelection(expectedType);
-             }
+                 if (sortedCompletions.Count > 0 || snippets.Count > 0)
+                 {
+                     // Build the window in a local first and only publish it to the field once it is
+                     // actually on screen. The field is the "completion is busy" gate for every other
+                     // entry point, so assigning it before Show() means any exception in between (a
+                     // sort, a style lookup, a data item) leaves a non-null field for a window that will
+                     // never open and never close — killing IntelliSense for the rest of the session.
+                     var window = new CompletionWindow(CodeEditor.TextArea);
+
+                     // Explicitly set StartOffset based on the prefix length to fix off-by-one replacement bugs
+                     window.StartOffset = offset - prefix.Length;
+
+                     var data = window.CompletionList.CompletionData;
+
+                     // Snippets go first, and the initial selection is CompletionData[0], so a matching
+                     // snippet is what Tab inserts. AvalonEdit renders items in insertion order and never
+                     // consults Priority for it — appending them left `for`/`foreach` below every
+                     // FormatException-shaped type in the list, several scrolls down, which is not a
+                     // place a snippet can be discovered, let alone accepted with one key.
+                     foreach (var snippet in snippets)
+                     {
+                         data.Add(snippet);
+                     }
+
+                     foreach (var item in sortedCompletions)
+                     {
+                         data.Add(item);
+                     }
+
+                     window.Closed += (s, args) =>
+                     {
+                         _completionWindow = null;
+                         _docSidecar?.Close();
+                     };
+
+                     _completionWindow = window;
+                     ShowCompletionWindowWithSelection(expectedType);
+                 }
+            }
+            catch (Exception ex)
+            {
+                 // Leave no half-open window behind; the finally clears the busy gate either way.
+                 try { _completionWindow?.Close(); } catch { }
+                 _completionWindow = null;
+                 Journal.Warn("MW.COMPLETION.FAILED", "Completion query failed", null, ex);
+                 System.Diagnostics.Debug.WriteLine($"Completion Error: {ex.Message}");
+            }
+            finally
+            {
+                _completionRunning = false;
+            }
         }
         catch (Exception ex)
         {
-             // Leave no half-open window behind; the finally clears the busy gate either way.
-             try { _completionWindow?.Close(); } catch { }
-             _completionWindow = null;
-             Journal.Warn("MW.COMPLETION.FAILED", "Completion query failed", null, ex);
-             System.Diagnostics.Debug.WriteLine($"Completion Error: {ex.Message}");
-        }
-        finally
-        {
-            _completionRunning = false;
+            DoodleSharp.Diagnostics.Journal.Error("MW.EDITOR.TRIGGERCOMPLETION_FAIL", "TriggerCompletion threw", ex);
+            SetStatus($"TriggerCompletion failed: {ex.Message}", isError: true);
         }
     }
 
@@ -2840,56 +2848,64 @@ public partial class MainWindow : Window
 
     private async void ShowSignatureHelp()
     {
-        if (_insightWindow != null)
-            return;
-
-        var offset = CodeEditor.CaretOffset;
-        var code = CodeEditor.Text;
-
         try
         {
-             // Use the live workspace when available so methods declared in other project files
-             // resolve; the single-file path only ever sees the tab being typed in.
-             List<string> signatures;
-             int currentParamIndex;
+            if (_insightWindow != null)
+                return;
 
-             if (_completionWorkspace != null && _activeFile != null)
-             {
-                 var service = new Editor.RoslynCompletionService(_completionWorkspace);
-                 (signatures, currentParamIndex) = await service.GetSignatureHelpAsync(
-                     code, offset, _completionWorkspace, _activeFile.FileName);
-             }
-             else
-             {
-                 var service = new Editor.RoslynCompletionService(_compiler.GetReferences());
-                 (signatures, currentParamIndex) = await service.GetSignatureHelpAsync(code, offset);
-             }
+            var offset = CodeEditor.CaretOffset;
+            var code = CodeEditor.Text;
 
-             if (signatures.Count == 0)
-                 return;
+            try
+            {
+                 // Use the live workspace when available so methods declared in other project files
+                 // resolve; the single-file path only ever sees the tab being typed in.
+                 List<string> signatures;
+                 int currentParamIndex;
 
-             // The Roslyn query is awaited, and typing continues during it. Without this guard the
-             // window opens for a call the caret has already left — which is how signature help
-             // stayed on screen after the closing parenthesis and the semicolon. The comma handler
-             // makes it worse by reopening on a Dispatcher callback, which can land after the ')'.
-             if (CodeEditor.CaretOffset != offset || !IsCaretInsideArgumentList())
-                 return;
+                 if (_completionWorkspace != null && _activeFile != null)
+                 {
+                     var service = new Editor.RoslynCompletionService(_completionWorkspace);
+                     (signatures, currentParamIndex) = await service.GetSignatureHelpAsync(
+                         code, offset, _completionWorkspace, _activeFile.FileName);
+                 }
+                 else
+                 {
+                     var service = new Editor.RoslynCompletionService(_compiler.GetReferences());
+                     (signatures, currentParamIndex) = await service.GetSignatureHelpAsync(code, offset);
+                 }
 
-             _insightWindow = new OverloadInsightWindow(CodeEditor.TextArea);
-             _insightWindow.Provider = new SignatureHelpProvider(signatures, currentParamIndex);
+                 if (signatures.Count == 0)
+                     return;
+
+                 // The Roslyn query is awaited, and typing continues during it. Without this guard the
+                 // window opens for a call the caret has already left — which is how signature help
+                 // stayed on screen after the closing parenthesis and the semicolon. The comma handler
+                 // makes it worse by reopening on a Dispatcher callback, which can land after the ')'.
+                 if (CodeEditor.CaretOffset != offset || !IsCaretInsideArgumentList())
+                     return;
+
+                 _insightWindow = new OverloadInsightWindow(CodeEditor.TextArea);
+                 _insightWindow.Provider = new SignatureHelpProvider(signatures, currentParamIndex);
              
-             // Try to find reasonable start/end offsets for the window logic (optional)
-             // Simple approach: Current cursor
-             _insightWindow.StartOffset = offset;
-             _insightWindow.EndOffset = CodeEditor.Document.TextLength;
+                 // Try to find reasonable start/end offsets for the window logic (optional)
+                 // Simple approach: Current cursor
+                 _insightWindow.StartOffset = offset;
+                 _insightWindow.EndOffset = CodeEditor.Document.TextLength;
 
-             StyleInsightWindow(_insightWindow);
-             _insightWindow.Show();
-             _insightWindow.Closed += (s, e) => _insightWindow = null;
+                 StyleInsightWindow(_insightWindow);
+                 _insightWindow.Show();
+                 _insightWindow.Closed += (s, e) => _insightWindow = null;
+            }
+            catch (Exception ex)
+            {
+                 System.Diagnostics.Debug.WriteLine($"ShowSignatureHelp error: {ex}");
+            }
         }
         catch (Exception ex)
         {
-             System.Diagnostics.Debug.WriteLine($"ShowSignatureHelp error: {ex}");
+            DoodleSharp.Diagnostics.Journal.Error("MW.EDITOR.SHOWSIGNATUREHELP_FAIL", "ShowSignatureHelp threw", ex);
+            SetStatus($"ShowSignatureHelp failed: {ex.Message}", isError: true);
         }
     }
 
@@ -3516,39 +3532,47 @@ public partial class MainWindow : Window
     /// </summary>
     private async void AutoRunTimer_Tick(object? sender, EventArgs e)
     {
-        if (_autoRunInFlight) return;
-        if (_currentProject?.ProjectFile.Settings.AutoRun != true)
-        {
-            _autoRunTimer?.Stop();
-            return;
-        }
-
-        _autoRunInFlight = true;
         try
         {
-            // Flush the editor first: the signature below has to describe the text on screen, and
-            // both run paths would do this anyway.
-            SaveCurrentEditorContent();
-
-            var signature = CurrentSourceSignature();
-            if (signature != _lastAutoRunSignature || !ModuleCompiler.HasResidentAssembly)
+            if (_autoRunInFlight) return;
+            if (_currentProject?.ProjectFile.Settings.AutoRun != true)
             {
-                _lastAutoRunSignature = signature;
-                await RunSilentlyAsync("Auto-Run");
+                _autoRunTimer?.Stop();
+                return;
             }
-            else
+
+            _autoRunInFlight = true;
+            try
             {
-                await ReExecuteResidentSilentlyAsync("Auto-Run");
+                // Flush the editor first: the signature below has to describe the text on screen, and
+                // both run paths would do this anyway.
+                SaveCurrentEditorContent();
+
+                var signature = CurrentSourceSignature();
+                if (signature != _lastAutoRunSignature || !ModuleCompiler.HasResidentAssembly)
+                {
+                    _lastAutoRunSignature = signature;
+                    await RunSilentlyAsync("Auto-Run");
+                }
+                else
+                {
+                    await ReExecuteResidentSilentlyAsync("Auto-Run");
+                }
+            }
+            catch (Exception ex)
+            {
+                // A throw out of an async void tick would reach the dispatcher and take the app down.
+                Journal.Error("MW.AUTORUN.TICK_FAIL", "Auto-Run tick failed", ex);
+            }
+            finally
+            {
+                _autoRunInFlight = false;
             }
         }
         catch (Exception ex)
         {
-            // A throw out of an async void tick would reach the dispatcher and take the app down.
-            Journal.Error("MW.AUTORUN.TICK_FAIL", "Auto-Run tick failed", ex);
-        }
-        finally
-        {
-            _autoRunInFlight = false;
+            DoodleSharp.Diagnostics.Journal.Error("MW.AUTORUN.TICK_UNHANDLED", "AutoRunTimer_Tick threw", ex);
+            SetStatus($"AutoRunTimer_Tick failed: {ex.Message}", isError: true);
         }
     }
 
@@ -3666,21 +3690,29 @@ public partial class MainWindow : Window
 
     private async void ManagePackagesMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentProject == null)
+        try
         {
-            SetStatus("No project open", isError: true);
-            return;
+            if (_currentProject == null)
+            {
+                SetStatus("No project open", isError: true);
+                return;
+            }
+            var win = new NuGetPackageManagerWindow(_currentProject);
+            win.Owner = this;
+            win.ShowDialog();
+        
+            // Refresh project tree to show .packages folder if created
+            LoadProjectTree();
+            RefreshFileTabs(); // In case any files were modified/added externally (unlikely but good practice)
+        
+            // Refresh completion references after adding/removing packages
+            await UpdateWorkspaceReferencesAsync();
         }
-        var win = new NuGetPackageManagerWindow(_currentProject);
-        win.Owner = this;
-        win.ShowDialog();
-        
-        // Refresh project tree to show .packages folder if created
-        LoadProjectTree();
-        RefreshFileTabs(); // In case any files were modified/added externally (unlikely but good practice)
-        
-        // Refresh completion references after adding/removing packages
-        await UpdateWorkspaceReferencesAsync();
+        catch (Exception ex)
+        {
+            DoodleSharp.Diagnostics.Journal.Error("MW.PACKAGES.MANAGE_UNHANDLED", "ManagePackagesMenuItem_Click threw", ex);
+            SetStatus($"ManagePackagesMenuItem failed: {ex.Message}", isError: true);
+        }
     }
 
     #region File System Watcher
@@ -4840,163 +4872,171 @@ public partial class MainWindow : Window
 
     private async void RunButton_Click(object sender, RoutedEventArgs e)
     {
-        using var runScope = Journal.Scope("MW.RUN", "Run requested",
-            $"project={_currentProject?.ProjectFile.Name ?? "<none>"} files={_currentProject?.Files.Count ?? 0}");
-
-        if (_currentProject == null || _currentProject.Files.Count == 0)
-        {
-            SetStatus("No files to compile", isError: false);
-            return;
-        }
-
-        // Save current editor content
-        SaveCurrentEditorContent();
-
-        // Verify entry point exists
-        if (_currentProject.EntryPointFile == null)
-        {
-            SetStatus("Error: StartViz.cs not found", isError: true);
-            return;
-        }
-
-        SetStatus("Compiling...", isError: false);
-        RunButton.IsEnabled = false;
-
-        // Clear selection before running (shapes will be recreated from code)
-        ViewportHost.ClearSelection();
-        _propertiesPanel?.UpdateSelection(new List<C2VGeometry.Shape>());
-
-        // Show console tab when running code, unless the user has hidden it via Windows > Console
-        if (ShowConsoleMenuItem.IsChecked)
-        {
-            SetPaneVisible("ds.tool.console", true);
-        }
-
         try
         {
-            _textMarkerService?.Clear();
-            var result = await _compiler.CompileAndExecuteAsync(_currentProject);
+            using var runScope = Journal.Scope("MW.RUN", "Run requested",
+                $"project={_currentProject?.ProjectFile.Name ?? "<none>"} files={_currentProject?.Files.Count ?? 0}");
 
-            // Apply project settings (including background)
-            _currentProject.ApplySettings();
-            if (_currentProject.ProjectFile.Settings.DefaultCanvasBackgroundColor is string bgCode)
+            if (_currentProject == null || _currentProject.Files.Count == 0)
             {
-                 try { ViewportHost.CanvasBackground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(bgCode)); } catch {}
+                SetStatus("No files to compile", isError: false);
+                return;
             }
 
-            if (result.Success)
+            // Save current editor content
+            SaveCurrentEditorContent();
+
+            // Verify entry point exists
+            if (_currentProject.EntryPointFile == null)
             {
-                // Reset animation time
-                _animationStopwatch.Restart();
-                _lastAnimationFrameTime = -1;
-
-                // Drop the commands the run invalidated — every shape is regenerated from code, so
-                // anything holding a Shape reference now points at an object that has left the
-                // canvas. Code-backed commands (the canvas delete) are kept: see PruneAfterCodeRun.
-                TransactionManager.Instance.PruneAfterCodeRun();
-
-                var shapes = CanvasRenderer.Instance.GetShapes();
-                var count = shapes.Count;
-
-                CanvasRenderer.Instance.RenderTo(ViewportHost);
-                SetStatus($"Success: {count} shape{(count != 1 ? "s" : "")} drawn", isError: false);
-                PopulateOutliner(shapes);
-                Journal.Info("MW.RUN.OK", "Run succeeded", $"shapes={count}");
+                SetStatus("Error: StartViz.cs not found", isError: true);
+                return;
             }
-            else
-            {
-                Journal.Warn("MW.RUN.FAILED", "Run did not succeed", $"error={result.Error}");
-                var errorCount = result.Diagnostics?.Count(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error) ?? 0;
 
-                if (errorCount > 0)
+            SetStatus("Compiling...", isError: false);
+            RunButton.IsEnabled = false;
+
+            // Clear selection before running (shapes will be recreated from code)
+            ViewportHost.ClearSelection();
+            _propertiesPanel?.UpdateSelection(new List<C2VGeometry.Shape>());
+
+            // Show console tab when running code, unless the user has hidden it via Windows > Console
+            if (ShowConsoleMenuItem.IsChecked)
+            {
+                SetPaneVisible("ds.tool.console", true);
+            }
+
+            try
+            {
+                _textMarkerService?.Clear();
+                var result = await _compiler.CompileAndExecuteAsync(_currentProject);
+
+                // Apply project settings (including background)
+                _currentProject.ApplySettings();
+                if (_currentProject.ProjectFile.Settings.DefaultCanvasBackgroundColor is string bgCode)
                 {
-                    SetStatus($"Compilation failed: {errorCount} error{(errorCount != 1 ? "s" : "")}", isError: true);
+                     try { ViewportHost.CanvasBackground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(bgCode)); } catch {}
                 }
-                else if (!string.IsNullOrEmpty(result.Error))
+
+                if (result.Success)
                 {
-                    // Show the error message if no diagnostics but compilation failed
-                    SetStatus("Compilation Error", isError: true);
-                    // Also write full error to console
-                    Console.ConsoleOutput.Instance.WriteError("Compiler", 0, result.Error);
+                    // Reset animation time
+                    _animationStopwatch.Restart();
+                    _lastAnimationFrameTime = -1;
+
+                    // Drop the commands the run invalidated — every shape is regenerated from code, so
+                    // anything holding a Shape reference now points at an object that has left the
+                    // canvas. Code-backed commands (the canvas delete) are kept: see PruneAfterCodeRun.
+                    TransactionManager.Instance.PruneAfterCodeRun();
+
+                    var shapes = CanvasRenderer.Instance.GetShapes();
+                    var count = shapes.Count;
+
+                    CanvasRenderer.Instance.RenderTo(ViewportHost);
+                    SetStatus($"Success: {count} shape{(count != 1 ? "s" : "")} drawn", isError: false);
+                    PopulateOutliner(shapes);
+                    Journal.Info("MW.RUN.OK", "Run succeeded", $"shapes={count}");
                 }
                 else
                 {
-                    SetStatus("Compilation failed", isError: true);
-                }
-            }
+                    Journal.Warn("MW.RUN.FAILED", "Run did not succeed", $"error={result.Error}");
+                    var errorCount = result.Diagnostics?.Count(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error) ?? 0;
 
-            // Show diagnostics (errors/warnings) in console and editor
-            if (result.Diagnostics != null)
-            {
-                foreach (var diagnostic in result.Diagnostics)
+                    if (errorCount > 0)
+                    {
+                        SetStatus($"Compilation failed: {errorCount} error{(errorCount != 1 ? "s" : "")}", isError: true);
+                    }
+                    else if (!string.IsNullOrEmpty(result.Error))
+                    {
+                        // Show the error message if no diagnostics but compilation failed
+                        SetStatus("Compilation Error", isError: true);
+                        // Also write full error to console
+                        Console.ConsoleOutput.Instance.WriteError("Compiler", 0, result.Error);
+                    }
+                    else
+                    {
+                        SetStatus("Compilation failed", isError: true);
+                    }
+                }
+
+                // Show diagnostics (errors/warnings) in console and editor
+                if (result.Diagnostics != null)
                 {
-                    // Only show errors and warnings
-                    if (diagnostic.Severity != Microsoft.CodeAnalysis.DiagnosticSeverity.Error &&
-                        diagnostic.Severity != Microsoft.CodeAnalysis.DiagnosticSeverity.Warning)
-                        continue;
-
-                    var lineSpan = diagnostic.Location.GetLineSpan();
-                    var startLine = lineSpan.StartLinePosition.Line + 1;
-                    var startCol = lineSpan.StartLinePosition.Character + 1;
-
-                    // Determine file path - use lineSpan.Path or try to find matching project file
-                    var filePath = lineSpan.Path;
-                    if (string.IsNullOrEmpty(filePath) && _currentProject != null)
+                    foreach (var diagnostic in result.Diagnostics)
                     {
-                        // Try to find the file by matching filename in the error
-                        filePath = _activeFile?.FilePath ?? "";
-                    }
+                        // Only show errors and warnings
+                        if (diagnostic.Severity != Microsoft.CodeAnalysis.DiagnosticSeverity.Error &&
+                            diagnostic.Severity != Microsoft.CodeAnalysis.DiagnosticSeverity.Warning)
+                            continue;
 
-                    // Add to console as clickable error entry
-                    var errorCode = diagnostic.Id;
-                    var message = $"{errorCode}: {diagnostic.GetMessage()}";
-                    Console.ConsoleOutput.Instance.WriteCompilationError(filePath, startLine, startCol, message);
+                        var lineSpan = diagnostic.Location.GetLineSpan();
+                        var startLine = lineSpan.StartLinePosition.Line + 1;
+                        var startCol = lineSpan.StartLinePosition.Character + 1;
 
-                    // Also highlight in editor if it matches the active file
-                    var activePath = _activeFile?.FilePath;
-                    bool isMatch = false;
-
-                    if (activePath != null)
-                    {
-                        if (string.IsNullOrEmpty(lineSpan.Path))
+                        // Determine file path - use lineSpan.Path or try to find matching project file
+                        var filePath = lineSpan.Path;
+                        if (string.IsNullOrEmpty(filePath) && _currentProject != null)
                         {
-                            isMatch = true;
+                            // Try to find the file by matching filename in the error
+                            filePath = _activeFile?.FilePath ?? "";
                         }
-                        else
-                        {
-                            if (string.Equals(lineSpan.Path, activePath, StringComparison.OrdinalIgnoreCase))
-                                isMatch = true;
-                            else if (string.Equals(Path.GetFileName(lineSpan.Path), Path.GetFileName(activePath), StringComparison.OrdinalIgnoreCase))
-                                isMatch = true;
-                        }
-                    }
 
-                    if (isMatch && TryGetDiagnosticRange(lineSpan, out var markerOffset, out var markerLength))
-                    {
-                        // Widened range: missing-token diagnostics are zero-width and would otherwise
-                        // never be underlined. See TryGetDiagnosticRange.
-                        var color = diagnostic.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error ? Colors.Red : Colors.Orange;
-                        _textMarkerService?.Create(markerOffset, markerLength, diagnostic.GetMessage(), color);
+                        // Add to console as clickable error entry
+                        var errorCode = diagnostic.Id;
+                        var message = $"{errorCode}: {diagnostic.GetMessage()}";
+                        Console.ConsoleOutput.Instance.WriteCompilationError(filePath, startLine, startCol, message);
+
+                        // Also highlight in editor if it matches the active file
+                        var activePath = _activeFile?.FilePath;
+                        bool isMatch = false;
+
+                        if (activePath != null)
+                        {
+                            if (string.IsNullOrEmpty(lineSpan.Path))
+                            {
+                                isMatch = true;
+                            }
+                            else
+                            {
+                                if (string.Equals(lineSpan.Path, activePath, StringComparison.OrdinalIgnoreCase))
+                                    isMatch = true;
+                                else if (string.Equals(Path.GetFileName(lineSpan.Path), Path.GetFileName(activePath), StringComparison.OrdinalIgnoreCase))
+                                    isMatch = true;
+                            }
+                        }
+
+                        if (isMatch && TryGetDiagnosticRange(lineSpan, out var markerOffset, out var markerLength))
+                        {
+                            // Widened range: missing-token diagnostics are zero-width and would otherwise
+                            // never be underlined. See TryGetDiagnosticRange.
+                            var color = diagnostic.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error ? Colors.Red : Colors.Orange;
+                            _textMarkerService?.Create(markerOffset, markerLength, diagnostic.GetMessage(), color);
+                        }
                     }
                 }
-            }
 
+            }
+            catch (Exception ex)
+            {
+                Journal.Error("MW.RUN.THREW", "Run handler threw", ex);
+                SetStatus($"Error: {ex.Message}", isError: true);
+            }
+            finally
+            {
+                // Flush any pending console output
+                Console.ConsoleOutput.Instance.Flush();
+                RunButton.IsEnabled = true;
+
+                // The run registered (or stopped registering) mouse handlers, so bring the canvas chrome
+                // into line. Done once here rather than per registration, so a Main() that assigns several
+                // handlers does not flicker the panel on and off.
+                SyncInteractiveModeChrome();
+            }
         }
         catch (Exception ex)
         {
-            Journal.Error("MW.RUN.THREW", "Run handler threw", ex);
-            SetStatus($"Error: {ex.Message}", isError: true);
-        }
-        finally
-        {
-            // Flush any pending console output
-            Console.ConsoleOutput.Instance.Flush();
-            RunButton.IsEnabled = true;
-
-            // The run registered (or stopped registering) mouse handlers, so bring the canvas chrome
-            // into line. Done once here rather than per registration, so a Main() that assigns several
-            // handlers does not flicker the panel on and off.
-            SyncInteractiveModeChrome();
+            DoodleSharp.Diagnostics.Journal.Error("MW.RUN.CLICK_UNHANDLED", "RunButton_Click threw", ex);
+            SetStatus($"RunButton failed: {ex.Message}", isError: true);
         }
     }
 
@@ -6524,32 +6564,40 @@ public partial class MainWindow : Window
     /// </summary>
     private async void OnGlobalParameterCommitted(C2VGeometry.Parameter parameter)
     {
-        if (_currentProject == null) return;
-
-        // Date parameters are declared from expressions like DateTime.Now; freezing that into a
-        // literal would change the program's meaning, so those stay runtime-only.
-        if (parameter.Kind == C2VGeometry.ParamKind.Date)
+        try
         {
-            await ReExecuteForParametersAsync();
-            return;
+            if (_currentProject == null) return;
+
+            // Date parameters are declared from expressions like DateTime.Now; freezing that into a
+            // literal would change the program's meaning, so those stay runtime-only.
+            if (parameter.Kind == C2VGeometry.ParamKind.Date)
+            {
+                await ReExecuteForParametersAsync();
+                return;
+            }
+
+            var reason = TryWriteParameterToSource(parameter);
+
+            if (reason == null)
+            {
+                // The source changed, so the resident IL is stale — force a real recompile.
+                ModuleCompiler.InvalidateResident();
+                await RunSilentlyAsync("Parameters");
+                _globalParametersPanel?.RefreshValues();
+            }
+            else
+            {
+                // Say why, rather than silently leaving code and canvas disagreeing.
+                Console.ConsoleOutput.Instance.WriteLine("Parameters", 0,
+                    $"'{parameter.Name}' = {parameter.ToLiteral()} applied to this run only — {reason}");
+                SetStatus($"'{parameter.Name}' updated for this run only ({reason})", isError: false);
+                await ReExecuteForParametersAsync();
+            }
         }
-
-        var reason = TryWriteParameterToSource(parameter);
-
-        if (reason == null)
+        catch (Exception ex)
         {
-            // The source changed, so the resident IL is stale — force a real recompile.
-            ModuleCompiler.InvalidateResident();
-            await RunSilentlyAsync("Parameters");
-            _globalParametersPanel?.RefreshValues();
-        }
-        else
-        {
-            // Say why, rather than silently leaving code and canvas disagreeing.
-            Console.ConsoleOutput.Instance.WriteLine("Parameters", 0,
-                $"'{parameter.Name}' = {parameter.ToLiteral()} applied to this run only — {reason}");
-            SetStatus($"'{parameter.Name}' updated for this run only ({reason})", isError: false);
-            await ReExecuteForParametersAsync();
+            DoodleSharp.Diagnostics.Journal.Error("MW.PARAMS.COMMIT_UNHANDLED", "OnGlobalParameterCommitted threw", ex);
+            SetStatus($"OnGlobalParameterCommitted failed: {ex.Message}", isError: true);
         }
     }
 
@@ -6579,7 +6627,7 @@ public partial class MainWindow : Window
                 var rewritten = ParameterCodeWriter.TryRewrite(diskContent, parameter);
                 if (rewritten == null)
                     return $"the Set(...) call was not found at {System.IO.Path.GetFileName(parameter.SourceFile)}:{parameter.SourceLine}";
-                System.IO.File.WriteAllText(parameter.SourceFile, rewritten);
+                DoodleSharp.Project.DurableFile.WriteAllText(parameter.SourceFile, rewritten);
                 return null;
             }
             catch (Exception ex) { return $"could not write {System.IO.Path.GetFileName(parameter.SourceFile)}: {ex.Message}"; }
@@ -8923,7 +8971,7 @@ public partial class MainWindow : Window
             var className = Path.GetFileNameWithoutExtension(fileName);
             var content = Templates.GetEmptyModuleTemplate(projectName, className);
 
-            File.WriteAllText(fullPath, content);
+            DoodleSharp.Project.DurableFile.WriteAllText(fullPath, content);
 
             // Add to project and open
             var newFile = new VizCodeFile
@@ -9958,123 +10006,131 @@ public partial class MainWindow : Window
     /// </summary>
     private async void ShowQuickActionsMenu()
     {
-        // Report missing prerequisites through the status bar rather than a modal: this now runs
-        // from a menu click as well as a shortcut, and a dialog on right-click would be jarring.
-        if (_currentProject == null)
-        {
-            SetStatus("Quick actions need an open project", isError: true);
-            return;
-        }
-        if (_activeFile == null)
-        {
-            SetStatus("Quick actions need an open file", isError: true);
-            return;
-        }
-        if (_refactoringProvider == null)
-        {
-            SetStatus("Refactoring provider is not initialised", isError: true);
-            return;
-        }
-
-        // Sync current content
-        _activeFile.Content = CodeEditor.Text;
-        var currentContent = CodeEditor.Text;
-        var offset = CodeEditor.CaretOffset;
-        var selectionLength = CodeEditor.SelectionLength;
-
-        // 1. Get Quick Actions from RefactoringProvider (pass current content directly)
-        SetStatus("Analyzing...", false);
-        List<DoodleSharp.Editor.RefactoringProvider.QuickActionItem> quickActions;
         try
         {
-            quickActions = await _refactoringProvider.GetQuickActionsAsync(_currentProject, _activeFile.FilePath, currentContent, offset, selectionLength);
+            // Report missing prerequisites through the status bar rather than a modal: this now runs
+            // from a menu click as well as a shortcut, and a dialog on right-click would be jarring.
+            if (_currentProject == null)
+            {
+                SetStatus("Quick actions need an open project", isError: true);
+                return;
+            }
+            if (_activeFile == null)
+            {
+                SetStatus("Quick actions need an open file", isError: true);
+                return;
+            }
+            if (_refactoringProvider == null)
+            {
+                SetStatus("Refactoring provider is not initialised", isError: true);
+                return;
+            }
+
+            // Sync current content
+            _activeFile.Content = CodeEditor.Text;
+            var currentContent = CodeEditor.Text;
+            var offset = CodeEditor.CaretOffset;
+            var selectionLength = CodeEditor.SelectionLength;
+
+            // 1. Get Quick Actions from RefactoringProvider (pass current content directly)
+            SetStatus("Analyzing...", false);
+            List<DoodleSharp.Editor.RefactoringProvider.QuickActionItem> quickActions;
+            try
+            {
+                quickActions = await _refactoringProvider.GetQuickActionsAsync(_currentProject, _activeFile.FilePath, currentContent, offset, selectionLength);
+            }
+            catch (Exception ex)
+            {
+                // An empty menu with no explanation is indistinguishable from "nothing applies here".
+                Journal.Error("MW.QUICKACTION.FAILED", "Quick action analysis threw", ex);
+                SetStatus($"Quick actions failed: {ex.Message}", isError: true);
+                return;
+            }
+            SetStatus("Ready", false);
+
+            var contextMenu = new ContextMenu();
+            bool hasItems = false;
+
+            // Add Refactoring Items
+            foreach (var action in quickActions)
+            {
+                var item = new MenuItem { Header = action.Title };
+            
+                // Add shortcut hint if applicable
+                if (action.ActionId == "Rename") item.InputGestureText = "Ctrl+R, R";
+            
+                item.Click += (s, args) => PerformQuickAction(action);
+                contextMenu.Items.Add(item);
+                hasItems = true;
+            }
+
+            // 2. Check for missing namespaces (types and extension methods)
+            // Keep existing logic for now as it's robust
+            var word = GetWordAtOffset(CodeEditor.Document, offset);
+            if (!string.IsNullOrEmpty(word))
+            {
+                var currentCode = CodeEditor.Text;
+
+                // First check for types
+                var namespaces = TypeInspector.FindNamespacesForType(word);
+
+                // Also check for extension methods (like LINQ's Select, Where, etc.)
+                var extensionNamespaces = TypeInspector.FindNamespacesForExtensionMethod(word);
+                foreach (var ns in extensionNamespaces)
+                {
+                    namespaces.Add(ns);
+                }
+
+                // Filter out namespaces that are already in the file
+                var newNamespaces = namespaces.Distinct()
+                    .Where(ns => !currentCode.Contains($"using {ns};"))
+                    .OrderByDescending(n => n.StartsWith("DoodleSharp"))
+                    .ThenBy(n => n)
+                    .ToList();
+
+                if (newNamespaces.Count > 0)
+                {
+                    if (hasItems) contextMenu.Items.Add(new Separator());
+
+                    foreach (var ns in newNamespaces)
+                    {
+                        var item = new MenuItem { Header = $"using {ns};" };
+                        item.Click += (s, args) => AddUsingStatement(ns);
+                        contextMenu.Items.Add(item);
+                    }
+                    hasItems = true;
+                }
+            }
+
+            // 4. Show menu or feedback
+            if (hasItems)
+            {
+                // Get visual position below the caret
+                var textView = CodeEditor.TextArea.TextView;
+                var pos = textView.GetVisualPosition(
+                    new TextViewPosition(CodeEditor.TextArea.Caret.Line, CodeEditor.TextArea.Caret.Column),
+                    ICSharpCode.AvalonEdit.Rendering.VisualYPosition.LineBottom);
+
+                // Adjust for scrolling
+                pos = new System.Windows.Point(pos.X - textView.ScrollOffset.X, pos.Y - textView.ScrollOffset.Y);
+
+                // Position relative to TextView at caret position
+                contextMenu.PlacementTarget = textView;
+                contextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.RelativePoint;
+                contextMenu.HorizontalOffset = pos.X;
+                contextMenu.VerticalOffset = pos.Y;
+                contextMenu.IsOpen = true;
+                SetStatus("Quick actions available", false);
+            }
+            else
+            {
+                SetStatus($"No quick actions. File: {System.IO.Path.GetFileName(_activeFile.FilePath)}, Offset: {offset}", true);
+            }
         }
         catch (Exception ex)
         {
-            // An empty menu with no explanation is indistinguishable from "nothing applies here".
-            Journal.Error("MW.QUICKACTION.FAILED", "Quick action analysis threw", ex);
-            SetStatus($"Quick actions failed: {ex.Message}", isError: true);
-            return;
-        }
-        SetStatus("Ready", false);
-
-        var contextMenu = new ContextMenu();
-        bool hasItems = false;
-
-        // Add Refactoring Items
-        foreach (var action in quickActions)
-        {
-            var item = new MenuItem { Header = action.Title };
-            
-            // Add shortcut hint if applicable
-            if (action.ActionId == "Rename") item.InputGestureText = "Ctrl+R, R";
-            
-            item.Click += (s, args) => PerformQuickAction(action);
-            contextMenu.Items.Add(item);
-            hasItems = true;
-        }
-
-        // 2. Check for missing namespaces (types and extension methods)
-        // Keep existing logic for now as it's robust
-        var word = GetWordAtOffset(CodeEditor.Document, offset);
-        if (!string.IsNullOrEmpty(word))
-        {
-            var currentCode = CodeEditor.Text;
-
-            // First check for types
-            var namespaces = TypeInspector.FindNamespacesForType(word);
-
-            // Also check for extension methods (like LINQ's Select, Where, etc.)
-            var extensionNamespaces = TypeInspector.FindNamespacesForExtensionMethod(word);
-            foreach (var ns in extensionNamespaces)
-            {
-                namespaces.Add(ns);
-            }
-
-            // Filter out namespaces that are already in the file
-            var newNamespaces = namespaces.Distinct()
-                .Where(ns => !currentCode.Contains($"using {ns};"))
-                .OrderByDescending(n => n.StartsWith("DoodleSharp"))
-                .ThenBy(n => n)
-                .ToList();
-
-            if (newNamespaces.Count > 0)
-            {
-                if (hasItems) contextMenu.Items.Add(new Separator());
-
-                foreach (var ns in newNamespaces)
-                {
-                    var item = new MenuItem { Header = $"using {ns};" };
-                    item.Click += (s, args) => AddUsingStatement(ns);
-                    contextMenu.Items.Add(item);
-                }
-                hasItems = true;
-            }
-        }
-
-        // 4. Show menu or feedback
-        if (hasItems)
-        {
-            // Get visual position below the caret
-            var textView = CodeEditor.TextArea.TextView;
-            var pos = textView.GetVisualPosition(
-                new TextViewPosition(CodeEditor.TextArea.Caret.Line, CodeEditor.TextArea.Caret.Column),
-                ICSharpCode.AvalonEdit.Rendering.VisualYPosition.LineBottom);
-
-            // Adjust for scrolling
-            pos = new System.Windows.Point(pos.X - textView.ScrollOffset.X, pos.Y - textView.ScrollOffset.Y);
-
-            // Position relative to TextView at caret position
-            contextMenu.PlacementTarget = textView;
-            contextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.RelativePoint;
-            contextMenu.HorizontalOffset = pos.X;
-            contextMenu.VerticalOffset = pos.Y;
-            contextMenu.IsOpen = true;
-            SetStatus("Quick actions available", false);
-        }
-        else
-        {
-            SetStatus($"No quick actions. File: {System.IO.Path.GetFileName(_activeFile.FilePath)}, Offset: {offset}", true);
+            DoodleSharp.Diagnostics.Journal.Error("MW.EDITOR.SHOWQUICKACTIONSMENU_FAIL", "ShowQuickActionsMenu threw", ex);
+            SetStatus($"ShowQuickActionsMenu failed: {ex.Message}", isError: true);
         }
     }
 
@@ -10165,461 +10221,469 @@ public partial class MainWindow : Window
 
     private async void PerformQuickAction(DoodleSharp.Editor.RefactoringProvider.QuickActionItem action)
     {
-        if (action.ActionId == "Rename")
+        try
         {
-             if (action.Data.TryGetValue("Name", out var name))
-             {
-                 PerformRename(name);
-             }
-        }
-        else if (action.ActionId == "MoveTypeToFile")
-        {
-            if (action.Data.TryGetValue("TypeName", out var typeName))
+            if (action.ActionId == "Rename")
             {
-                MoveTypeToNewFile(typeName);
+                 if (action.Data.TryGetValue("Name", out var name))
+                 {
+                     PerformRename(name);
+                 }
             }
-        }
-        else if (action.ActionId == "ExtractInterface")
-        {
-             MessageBox.Show("Extract Interface: Coming soon!", "Refactoring", MessageBoxButton.OK, MessageBoxImage.Information);
-        }
-        else if (action.ActionId == "ImplementInterface")
-        {
-            if (action.Data.TryGetValue("InterfaceName", out var interfaceName) &&
-                action.Data.TryGetValue("ClassName", out var className))
+            else if (action.ActionId == "MoveTypeToFile")
             {
-                await ImplementInterfaceAsync(className, interfaceName);
-            }
-        }
-        else if (action.ActionId == "FixFormatting")
-        {
-             try 
-             {
-                 var newText = DoodleSharp.Editor.CodeFormatter.Format(CodeEditor.Text);
-                 CodeEditor.Document.Replace(0, CodeEditor.Document.TextLength, newText);
-             }
-             catch (Exception ex)
-             {
-                 SetStatus($"Formatting failed: {ex.Message}", true);
-             }
-        }
-        else if (action.ActionId == "GenerateMethod")
-        {
-            GenerateMethodFromQuickAction(action);
-        }
-        else if (action.ActionId == "GenerateType")
-        {
-            if (action.Data.TryGetValue("TypeName", out var typeName))
-            {
-                action.Data.TryGetValue("ConstructorParams", out var ctorParams);
-                ctorParams ??= "";
-                
-                // Generate class stub with constructor if parameters are available
-                var constructorCode = "";
-                if (!string.IsNullOrEmpty(ctorParams))
+                if (action.Data.TryGetValue("TypeName", out var typeName))
                 {
-                    // Generate fields and constructor body from parameters
-                    var paramList = ctorParams.Split(new[] { ", " }, StringSplitOptions.RemoveEmptyEntries);
-                    var fields = new List<string>();
-                    var assignments = new List<string>();
-                    
-                    foreach (var param in paramList)
+                    MoveTypeToNewFile(typeName);
+                }
+            }
+            else if (action.ActionId == "ExtractInterface")
+            {
+                 MessageBox.Show("Extract Interface: Coming soon!", "Refactoring", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            else if (action.ActionId == "ImplementInterface")
+            {
+                if (action.Data.TryGetValue("InterfaceName", out var interfaceName) &&
+                    action.Data.TryGetValue("ClassName", out var className))
+                {
+                    await ImplementInterfaceAsync(className, interfaceName);
+                }
+            }
+            else if (action.ActionId == "FixFormatting")
+            {
+                 try 
+                 {
+                     var newText = DoodleSharp.Editor.CodeFormatter.Format(CodeEditor.Text);
+                     CodeEditor.Document.Replace(0, CodeEditor.Document.TextLength, newText);
+                 }
+                 catch (Exception ex)
+                 {
+                     SetStatus($"Formatting failed: {ex.Message}", true);
+                 }
+            }
+            else if (action.ActionId == "GenerateMethod")
+            {
+                GenerateMethodFromQuickAction(action);
+            }
+            else if (action.ActionId == "GenerateType")
+            {
+                if (action.Data.TryGetValue("TypeName", out var typeName))
+                {
+                    action.Data.TryGetValue("ConstructorParams", out var ctorParams);
+                    ctorParams ??= "";
+                
+                    // Generate class stub with constructor if parameters are available
+                    var constructorCode = "";
+                    if (!string.IsNullOrEmpty(ctorParams))
                     {
-                        var parts = param.Split(' ');
-                        if (parts.Length >= 2)
+                        // Generate fields and constructor body from parameters
+                        var paramList = ctorParams.Split(new[] { ", " }, StringSplitOptions.RemoveEmptyEntries);
+                        var fields = new List<string>();
+                        var assignments = new List<string>();
+                    
+                        foreach (var param in paramList)
                         {
-                            var paramType = parts[0];
-                            var paramName = parts[1];
-                            var fieldName = "_" + paramName;
-                            fields.Add($"        private {paramType} {fieldName};");
-                            assignments.Add($"            {fieldName} = {paramName};");
+                            var parts = param.Split(' ');
+                            if (parts.Length >= 2)
+                            {
+                                var paramType = parts[0];
+                                var paramName = parts[1];
+                                var fieldName = "_" + paramName;
+                                fields.Add($"        private {paramType} {fieldName};");
+                                assignments.Add($"            {fieldName} = {paramName};");
+                            }
                         }
+                    
+                        var fieldsStr = string.Join("\r\n", fields);
+                        var assignmentsStr = string.Join("\r\n", assignments);
+                        constructorCode = $@"
+    {fieldsStr}
+
+            public {typeName}({ctorParams})
+            {{
+    {assignmentsStr}
+            }}";
                     }
-                    
-                    var fieldsStr = string.Join("\r\n", fields);
-                    var assignmentsStr = string.Join("\r\n", assignments);
-                    constructorCode = $@"
-{fieldsStr}
-
-        public {typeName}({ctorParams})
-        {{
-{assignmentsStr}
-        }}";
-                }
-                else
-                {
-                    constructorCode = $@"
-        public {typeName}()
-        {{
-        }}";
-                }
-                
-                var classStub = $@"
-
-public class {typeName}
-{{{constructorCode}
-}}
-";
-                
-                // Insert at end of file (before last closing brace if there's a namespace)
-                var text = CodeEditor.Text;
-                var lastBrace = text.LastIndexOf('}');
-                if (lastBrace > 0)
-                {
-                    CodeEditor.Document.Insert(lastBrace, classStub);
-                }
-                else
-                {
-                    CodeEditor.Document.Insert(text.Length, classStub);
-                }
-            }
-        }
-        else if (action.ActionId == "GenerateTypeInNewFile")
-        {
-            if (action.Data.TryGetValue("TypeName", out var typeName) && _currentProject != null)
-            {
-                action.Data.TryGetValue("ConstructorParams", out var ctorParams);
-                ctorParams ??= "";
-                
-                // Get namespace from current file
-                var currentNamespace = "";
-                var nsMatch = System.Text.RegularExpressions.Regex.Match(CodeEditor.Text, @"namespace\s+([\w.]+)");
-                if (nsMatch.Success)
-                {
-                    currentNamespace = nsMatch.Groups[1].Value;
-                }
-                
-                // Generate class stub with constructor if parameters are available
-                var constructorCode = "";
-                if (!string.IsNullOrEmpty(ctorParams))
-                {
-                    // Generate fields and constructor body from parameters
-                    var paramList = ctorParams.Split(new[] { ", " }, StringSplitOptions.RemoveEmptyEntries);
-                    var fields = new List<string>();
-                    var assignments = new List<string>();
-                    
-                    foreach (var param in paramList)
+                    else
                     {
-                        var parts = param.Split(' ');
-                        if (parts.Length >= 2)
-                        {
-                            var paramType = parts[0];
-                            var paramName = parts[1];
-                            var fieldName = "_" + paramName;
-                            fields.Add($"        private {paramType} {fieldName};");
-                            assignments.Add($"            {fieldName} = {paramName};");
-                        }
+                        constructorCode = $@"
+            public {typeName}()
+            {{
+            }}";
                     }
-                    
-                    var fieldsStr = string.Join("\r\n", fields);
-                    var assignmentsStr = string.Join("\r\n", assignments);
-                    constructorCode = $@"
-{fieldsStr}
-
-        public {typeName}({ctorParams})
-        {{
-{assignmentsStr}
-        }}";
-                }
-                else
-                {
-                    constructorCode = $@"
-        public {typeName}()
-        {{
-        }}";
-                }
                 
-                // Build full file content
-                var fileContent = "";
-                if (!string.IsNullOrEmpty(currentNamespace))
-                {
-                    fileContent = $@"namespace {currentNamespace}
-{{
+                    var classStub = $@"
+
     public class {typeName}
-    {{{constructorCode.Replace("\r\n", "\r\n    ")}
+    {{{constructorCode}
     }}
-}}
-";
-                }
-                else
-                {
-                    fileContent = $@"public class {typeName}
-{{{constructorCode}
-}}
-";
-                }
+    ";
                 
-                // Create new file in project
-                var newFileName = typeName + ".cs";
-                var projectDir = _currentProject.ProjectDirectory ?? "";
-                var newFilePath = System.IO.Path.Combine(projectDir, newFileName);
-                
-                // Add file to project
-                var newFile = new VizCodeFile
-                {
-                    FilePath = newFilePath,
-                    Content = fileContent,
-                    HasUnsavedChanges = true,
-                    IsNew = true
-                };
-                
-                _currentProject.Files.Add(newFile);
-                RefreshFileTabs();
-                
-                // Open the new file
-                SelectFile(newFile);
-                
-                SetStatus($"Created new file: {newFileName}", false);
-            }
-        }
-        else if (action.ActionId == "GenerateConstructor")
-        {
-            if (action.Data.TryGetValue("TypeName", out var typeName))
-            {
-                // Generate a constructor stub
-                var stub = $"\r\n\r\n        public {typeName}()\r\n        {{\r\n            // TODO: Initialize fields\r\n        }}";
-                
-                // Find the class opening brace and insert after the first line inside
-                var text = CodeEditor.Text;
-                var classPattern = $"class\\s+{System.Text.RegularExpressions.Regex.Escape(typeName)}";
-                var match = System.Text.RegularExpressions.Regex.Match(text, classPattern);
-                
-                if (match.Success)
-                {
-                    // Find the opening brace after the class declaration
-                    var bracePos = text.IndexOf('{', match.Index);
-                    if (bracePos > 0)
+                    // Insert at end of file (before last closing brace if there's a namespace)
+                    var text = CodeEditor.Text;
+                    var lastBrace = text.LastIndexOf('}');
+                    if (lastBrace > 0)
                     {
-                        // Insert after the opening brace
-                        CodeEditor.Document.Insert(bracePos + 1, stub);
+                        CodeEditor.Document.Insert(lastBrace, classStub);
+                    }
+                    else
+                    {
+                        CodeEditor.Document.Insert(text.Length, classStub);
                     }
                 }
             }
-        }
-        else if (action.ActionId == "AddParameter")
-        {
-            if (action.Data.TryGetValue("MethodName", out var methodName))
+            else if (action.ActionId == "GenerateTypeInNewFile")
             {
-                // Prompt for parameter details
-                var paramType = PromptForInput("Add Parameter", "Enter parameter type:", "string");
-                if (string.IsNullOrEmpty(paramType)) return;
-                
-                var paramName = PromptForInput("Add Parameter", "Enter parameter name:", "value");
-                if (string.IsNullOrEmpty(paramName)) return;
-                
-                var newParam = $"{paramType} {paramName}";
-                
-                // Find the method DECLARATION (not call site)
-                // Method declarations have a return type before the method name
-                var text = CodeEditor.Text;
-                var escapedName = System.Text.RegularExpressions.Regex.Escape(methodName);
-                // Pattern: return_type methodName( - the return type includes modifiers
-                var methodDeclPattern = $@"(?:void|int|string|bool|double|float|object|var|\w+)\s+{escapedName}\s*\(";
-                var match = System.Text.RegularExpressions.Regex.Match(text, methodDeclPattern);
-                
-                if (match.Success)
+                if (action.Data.TryGetValue("TypeName", out var typeName) && _currentProject != null)
                 {
-                    var openParen = match.Index + match.Length - 1;
-                    var closeParen = text.IndexOf(')', openParen);
+                    action.Data.TryGetValue("ConstructorParams", out var ctorParams);
+                    ctorParams ??= "";
+                
+                    // Get namespace from current file
+                    var currentNamespace = "";
+                    var nsMatch = System.Text.RegularExpressions.Regex.Match(CodeEditor.Text, @"namespace\s+([\w.]+)");
+                    if (nsMatch.Success)
+                    {
+                        currentNamespace = nsMatch.Groups[1].Value;
+                    }
+                
+                    // Generate class stub with constructor if parameters are available
+                    var constructorCode = "";
+                    if (!string.IsNullOrEmpty(ctorParams))
+                    {
+                        // Generate fields and constructor body from parameters
+                        var paramList = ctorParams.Split(new[] { ", " }, StringSplitOptions.RemoveEmptyEntries);
+                        var fields = new List<string>();
+                        var assignments = new List<string>();
                     
-                    if (closeParen > openParen)
-                    {
-                        var existingParams = text.Substring(openParen + 1, closeParen - openParen - 1).Trim();
-                        
-                        if (string.IsNullOrEmpty(existingParams))
+                        foreach (var param in paramList)
                         {
-                            // No existing params, just insert
-                            CodeEditor.Document.Insert(openParen + 1, newParam);
+                            var parts = param.Split(' ');
+                            if (parts.Length >= 2)
+                            {
+                                var paramType = parts[0];
+                                var paramName = parts[1];
+                                var fieldName = "_" + paramName;
+                                fields.Add($"        private {paramType} {fieldName};");
+                                assignments.Add($"            {fieldName} = {paramName};");
+                            }
                         }
-                        else
+                    
+                        var fieldsStr = string.Join("\r\n", fields);
+                        var assignmentsStr = string.Join("\r\n", assignments);
+                        constructorCode = $@"
+    {fieldsStr}
+
+            public {typeName}({ctorParams})
+            {{
+    {assignmentsStr}
+            }}";
+                    }
+                    else
+                    {
+                        constructorCode = $@"
+            public {typeName}()
+            {{
+            }}";
+                    }
+                
+                    // Build full file content
+                    var fileContent = "";
+                    if (!string.IsNullOrEmpty(currentNamespace))
+                    {
+                        fileContent = $@"namespace {currentNamespace}
+    {{
+        public class {typeName}
+        {{{constructorCode.Replace("\r\n", "\r\n    ")}
+        }}
+    }}
+    ";
+                    }
+                    else
+                    {
+                        fileContent = $@"public class {typeName}
+    {{{constructorCode}
+    }}
+    ";
+                    }
+                
+                    // Create new file in project
+                    var newFileName = typeName + ".cs";
+                    var projectDir = _currentProject.ProjectDirectory ?? "";
+                    var newFilePath = System.IO.Path.Combine(projectDir, newFileName);
+                
+                    // Add file to project
+                    var newFile = new VizCodeFile
+                    {
+                        FilePath = newFilePath,
+                        Content = fileContent,
+                        HasUnsavedChanges = true,
+                        IsNew = true
+                    };
+                
+                    _currentProject.Files.Add(newFile);
+                    RefreshFileTabs();
+                
+                    // Open the new file
+                    SelectFile(newFile);
+                
+                    SetStatus($"Created new file: {newFileName}", false);
+                }
+            }
+            else if (action.ActionId == "GenerateConstructor")
+            {
+                if (action.Data.TryGetValue("TypeName", out var typeName))
+                {
+                    // Generate a constructor stub
+                    var stub = $"\r\n\r\n        public {typeName}()\r\n        {{\r\n            // TODO: Initialize fields\r\n        }}";
+                
+                    // Find the class opening brace and insert after the first line inside
+                    var text = CodeEditor.Text;
+                    var classPattern = $"class\\s+{System.Text.RegularExpressions.Regex.Escape(typeName)}";
+                    var match = System.Text.RegularExpressions.Regex.Match(text, classPattern);
+                
+                    if (match.Success)
+                    {
+                        // Find the opening brace after the class declaration
+                        var bracePos = text.IndexOf('{', match.Index);
+                        if (bracePos > 0)
                         {
-                            // Add comma and new param
-                            CodeEditor.Document.Insert(closeParen, $", {newParam}");
+                            // Insert after the opening brace
+                            CodeEditor.Document.Insert(bracePos + 1, stub);
                         }
                     }
                 }
             }
-        }
-        else if (action.ActionId == "RemoveUnusedUsings")
-        {
-            try
+            else if (action.ActionId == "AddParameter")
             {
-                // Use Roslyn to properly detect unused usings
-                var text = CodeEditor.Text;
-                
-                // Parse the code and get compilation with diagnostics
-                var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(text);
-                var root = tree.GetRoot();
-                
-                // Get all using directives
-                var usingDirectives = root.DescendantNodes()
-                    .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.UsingDirectiveSyntax>()
-                    .ToList();
-                
-                if (usingDirectives.Count == 0)
+                if (action.Data.TryGetValue("MethodName", out var methodName))
                 {
-                    SetStatus("No using statements found", false);
-                    return;
+                    // Prompt for parameter details
+                    var paramType = PromptForInput("Add Parameter", "Enter parameter type:", "string");
+                    if (string.IsNullOrEmpty(paramType)) return;
+                
+                    var paramName = PromptForInput("Add Parameter", "Enter parameter name:", "value");
+                    if (string.IsNullOrEmpty(paramName)) return;
+                
+                    var newParam = $"{paramType} {paramName}";
+                
+                    // Find the method DECLARATION (not call site)
+                    // Method declarations have a return type before the method name
+                    var text = CodeEditor.Text;
+                    var escapedName = System.Text.RegularExpressions.Regex.Escape(methodName);
+                    // Pattern: return_type methodName( - the return type includes modifiers
+                    var methodDeclPattern = $@"(?:void|int|string|bool|double|float|object|var|\w+)\s+{escapedName}\s*\(";
+                    var match = System.Text.RegularExpressions.Regex.Match(text, methodDeclPattern);
+                
+                    if (match.Success)
+                    {
+                        var openParen = match.Index + match.Length - 1;
+                        var closeParen = text.IndexOf(')', openParen);
+                    
+                        if (closeParen > openParen)
+                        {
+                            var existingParams = text.Substring(openParen + 1, closeParen - openParen - 1).Trim();
+                        
+                            if (string.IsNullOrEmpty(existingParams))
+                            {
+                                // No existing params, just insert
+                                CodeEditor.Document.Insert(openParen + 1, newParam);
+                            }
+                            else
+                            {
+                                // Add comma and new param
+                                CodeEditor.Document.Insert(closeParen, $", {newParam}");
+                            }
+                        }
+                    }
                 }
-                
-                // Get compilation with the current project to check for unused usings
-                var (compilation, _) = await _compiler.CreateCompilationAsync(_currentProject!);
-                
-                // Replace the tree in compilation for accurate analysis
-                var oldTree = compilation.SyntaxTrees.FirstOrDefault(t => 
-                    string.Equals(System.IO.Path.GetFileName(t.FilePath), 
-                                  System.IO.Path.GetFileName(_activeFile!.FilePath), 
-                                  StringComparison.OrdinalIgnoreCase));
-                
-                var newTree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
-                    text, 
-                    options: new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest),
-                    path: _activeFile.FilePath ?? "");
-                
-                if (oldTree != null)
+            }
+            else if (action.ActionId == "RemoveUnusedUsings")
+            {
+                try
                 {
-                    compilation = compilation.ReplaceSyntaxTree(oldTree, newTree);
-                }
-                else
-                {
-                    compilation = compilation.AddSyntaxTrees(newTree);
-                }
+                    // Use Roslyn to properly detect unused usings
+                    var text = CodeEditor.Text;
                 
-                // Get diagnostics - CS8019 is "Unnecessary using directive"
-                var diagnostics = compilation.GetDiagnostics()
-                    .Where(d => d.Id == "CS8019" || d.Id == "IDE0005")
-                    .ToList();
+                    // Parse the code and get compilation with diagnostics
+                    var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(text);
+                    var root = tree.GetRoot();
                 
-                if (diagnostics.Count == 0)
-                {
-                    // Fallback: Check for CS0246 "type or namespace not found" after removing each using
-                    // If removing a using causes CS0246, it's needed
-                    var usedUsings = new HashSet<int>();
-                    var model = compilation.GetSemanticModel(newTree);
-                    var newRoot = await newTree.GetRootAsync();
-                    var newUsingDirectives = newRoot.DescendantNodes()
+                    // Get all using directives
+                    var usingDirectives = root.DescendantNodes()
                         .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.UsingDirectiveSyntax>()
                         .ToList();
-                    
-                    // Get all type references in the code
-                    var typeRefs = newRoot.DescendantNodes()
-                        .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax>()
-                        .ToList();
-                    
-                    foreach (var typeRef in typeRefs)
+                
+                    if (usingDirectives.Count == 0)
                     {
-                        var symbolInfo = model.GetSymbolInfo(typeRef);
-                        if (symbolInfo.Symbol != null)
+                        SetStatus("No using statements found", false);
+                        return;
+                    }
+                
+                    // Get compilation with the current project to check for unused usings
+                    var (compilation, _) = await _compiler.CreateCompilationAsync(_currentProject!);
+                
+                    // Replace the tree in compilation for accurate analysis
+                    var oldTree = compilation.SyntaxTrees.FirstOrDefault(t => 
+                        string.Equals(System.IO.Path.GetFileName(t.FilePath), 
+                                      System.IO.Path.GetFileName(_activeFile!.FilePath), 
+                                      StringComparison.OrdinalIgnoreCase));
+                
+                    var newTree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
+                        text, 
+                        options: new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest),
+                        path: _activeFile.FilePath ?? "");
+                
+                    if (oldTree != null)
+                    {
+                        compilation = compilation.ReplaceSyntaxTree(oldTree, newTree);
+                    }
+                    else
+                    {
+                        compilation = compilation.AddSyntaxTrees(newTree);
+                    }
+                
+                    // Get diagnostics - CS8019 is "Unnecessary using directive"
+                    var diagnostics = compilation.GetDiagnostics()
+                        .Where(d => d.Id == "CS8019" || d.Id == "IDE0005")
+                        .ToList();
+                
+                    if (diagnostics.Count == 0)
+                    {
+                        // Fallback: Check for CS0246 "type or namespace not found" after removing each using
+                        // If removing a using causes CS0246, it's needed
+                        var usedUsings = new HashSet<int>();
+                        var model = compilation.GetSemanticModel(newTree);
+                        var newRoot = await newTree.GetRootAsync();
+                        var newUsingDirectives = newRoot.DescendantNodes()
+                            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.UsingDirectiveSyntax>()
+                            .ToList();
+                    
+                        // Get all type references in the code
+                        var typeRefs = newRoot.DescendantNodes()
+                            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax>()
+                            .ToList();
+                    
+                        foreach (var typeRef in typeRefs)
                         {
-                            var containingNs = symbolInfo.Symbol.ContainingNamespace?.ToDisplayString();
-                            if (containingNs != null)
+                            var symbolInfo = model.GetSymbolInfo(typeRef);
+                            if (symbolInfo.Symbol != null)
                             {
-                                for (int i = 0; i < newUsingDirectives.Count; i++)
+                                var containingNs = symbolInfo.Symbol.ContainingNamespace?.ToDisplayString();
+                                if (containingNs != null)
                                 {
-                                    var usingNs = newUsingDirectives[i].Name?.ToString();
-                                    if (usingNs != null && containingNs.StartsWith(usingNs))
+                                    for (int i = 0; i < newUsingDirectives.Count; i++)
                                     {
-                                        usedUsings.Add(i);
+                                        var usingNs = newUsingDirectives[i].Name?.ToString();
+                                        if (usingNs != null && containingNs.StartsWith(usingNs))
+                                        {
+                                            usedUsings.Add(i);
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
                     
-                    // Remove unused usings (those not in usedUsings set)
-                    var lines = text.Split('\n').ToList();
-                    var removedCount = 0;
+                        // Remove unused usings (those not in usedUsings set)
+                        var lines = text.Split('\n').ToList();
+                        var removedCount = 0;
                     
-                    for (int i = newUsingDirectives.Count - 1; i >= 0; i--)
-                    {
-                        if (!usedUsings.Contains(i))
+                        for (int i = newUsingDirectives.Count - 1; i >= 0; i--)
                         {
-                            var usingLine = newUsingDirectives[i].GetLocation().GetLineSpan().StartLinePosition.Line;
-                            if (usingLine < lines.Count)
+                            if (!usedUsings.Contains(i))
                             {
-                                lines.RemoveAt(usingLine);
-                                removedCount++;
+                                var usingLine = newUsingDirectives[i].GetLocation().GetLineSpan().StartLinePosition.Line;
+                                if (usingLine < lines.Count)
+                                {
+                                    lines.RemoveAt(usingLine);
+                                    removedCount++;
+                                }
                             }
                         }
-                    }
                     
-                    if (removedCount > 0)
-                    {
-                        CodeEditor.Document.Replace(0, CodeEditor.Document.TextLength, string.Join("\n", lines));
-                        SetStatus($"Removed {removedCount} unused using(s)", false);
+                        if (removedCount > 0)
+                        {
+                            CodeEditor.Document.Replace(0, CodeEditor.Document.TextLength, string.Join("\n", lines));
+                            SetStatus($"Removed {removedCount} unused using(s)", false);
+                        }
+                        else
+                        {
+                            SetStatus("No unused usings found", false);
+                        }
                     }
                     else
                     {
-                        SetStatus("No unused usings found", false);
+                        // Use the diagnostics to find unused usings
+                        var lines = text.Split('\n').ToList();
+                        var linesToRemove = diagnostics
+                            .Select(d => d.Location.GetLineSpan().StartLinePosition.Line)
+                            .Distinct()
+                            .OrderByDescending(x => x)
+                            .ToList();
+                    
+                        foreach (var lineNum in linesToRemove)
+                        {
+                            if (lineNum < lines.Count)
+                            {
+                                lines.RemoveAt(lineNum);
+                            }
+                        }
+                    
+                        CodeEditor.Document.Replace(0, CodeEditor.Document.TextLength, string.Join("\n", lines));
+                        SetStatus($"Removed {linesToRemove.Count} unused using(s)", false);
                     }
                 }
-                else
+                catch (Exception ex)
                 {
-                    // Use the diagnostics to find unused usings
-                    var lines = text.Split('\n').ToList();
-                    var linesToRemove = diagnostics
-                        .Select(d => d.Location.GetLineSpan().StartLinePosition.Line)
-                        .Distinct()
-                        .OrderByDescending(x => x)
-                        .ToList();
-                    
-                    foreach (var lineNum in linesToRemove)
+                    SetStatus($"Failed to remove unused usings: {ex.Message}", true);
+                }
+            }
+            else if (action.ActionId == "ChangeSignature")
+            {
+                if (action.Data.TryGetValue("MethodName", out var methodName))
+                {
+                    // Find the method declaration
+                    // Method declarations have a return type before the method name
+                    var text = CodeEditor.Text;
+                    var escapedName = System.Text.RegularExpressions.Regex.Escape(methodName);
+                
+                    // Pattern: return_type methodName(parameters)
+                    // Use a non-greedy match for return type: (?:...)\s+
+                    var methodDeclPattern = $@"(?:void|int|string|bool|double|float|object|var|\w+)\s+{escapedName}\s*\((.*?)\)";
+                    var match = System.Text.RegularExpressions.Regex.Match(text, methodDeclPattern, System.Text.RegularExpressions.RegexOptions.Singleline);
+                
+                    if (match.Success)
                     {
-                        if (lineNum < lines.Count)
+                        var currentParams = match.Groups[1].Value.Trim();
+                    
+                        // Prompt user for new parameters
+                        var newParams = PromptForInput("Change Signature", $"Edit parameters for '{methodName}':", currentParams);
+                    
+                        if (newParams != null && newParams != currentParams)
                         {
-                            lines.RemoveAt(lineNum);
+                            var methodIndex = match.Index;
+                            var paramStartIndex = match.Groups[1].Index;
+                            var paramLength = match.Groups[1].Length;
+                        
+                            CodeEditor.Document.Replace(paramStartIndex, paramLength, newParams);
+                            SetStatus($"Signature changed for '{methodName}'", false);
                         }
                     }
-                    
-                    CodeEditor.Document.Replace(0, CodeEditor.Document.TextLength, string.Join("\n", lines));
-                    SetStatus($"Removed {linesToRemove.Count} unused using(s)", false);
-                }
-            }
-            catch (Exception ex)
-            {
-                SetStatus($"Failed to remove unused usings: {ex.Message}", true);
-            }
-        }
-        else if (action.ActionId == "ChangeSignature")
-        {
-            if (action.Data.TryGetValue("MethodName", out var methodName))
-            {
-                // Find the method declaration
-                // Method declarations have a return type before the method name
-                var text = CodeEditor.Text;
-                var escapedName = System.Text.RegularExpressions.Regex.Escape(methodName);
-                
-                // Pattern: return_type methodName(parameters)
-                // Use a non-greedy match for return type: (?:...)\s+
-                var methodDeclPattern = $@"(?:void|int|string|bool|double|float|object|var|\w+)\s+{escapedName}\s*\((.*?)\)";
-                var match = System.Text.RegularExpressions.Regex.Match(text, methodDeclPattern, System.Text.RegularExpressions.RegexOptions.Singleline);
-                
-                if (match.Success)
-                {
-                    var currentParams = match.Groups[1].Value.Trim();
-                    
-                    // Prompt user for new parameters
-                    var newParams = PromptForInput("Change Signature", $"Edit parameters for '{methodName}':", currentParams);
-                    
-                    if (newParams != null && newParams != currentParams)
+                    else
                     {
-                        var methodIndex = match.Index;
-                        var paramStartIndex = match.Groups[1].Index;
-                        var paramLength = match.Groups[1].Length;
-                        
-                        CodeEditor.Document.Replace(paramStartIndex, paramLength, newParams);
-                        SetStatus($"Signature changed for '{methodName}'", false);
+                        MessageBox.Show($"Could not find method declaration for '{methodName}'.", "Change Signature", MessageBoxButton.OK, MessageBoxImage.Warning);
                     }
                 }
-                else
-                {
-                    MessageBox.Show($"Could not find method declaration for '{methodName}'.", "Change Signature", MessageBoxButton.OK, MessageBoxImage.Warning);
-                }
+            }
+            else
+            {
+                 MessageBox.Show($"Action '{action.Title}' ({action.ActionId}) initiated.\nContext: {string.Join(", ", action.Data.Keys)}", "Quick Action", MessageBoxButton.OK, MessageBoxImage.Information);
             }
         }
-        else
+        catch (Exception ex)
         {
-             MessageBox.Show($"Action '{action.Title}' ({action.ActionId}) initiated.\nContext: {string.Join(", ", action.Data.Keys)}", "Quick Action", MessageBoxButton.OK, MessageBoxImage.Information);
+            DoodleSharp.Diagnostics.Journal.Error("MW.EDITOR.PERFORMQUICKACTION_FAIL", "PerformQuickAction threw", ex);
+            SetStatus($"PerformQuickAction failed: {ex.Message}", isError: true);
         }
     }
 
@@ -10639,19 +10703,27 @@ public class {typeName}
 
     private async void ExecuteRename(string newName, int offset)
     {
-        if (_currentProject == null || _activeFile == null || _refactoringProvider == null) return;
-
-        string currentContent = CodeEditor.Text; // Should be main thread, safe to access
-        var result = await _refactoringProvider.GetRenameEditsAsync(_currentProject, _activeFile.FilePath, offset, newName, currentContent);
-
-        if (result.Success && result.Changes != null)
+        try
         {
-            ApplyRefactoring(result.Changes);
-            SetStatus("Rename applied", false);
+            if (_currentProject == null || _activeFile == null || _refactoringProvider == null) return;
+
+            string currentContent = CodeEditor.Text; // Should be main thread, safe to access
+            var result = await _refactoringProvider.GetRenameEditsAsync(_currentProject, _activeFile.FilePath, offset, newName, currentContent);
+
+            if (result.Success && result.Changes != null)
+            {
+                ApplyRefactoring(result.Changes);
+                SetStatus("Rename applied", false);
+            }
+            else
+            {
+                SetStatus(result.Error ?? "Rename failed", true);
+            }
         }
-        else
+        catch (Exception ex)
         {
-            SetStatus(result.Error ?? "Rename failed", true);
+            DoodleSharp.Diagnostics.Journal.Error("MW.EDITOR.EXECUTERENAME_FAIL", "ExecuteRename threw", ex);
+            SetStatus($"ExecuteRename failed: {ex.Message}", isError: true);
         }
     }
 
@@ -10738,64 +10810,80 @@ public class {typeName}
 
     private async void GoToDefinition_Executed(object sender, ExecutedRoutedEventArgs e)
     {
-        if (_currentProject == null || _activeFile == null || _refactoringProvider == null) return;
-
-        // Sync current content
-        _activeFile.Content = CodeEditor.Text;
-        var offset = CodeEditor.CaretOffset;
-
-        SetStatus("Finding definition...", false);
-
-        var result = await _refactoringProvider.GetDefinitionAsync(_currentProject, _activeFile.FilePath, offset);
-
-        if (result.Success && result.FilePath != null)
+        try
         {
-            // Navigate to definition
-            NavigateToLocation(result.FilePath, result.Line, result.Column);
-            SetStatus($"Definition: {result.SymbolKind} {result.SymbolName}", false);
+            if (_currentProject == null || _activeFile == null || _refactoringProvider == null) return;
+
+            // Sync current content
+            _activeFile.Content = CodeEditor.Text;
+            var offset = CodeEditor.CaretOffset;
+
+            SetStatus("Finding definition...", false);
+
+            var result = await _refactoringProvider.GetDefinitionAsync(_currentProject, _activeFile.FilePath, offset);
+
+            if (result.Success && result.FilePath != null)
+            {
+                // Navigate to definition
+                NavigateToLocation(result.FilePath, result.Line, result.Column);
+                SetStatus($"Definition: {result.SymbolKind} {result.SymbolName}", false);
+            }
+            else
+            {
+                SetStatus(result.Error ?? "Definition not found", true);
+            }
         }
-        else
+        catch (Exception ex)
         {
-            SetStatus(result.Error ?? "Definition not found", true);
+            DoodleSharp.Diagnostics.Journal.Error("MW.EDITOR.GOTODEFINITION_FAIL", "GoToDefinition_Executed threw", ex);
+            SetStatus($"GoToDefinition failed: {ex.Message}", isError: true);
         }
     }
 
     private async void FindAllReferences_Executed(object sender, ExecutedRoutedEventArgs e)
     {
-        if (_currentProject == null || _activeFile == null || _refactoringProvider == null) return;
-
-        // Sync current content
-        _activeFile.Content = CodeEditor.Text;
-        var offset = CodeEditor.CaretOffset;
-
-        SetStatus("Finding references...", false);
-
-        var result = await _refactoringProvider.FindAllReferencesAsync(_currentProject, _activeFile.FilePath, offset);
-
-        if (result.Success)
+        try
         {
-            if (result.References.Count == 0)
-            {
-                SetStatus("No references found", true);
-                return;
-            }
+            if (_currentProject == null || _activeFile == null || _refactoringProvider == null) return;
 
-            // If only one reference (the definition itself), just navigate to it
-            if (result.References.Count == 1)
-            {
-                var singleRef = result.References[0];
-                NavigateToLocation(singleRef.FilePath, singleRef.Line, singleRef.Column);
-                SetStatus($"Found 1 reference to '{result.SymbolName}'", false);
-                return;
-            }
+            // Sync current content
+            _activeFile.Content = CodeEditor.Text;
+            var offset = CodeEditor.CaretOffset;
 
-            // Show references in console panel
-            ShowReferencesInConsole(result.SymbolName ?? "Symbol", result.References);
-            SetStatus($"Found {result.References.Count} references to '{result.SymbolName}'", false);
+            SetStatus("Finding references...", false);
+
+            var result = await _refactoringProvider.FindAllReferencesAsync(_currentProject, _activeFile.FilePath, offset);
+
+            if (result.Success)
+            {
+                if (result.References.Count == 0)
+                {
+                    SetStatus("No references found", true);
+                    return;
+                }
+
+                // If only one reference (the definition itself), just navigate to it
+                if (result.References.Count == 1)
+                {
+                    var singleRef = result.References[0];
+                    NavigateToLocation(singleRef.FilePath, singleRef.Line, singleRef.Column);
+                    SetStatus($"Found 1 reference to '{result.SymbolName}'", false);
+                    return;
+                }
+
+                // Show references in console panel
+                ShowReferencesInConsole(result.SymbolName ?? "Symbol", result.References);
+                SetStatus($"Found {result.References.Count} references to '{result.SymbolName}'", false);
+            }
+            else
+            {
+                SetStatus(result.Error ?? "Find references failed", true);
+            }
         }
-        else
+        catch (Exception ex)
         {
-            SetStatus(result.Error ?? "Find references failed", true);
+            DoodleSharp.Diagnostics.Journal.Error("MW.EDITOR.FINDALLREFERENCES_FAIL", "FindAllReferences_Executed threw", ex);
+            SetStatus($"FindAllReferences failed: {ex.Message}", isError: true);
         }
     }
 
@@ -10887,26 +10975,34 @@ public class {typeName}
 
     private async void PeekDefinition_Executed(object sender, ExecutedRoutedEventArgs e)
     {
-        if (_currentProject == null || _activeFile == null || _refactoringProvider == null) return;
-
-        // Close any existing peek popup
-        ClosePeekPopup();
-
-        // Sync current content
-        _activeFile.Content = CodeEditor.Text;
-        var offset = CodeEditor.CaretOffset;
-
-        SetStatus("Finding definition...", false);
-
-        var result = await _refactoringProvider.GetDefinitionAsync(_currentProject, _activeFile.FilePath, offset);
-
-        if (result.Success && result.FilePath != null)
+        try
         {
-            ShowPeekDefinition(result);
+            if (_currentProject == null || _activeFile == null || _refactoringProvider == null) return;
+
+            // Close any existing peek popup
+            ClosePeekPopup();
+
+            // Sync current content
+            _activeFile.Content = CodeEditor.Text;
+            var offset = CodeEditor.CaretOffset;
+
+            SetStatus("Finding definition...", false);
+
+            var result = await _refactoringProvider.GetDefinitionAsync(_currentProject, _activeFile.FilePath, offset);
+
+            if (result.Success && result.FilePath != null)
+            {
+                ShowPeekDefinition(result);
+            }
+            else
+            {
+                SetStatus(result.Error ?? "Definition not found", true);
+            }
         }
-        else
+        catch (Exception ex)
         {
-            SetStatus(result.Error ?? "Definition not found", true);
+            DoodleSharp.Diagnostics.Journal.Error("MW.EDITOR.PEEKDEFINITION_FAIL", "PeekDefinition_Executed threw", ex);
+            SetStatus($"PeekDefinition failed: {ex.Message}", isError: true);
         }
     }
 
@@ -11106,46 +11202,62 @@ public class {typeName}
 
     private async void DocumentSymbols_Executed(object sender, ExecutedRoutedEventArgs e)
     {
-        if (_currentProject == null || _activeFile == null || _refactoringProvider == null) return;
-
-        // Sync current content
-        _activeFile.Content = CodeEditor.Text;
-
-        SetStatus("Loading document symbols...", false);
-
-        var result = await _refactoringProvider.GetDocumentSymbolsAsync(_currentProject, _activeFile.FilePath);
-
-        if (result.Success)
+        try
         {
-            ShowSymbolPicker(result.Symbols, "Go to Symbol in Editor", false);
+            if (_currentProject == null || _activeFile == null || _refactoringProvider == null) return;
+
+            // Sync current content
+            _activeFile.Content = CodeEditor.Text;
+
+            SetStatus("Loading document symbols...", false);
+
+            var result = await _refactoringProvider.GetDocumentSymbolsAsync(_currentProject, _activeFile.FilePath);
+
+            if (result.Success)
+            {
+                ShowSymbolPicker(result.Symbols, "Go to Symbol in Editor", false);
+            }
+            else
+            {
+                SetStatus(result.Error ?? "Failed to load symbols", true);
+            }
         }
-        else
+        catch (Exception ex)
         {
-            SetStatus(result.Error ?? "Failed to load symbols", true);
+            DoodleSharp.Diagnostics.Journal.Error("MW.EDITOR.DOCUMENTSYMBOLS_FAIL", "DocumentSymbols_Executed threw", ex);
+            SetStatus($"DocumentSymbols failed: {ex.Message}", isError: true);
         }
     }
 
     private async void WorkspaceSymbols_Executed(object sender, ExecutedRoutedEventArgs e)
     {
-        if (_currentProject == null || _refactoringProvider == null) return;
-
-        // Sync current content if we have an active file
-        if (_activeFile != null)
+        try
         {
-            _activeFile.Content = CodeEditor.Text;
+            if (_currentProject == null || _refactoringProvider == null) return;
+
+            // Sync current content if we have an active file
+            if (_activeFile != null)
+            {
+                _activeFile.Content = CodeEditor.Text;
+            }
+
+            SetStatus("Loading workspace symbols...", false);
+
+            var result = await _refactoringProvider.GetWorkspaceSymbolsAsync(_currentProject);
+
+            if (result.Success)
+            {
+                ShowSymbolPicker(result.Symbols, "Go to Symbol in Workspace", true);
+            }
+            else
+            {
+                SetStatus(result.Error ?? "Failed to load symbols", true);
+            }
         }
-
-        SetStatus("Loading workspace symbols...", false);
-
-        var result = await _refactoringProvider.GetWorkspaceSymbolsAsync(_currentProject);
-
-        if (result.Success)
+        catch (Exception ex)
         {
-            ShowSymbolPicker(result.Symbols, "Go to Symbol in Workspace", true);
-        }
-        else
-        {
-            SetStatus(result.Error ?? "Failed to load symbols", true);
+            DoodleSharp.Diagnostics.Journal.Error("MW.EDITOR.WORKSPACESYMBOLS_FAIL", "WorkspaceSymbols_Executed threw", ex);
+            SetStatus($"WorkspaceSymbols failed: {ex.Message}", isError: true);
         }
     }
 
@@ -11636,7 +11748,7 @@ public class {typeName}
 
         // Save the modified original file to disk
         if (!_activeFile.IsNew)
-            File.WriteAllText(_activeFile.FilePath, newCode);
+            DoodleSharp.Project.DurableFile.WriteAllText(_activeFile.FilePath, newCode);
 
         // Create new file
         var fileName = _activeFile.FileName ?? "";
@@ -11678,7 +11790,7 @@ public class {typeName}
         };
 
         // Save to disk immediately
-        File.WriteAllText(newFilePath, newFileContent);
+        DoodleSharp.Project.DurableFile.WriteAllText(newFilePath, newFileContent);
 
         _currentProject.Files.Add(newFile);
         RefreshFileTabs();

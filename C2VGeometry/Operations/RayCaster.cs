@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
@@ -839,11 +839,26 @@ public class RayCaster
         if (rx <= 0 || ry <= 0) return;
 
         double cx = ellipse.Center.X, cy = ellipse.Center.Y;
+
+        // The circle-squash below is written in the ellipse's own frame, so a turned ellipse has
+        // the ray taken into that frame first and the hit point brought back out at the end.
+        double rox = ox - cx, roy = oy - cy;
+        double rdx = dx, rdy = dy;
+        bool turned = ellipse.Rotation != 0;
+        double rotCos = 1, rotSin = 0;
+        if (turned)
+        {
+            double r = ellipse.Rotation * Math.PI / 180.0;
+            rotCos = Math.Cos(r); rotSin = Math.Sin(r);
+            (rox, roy) = (rox * rotCos + roy * rotSin, -rox * rotSin + roy * rotCos);
+            (rdx, rdy) = (rdx * rotCos + rdy * rotSin, -rdx * rotSin + rdy * rotCos);
+        }
+
         double scale = rx / ry;
-        double lox = ox - cx;
-        double loy = (oy - cy) * scale;
-        double ldx = dx;
-        double ldy = dy * scale;
+        double lox = rox;
+        double loy = roy * scale;
+        double ldx = rdx;
+        double ldy = rdy * scale;
         double dlen = Math.Sqrt(ldx * ldx + ldy * ldy);
         if (dlen < DegenerateEpsilon) return;
         ldx /= dlen; ldy /= dlen;
@@ -860,8 +875,20 @@ public class RayCaster
 
         double lhx = lox + ldx * tLocal;
         double lhy = loy + ldy * tLocal;
-        double hx = lhx + cx;
-        double hy = lhy / scale + cy;
+
+        double fx = lhx;              // still in the ellipse's own frame
+        double fy = lhy / scale;
+        double hx, hy;
+        if (turned)
+        {
+            hx = fx * rotCos - fy * rotSin + cx;
+            hy = fx * rotSin + fy * rotCos + cy;
+        }
+        else
+        {
+            hx = fx + cx;
+            hy = fy + cy;
+        }
 
         if (ellipse.StartAngle != 0 || ellipse.EndAngle != 360)
         {
@@ -918,21 +945,18 @@ public class RayCaster
         hit.HitY = oy + dy * t;
     }
 
-    private static bool IsAngleWithin(double startDeg, double endDeg, double angleDeg)
-    {
-        double s = Normalize360(startDeg);
-        double e = Normalize360(endDeg);
-        double a = Normalize360(angleDeg);
-        if (s <= e) return a >= s && a <= e;
-        return a >= s || a <= e;
-    }
-
-    private static double Normalize360(double angleDeg)
-    {
-        angleDeg %= 360.0;
-        if (angleDeg < 0) angleDeg += 360.0;
-        return angleDeg;
-    }
+    /// <summary>
+    /// True when the sweep from <paramref name="startDeg"/> to <paramref name="endDeg"/> reaches
+    /// <paramref name="angleDeg"/>.
+    /// </summary>
+    /// <remarks>
+    /// Delegates to <see cref="GeometryHelper.SweepContains"/> rather than keeping a private copy.
+    /// The copy normalised all three angles into [0, 360) first, which reads a clockwise sweep
+    /// backwards — a ray aimed squarely at an arc from 90 to 0 degrees was reported as missing it —
+    /// and cannot tell a 20-degree sweep written as 350 to 370 from a 340-degree one.
+    /// </remarks>
+    private static bool IsAngleWithin(double startDeg, double endDeg, double angleDeg) =>
+        GeometryHelper.SweepContains(startDeg, endDeg, angleDeg);
 
     private static bool IsFiniteBox(double minX, double minY, double maxX, double maxY)
     {

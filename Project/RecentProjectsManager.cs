@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 
 namespace DoodleSharp.Project;
@@ -95,7 +95,7 @@ public static class RecentProjectsManager
         try
         {
             var json = JsonSerializer.Serialize(_recentProjects, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(SettingsPath, json);
+            DurableFile.WriteAllText(SettingsPath, json);
         }
         catch
         {

@@ -127,6 +127,16 @@ public static class ApplicationSettings
         Load();
     }
 
+    /// <summary>
+    /// Reads the settings file, falling back to defaults if it cannot be read.
+    /// </summary>
+    /// <remarks>
+    /// An unreadable file is set aside as <c>appsettings.bad</c> rather than left in place. The
+    /// fallback to defaults is silent by design — settings are a convenience and the app must start
+    /// — but the next <see cref="Save"/> writes those defaults straight over the file, so without
+    /// the copy the user's whole configuration would be gone with nothing to look at afterwards.
+    /// One copy, overwritten each time, so this cannot accumulate.
+    /// </remarks>
     public static void Load()
     {
         try
@@ -137,7 +147,26 @@ public static class ApplicationSettings
                 Instance = JsonSerializer.Deserialize<AppSettingsData>(json) ?? new AppSettingsData();
             }
         }
-        catch { /* Ignore errors, use defaults */ }
+        catch (Exception ex)
+        {
+            Instance = new AppSettingsData();
+            PreserveUnreadableSettings(ex);
+        }
+    }
+
+    private static void PreserveUnreadableSettings(Exception cause)
+    {
+        try
+        {
+            var quarantine = Path.ChangeExtension(SettingsPath, ".bad");
+            File.Copy(SettingsPath, quarantine, overwrite: true);
+            Diagnostics.Journal.Warn("SETTINGS.LOAD.UNREADABLE",
+                "appsettings.json could not be read; using defaults", $"copy={quarantine} cause={cause.Message}");
+        }
+        catch
+        {
+            // Nothing further to try; defaults are already in place and the app must still start.
+        }
     }
 
     public static void Save()
@@ -149,7 +178,10 @@ public static class ApplicationSettings
 
             var options = new JsonSerializerOptions { WriteIndented = true };
             var json = JsonSerializer.Serialize(Instance, options);
-            File.WriteAllText(SettingsPath, json);
+            // Atomic. A truncated settings file does not fail loudly: Load() catches the parse
+            // error, falls back to defaults, and the next Save() then writes those defaults over
+            // the top -- so an interrupted write quietly erased every preference the user had set.
+            DoodleSharp.Project.DurableFile.WriteAllText(SettingsPath, json);
         }
         catch { /* Ignore errors */ }
     }

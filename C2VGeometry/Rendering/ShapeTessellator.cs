@@ -147,7 +147,7 @@ public sealed class ShapeTessellator
             {
                 var full = Math.Abs(ellipse.EndAngle - ellipse.StartAngle) >= 359.999;
                 SampleEllipse(ellipse.Center, ellipse.RadiusX, ellipse.RadiusY,
-                              ellipse.StartAngle, ellipse.EndAngle, scale);
+                              ellipse.StartAngle, ellipse.EndAngle, scale, ellipse.Rotation);
                 if (full) return EmitClosed(_points, pen, sink);
                 sink.EmitPolyline(_points, closed: false);
                 return true;
@@ -390,7 +390,8 @@ public sealed class ShapeTessellator
     /// too expensive for something on the per-frame path.
     /// </summary>
     private void SampleEllipse(VXYZ centre, double rx, double ry,
-                               double startDeg, double endDeg, double scale)
+                               double startDeg, double endDeg, double scale,
+                               double rotationDeg = 0)
     {
         _points.Clear();
 
@@ -407,10 +408,21 @@ public sealed class ShapeTessellator
         var startRad = startDeg * Math.PI / 180.0;
         var sweepRad = sweep * Math.PI / 180.0;
 
+        // Orientation is folded in here rather than left to the caller so that every backend and
+        // exporter that samples an ellipse gets it, and none of them has to know the formula.
+        var rot = rotationDeg * Math.PI / 180.0;
+        var rotCos = Math.Cos(rot);
+        var rotSin = Math.Sin(rot);
+        var turned = rotationDeg != 0;
+
         for (int i = 0; i <= segments; i++)
         {
             var t = startRad + sweepRad * (i / (double)segments);
-            _points.Add(new VXYZ(centre.X + rx * Math.Cos(t), centre.Y + ry * Math.Sin(t)));
+            var lx = rx * Math.Cos(t);
+            var ly = ry * Math.Sin(t);
+            _points.Add(turned
+                ? new VXYZ(centre.X + lx * rotCos - ly * rotSin, centre.Y + lx * rotSin + ly * rotCos)
+                : new VXYZ(centre.X + lx, centre.Y + ly));
         }
     }
 

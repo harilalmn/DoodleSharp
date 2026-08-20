@@ -119,7 +119,7 @@ each tick clears the canvas and the console and rebuilds the drawing from your c
 | **VRay** | A semi-infinite ray | `new VRay(origin, direction)` (the second argument is a **direction**) or `new VRay(ox, oy, tx, ty)` (origin **through** a point) |
 | **VCircle** | A circle | `new VCircle(center, radius)`, `new VCircle(x, y, radius)` or `new VCircle(p1, p2, p3)` (circumcircle) |
 | **VRectangle** | A rectangle (inherits from VPolygon) | `new VRectangle(corner, width, height)`, `new VRectangle(x, y, width, height)` or `new VRectangle(bottomLeft, topRight)` |
-| **VEllipse** | An ellipse or elliptical arc | `new VEllipse(center, radiusX, radiusY)` or `new VEllipse(center, rx, ry, startAngle, endAngle)` |
+| **VEllipse** | An ellipse or elliptical arc, optionally turned by `Rotation` | `new VEllipse(center, radiusX, radiusY)` or `new VEllipse(center, rx, ry, startAngle, endAngle)` |
 | **VArc** | A circular arc | `new VArc(center, radius, startAngle, endAngle)` or `new VArc(start, mid, end)` |
 | **VPolygon** | A closed polygon | `new VPolygon(p1, p2, p3, ...)` or `new VPolygon(listOfCurves)` |
 | **VPolyline** | Open connected segments | `new VPolyline(p1, p2, p3, ...)` |
@@ -314,7 +314,7 @@ Beyond the constructors above and the `ICurve` members every curve shares.
 | **VLine** | `Start` / `End` (settable `VXYZ` — there is no `StartPoint`/`EndPoint` on a concrete `VLine`), `MidPoint`, `Direction` (unit vector) |
 | **VCircle** | `Center`, `Radius`, `Diameter` (get/set, `2 × Radius`; setting it resizes about the centre, `Center` does not move), `Area`, `Circumference`. Statics: `FromCenterDiameter(center, diameter)`, `FromCenterDiameter(cx, cy, diameter)`, `FromTwoPoints(p1, p2)` (the two points are the ends of a diameter) |
 | **VArc** | `Center`, `Radius`, `StartAngle`, `EndAngle`, `MidPoint`, `Evaluate(t)`. Nine statics: `FromStartCenterEnd`, `FromCenterStartEnd`, `FromStartCenterAngle`, `FromCenterStartAngle`, `FromStartCenterLength`, `FromCenterStartLength`, `FromStartEndRadius(start, end, radius, largeArc = false)`, `FromStartEndAngle`, and `Continue(previousCurve, arcLength)` — which starts tangent to the curve you pass |
-| **VEllipse** | `Center`, `RadiusX`, `RadiusY`, `StartAngle`, `EndAngle`, `Area`, `Circumference`, `Evaluate(t)` (arc-length), `EvaluateByAngle(t)` (angle-linear — use it for spokes and sector edges) |
+| **VEllipse** | `Center`, `RadiusX`, `RadiusY`, `StartAngle`, `EndAngle`, `Rotation`, `Area`, `Circumference`, `Evaluate(t)` (arc-length), `EvaluateByAngle(t)` (angle-linear — use it for spokes and sector edges), `PointAtAngle(deg)` |
 | **VRectangle** | `Corner` (bottom-left), `Width`, `Height`, `RotationAngle`. Setting any of them rebuilds the four points; everything on `VPolygon` is inherited |
 | **VPolygon** | `Points` (mutable), `Curves`, `Area`, `SignedArea`, `AddPoint(point)` / `AddPoint(x, y)`, `Slice(linePoint1, linePoint2)` → `List<VPolygon>` cut along the infinite line through the two points. Area-preserving (the pieces sum back to `Area`), so a concave polygon crossed more than twice returns three or more pieces; a line that misses or merely grazes returns one. See [Slicing a polygon](#slicing-a-polygon) |
 | **VPolyline** | `Points` (mutable), `PointCount` (`Points.Count`, null-safe), `AddPoint(point)` / `AddPoint(x, y)` |
@@ -1800,7 +1800,7 @@ recomputes from the current `Points`, so they follow edits to the list.
 ### Angles
 
 **Every angle in the shape API is in degrees**, measured counter-clockwise from the positive X axis:
-`VArc`'s `StartAngle`/`EndAngle`, `VEllipse`'s sweep, `VText.Angle`, `Shape.Rotate(pivot, angle)`,
+`VArc`'s `StartAngle`/`EndAngle`, `VEllipse`'s sweep and `Rotation`, `VText.Angle`, `Shape.Rotate(pivot, angle)`,
 `VXYZ.Rotate(angle)`, `GeometryHelper.RotatePoint`, `VCoordinateSystem.Rotate`. `.NET`'s trig
 functions work in radians, so convert when you cross that boundary:
 
@@ -4828,6 +4828,31 @@ for (int i = 0; i < 12; i++)
 ```
 
 On a circle (`RadiusX == RadiusY`) the two agree, because angle and arc length are proportional.
+
+### Turning an ellipse
+
+`VEllipse.Rotation` is the orientation of the ellipse in degrees, counter-clockwise — the direction
+its `RadiusX` axis points. It defaults to `0`, which is the axis-aligned ellipse, and
+`Rotate(pivot, degrees)` writes it, so rotating an ellipse now turns it as well as moving it.
+
+`StartAngle` and `EndAngle` are measured in the ellipse's **own** frame, so turning a half ellipse
+turns the half with it rather than re-cutting a different half:
+
+```csharp
+var tilted = new VEllipse(new VXYZ(0, 0), 80, 40) { Rotation = 30 };
+
+// The upper half of a tilted ellipse -- upper relative to the ellipse, not to the page.
+var half = new VEllipse(new VXYZ(0, -120), 80, 40, 0, 180) { Rotation = 30 };
+
+// Rotate() turns the shape, not just its centre.
+tilted.Rotate(tilted.Center, 45);      // Rotation is now 75
+
+// PointAtAngle is the world point at an angle in the ellipse's own frame.
+VXYZ tipOfMajorAxis = tilted.PointAtAngle(0);
+```
+
+`GetBounds()` is exact for both a partial sweep and a rotated ellipse, so zoom-to-fit, selection and
+export extents all frame what is actually drawn.
 They diverge as the ellipse gets more eccentric.
 
 ### Curve Intersection
@@ -4977,7 +5002,7 @@ dispatch and documents the intent:
 | `IntersectLineLine(VLine, VLine)` | One point, or — for collinear overlapping segments — the shared segment in `Curves` (`HasOverlap` is true). Parallel non-collinear: empty |
 | `IntersectLineCircle(VLine, VCircle)` | 0, 1 (tangent) or 2 points, limited to the segment's extent |
 | `IntersectLineArc(VLine, VArc)` | As above, then filtered to the arc's angular sweep |
-| `IntersectLineEllipse(VLine, VEllipse)` | 0, 1 or 2 points. **The ellipse is treated as complete** — a partial `VEllipse`'s `StartAngle`/`EndAngle` is not applied here |
+| `IntersectLineEllipse(VLine, VEllipse)` | 0, 1 or 2 points. Honours `Rotation` (it solves in the ellipse's own frame), but **the ellipse is treated as complete** — a partial `VEllipse`'s `StartAngle`/`EndAngle` is not applied here |
 | `IntersectCircleCircle(VCircle, VCircle)` | 0, 1 (tangent) or 2 points. Two coincident circles return the circle itself in `Curves`, not points |
 | `IntersectCircleArc(VCircle, VArc)` | Circle/circle roots filtered to the arc's sweep |
 | `IntersectArcArc(VArc, VArc)` | Circle/circle roots filtered to *both* sweeps |

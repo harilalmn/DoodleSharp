@@ -250,15 +250,21 @@ public class VText : Shape
             Width *= Math.Abs(factor);
     }
 
+    /// <summary>
+    /// The layout box of the whole label, honouring <see cref="Anchor"/> and <see cref="Angle"/>.
+    /// For <see cref="VText"/> this box <i>is</i> the shape — the type is deliberately exempt from
+    /// exact <c>Contains</c>/<c>DistanceTo</c> because a glyph run has no other outline — so
+    /// everything from hit testing to zoom-to-fit reads it.
+    /// </summary>
     public override BoundingBox GetBounds()
     {
-        var textWidth = Width > 0 ? Width : Height * Content.Length * 0.6;
-        var (offsetX, offsetY) = GetAnchorOffset(textWidth, Height);
+        var (textWidth, textHeight) = MeasureBlock();
+        var (offsetX, offsetY) = GetAnchorOffset(textWidth, textHeight);
 
         if (Angle == 0)
         {
             var bottomLeft = new VXYZ(Location.X + offsetX, Location.Y + offsetY);
-            return new BoundingBox(bottomLeft, new VXYZ(bottomLeft.X + textWidth, bottomLeft.Y + Height));
+            return new BoundingBox(bottomLeft, new VXYZ(bottomLeft.X + textWidth, bottomLeft.Y + textHeight));
         }
 
         var rad = Angle * Math.PI / 180.0;
@@ -266,8 +272,8 @@ public class VText : Shape
         var sin = Math.Sin(rad);
         double rx0 = offsetX, ry0 = offsetY;
         double rx1 = offsetX + textWidth, ry1 = offsetY;
-        double rx2 = offsetX + textWidth, ry2 = offsetY + Height;
-        double rx3 = offsetX, ry3 = offsetY + Height;
+        double rx2 = offsetX + textWidth, ry2 = offsetY + textHeight;
+        double rx3 = offsetX, ry3 = offsetY + textHeight;
 
         VXYZ Rotate(double rx, double ry) =>
             new VXYZ(Location.X + rx * cos - ry * sin, Location.Y + rx * sin + ry * cos);
@@ -282,6 +288,61 @@ public class VText : Shape
         var minY = Math.Min(Math.Min(p0.Y, p1.Y), Math.Min(p2.Y, p3.Y));
         var maxY = Math.Max(Math.Max(p0.Y, p1.Y), Math.Max(p2.Y, p3.Y));
         return new BoundingBox(new VXYZ(minX, minY), new VXYZ(maxX, maxY));
+    }
+
+    /// <summary>
+    /// The estimated size of the whole text block: the width of its <b>widest line</b> by the
+    /// height of all its lines together. Both are estimates — C2VGeometry cannot measure a font —
+    /// but they are the estimates every geometry-side consumer shares, so the box is at least
+    /// self-consistent everywhere.
+    /// </summary>
+    /// <remarks>
+    /// Written per line rather than over the whole string because <see cref="Content"/> may be
+    /// multi-line, and a single-line measure is wrong on both axes at once: the width summed every
+    /// line end to end (counting the newline characters themselves), while the height stayed at one
+    /// line. A three-line label 18 units wide and 30 tall reported itself as 66 by 10, so a
+    /// selection click landed in the wrong place, zoom-to-fit framed empty canvas beside the label
+    /// and clipped the top of it, and the cull index dropped the label whenever only its upper
+    /// lines were on screen. An explicit <see cref="Width"/> still wins, exactly as before, and
+    /// single-line text measures identically to the way it always has.
+    /// </remarks>
+    /// <summary>
+    /// Baseline-to-baseline distance as a multiple of <see cref="Height"/>. A font's line box is
+    /// taller than its em size — the ascender, descender and leading all sit outside it — so
+    /// stacking lines at exactly <c>Height</c> apart measures a multi-line block noticeably shorter
+    /// than it renders, and the bounding box then clips its own first line. 1.2 is the usual figure
+    /// for the sans faces <see cref="VFont"/> offers; it is an estimate for the same reason the
+    /// character width is, since C2VGeometry has no font metrics of its own.
+    /// </summary>
+    private const double LineSpacing = 1.2;
+
+    internal (double width, double height) MeasureBlock()
+    {
+        int lineCount = 1;
+        int longest = 0;
+        int current = 0;
+
+        foreach (var c in Content)
+        {
+            if (c == '\n')
+            {
+                if (current > longest) longest = current;
+                current = 0;
+                lineCount++;
+            }
+            else if (c != '\r')
+            {
+                current++;
+            }
+        }
+        if (current > longest) longest = current;
+
+        var width = Width > 0 ? Width : Height * longest * 0.6;
+
+        // Only the GAPS between lines are scaled by the line spacing, not the block as a whole, so
+        // single-line text still measures exactly Height and nothing that existed before this moves.
+        var height = Height * (1 + (lineCount - 1) * LineSpacing);
+        return (width, height);
     }
 
     public (double offsetX, double offsetY) GetAnchorOffset(double textWidth, double textHeight)
@@ -319,13 +380,13 @@ public class VText : Shape
 
     private void GetCornerCoords(out double[] xs, out double[] ys)
     {
-        var textWidth = Width > 0 ? Width : Height * Content.Length * 0.6;
-        var (offsetX, offsetY) = GetAnchorOffset(textWidth, Height);
+        var (textWidth, textHeight) = MeasureBlock();
+        var (offsetX, offsetY) = GetAnchorOffset(textWidth, textHeight);
 
         if (Angle == 0)
         {
             xs = new[] { Location.X + offsetX, Location.X + offsetX + textWidth, Location.X + offsetX + textWidth, Location.X + offsetX };
-            ys = new[] { Location.Y + offsetY, Location.Y + offsetY, Location.Y + offsetY + Height, Location.Y + offsetY + Height };
+            ys = new[] { Location.Y + offsetY, Location.Y + offsetY, Location.Y + offsetY + textHeight, Location.Y + offsetY + textHeight };
             return;
         }
 
@@ -334,8 +395,8 @@ public class VText : Shape
         var sin = Math.Sin(rad);
         double rx0 = offsetX, ry0 = offsetY;
         double rx1 = offsetX + textWidth, ry1 = offsetY;
-        double rx2 = offsetX + textWidth, ry2 = offsetY + Height;
-        double rx3 = offsetX, ry3 = offsetY + Height;
+        double rx2 = offsetX + textWidth, ry2 = offsetY + textHeight;
+        double rx3 = offsetX, ry3 = offsetY + textHeight;
         xs = new[]
         {
             Location.X + rx0 * cos - ry0 * sin,

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 
 namespace DoodleSharp.Project;
@@ -47,7 +47,7 @@ public class VizProjectFile
     {
         var options = new JsonSerializerOptions { WriteIndented = true };
         var json = JsonSerializer.Serialize(this, options);
-        File.WriteAllText(path, json);
+        DurableFile.WriteAllText(path, json);
     }
 }
 

@@ -899,6 +899,14 @@ var e2 = new VEllipse(0, 0, 80, 40);
 // A partial ellipse (elliptical arc) — angles in degrees, CCW
 var wedge = new VEllipse(new VXYZ(-150, 0), 60, 40, 30, 210);
 
+// Rotation turns the ellipse itself. StartAngle/EndAngle are measured in the
+// ellipse's own frame, so a half ellipse keeps its half and turns with it.
+var tilted = new VEllipse(new VXYZ(150, 0), 60, 30) { Rotation = 30 };
+var tiltedHalf = new VEllipse(new VXYZ(150, -120), 60, 30, 0, 180) { Rotation = 30 };
+
+// Rotate() writes Rotation as well as moving the centre, so this really turns:
+tilted.Rotate(tilted.Center, 45);            // now at 75 degrees
+
 // Computed properties
 double area = ellipse.Area;                // pi * rx * ry
 double perimeter = ellipse.Circumference;  // Ramanujan approximation
@@ -4330,24 +4338,26 @@ for (int i = 0; i < 60; i++)   // two seconds at 30 fps
                 { "VEllipse.Area", "Gets the area of the ellipse (π × RadiusX × RadiusY)." },
                 { "VEllipse.Circumference", "Gets the approximate circumference of the ellipse using Ramanujan's formula." },
                 { "VEllipse.SelfIntersecting", "Always returns false (ellipses cannot self-intersect)." },
+                { "VEllipse.Rotation", "Orientation of the ellipse in degrees, counter-clockwise: the direction its RadiusX axis points. 0 (the default) is an axis-aligned ellipse and behaves exactly as an ellipse always has. StartAngle and EndAngle are measured in the ellipse's OWN frame, so turning a half ellipse turns the half with it rather than re-cutting it. Rotate(pivot, degrees) writes this; before it existed, Rotate moved the centre and nothing else, so rotating an ellipse about its own centre was a silent no-op." },
 
                 // VEllipse Methods
                 { "VEllipse.Draw", "Renders the ellipse to the canvas." },
                 { "VEllipse.Clone", "Creates a deep copy of this ellipse with all properties duplicated." },
                 { "VEllipse.Move", "Translates the ellipse by the specified displacement vector." },
-                { "VEllipse.Rotate", "Rotates the ellipse around the specified pivot by the given angle in degrees." },
-                { "VEllipse.Flip", "Mirrors the ellipse across the specified axis line." },
+                { "VEllipse.Rotate", "Rotates the ellipse around the specified pivot by the given angle in degrees: the centre travels around the pivot AND the ellipse turns, by writing Rotation. It used to move the centre only, so rotating about the ellipse's own centre did nothing at all and rotating about any other point made the ellipse orbit without turning." },
+                { "VEllipse.Flip", "Mirrors the ellipse across the specified line, honouring the line's angle: Rotation becomes 2*(mirror angle) - Rotation and the sweep is reversed, so a mirrored half ellipse is the mirror image rather than the same half again." },
                 { "VEllipse.Scale", "Scales the ellipse relative to a center point by the specified factor." },
-                { "VEllipse.GetBounds", "Returns the axis-aligned bounding box of the ellipse." },
+                { "VEllipse.GetBounds", "Returns the axis-aligned bounding box of the drawn ellipse — exact for a partial sweep and for a rotated one, computed from the endpoints plus whichever axis extremes the sweep actually reaches. It used to return the box of the FULL, axis-aligned ellipse, so a half ellipse claimed the space its missing half would have taken and a rotated one claimed a box that no longer contained it." },
                 { "VEllipse.Contains", "For a FULL ellipse (a 360-degree sweep) this is an exact interior test — the implicit equation (dx/RadiusX)² + (dy/RadiusY)² <= 1, with dx/dy measured from Center. For a PARTIAL sweep there is no enclosed area, so it means 'lies on the curve' instead, judged with a tolerance scaled to the larger radius. Either way it is not a bounding-box test: a point in a corner of the box is outside." },
                 { "VEllipse.Evaluate", "Returns the point at a parameter in [0, 1] measured by ARC LENGTH, so 0.5 is the halfway point along the curve and Divide(n) gives evenly spaced points. This is what PointAtParameter calls. It used to interpolate the sweep angle linearly, which on an eccentric ellipse bunched divisions up near the flat ends; every other ICurve is length-parameterised, and callers like Measure and the animation samplers assume it. Use EvaluateByAngle when you want the angle-linear reading instead." },
                 { "VEllipse.EvaluateByAngle", "Returns the point at a parameter in [0, 1] interpolated linearly through the sweep ANGLE, from StartAngle to EndAngle. This is the right choice when you want equal angles rather than equal distances — radial spokes, sector boundaries, a hand sweeping round a dial. For anything spaced along the curve use Evaluate. On a circle the two agree, because angle and arc length are proportional there; they diverge as the ellipse becomes more eccentric." },
                 { "VEllipse.DistanceTo", "Returns the shortest distance from the point to the ellipse's CURVE, computed by sampling it. It honours the sweep: on a partial ellipse a point past either end measures to the nearer endpoint, not to the full ellipse. Zero on the curve, positive both inside and outside — pair it with Contains for the side." },
-                { "VEllipse.GetLength", "Returns the approximate perimeter of the ellipse." },
+                { "VEllipse.GetLength", "Returns the length of the swept curve, computed numerically. Shares its implementation with the ICurve.GetLength explicit implementation — the two used to differ, so ellipse.GetLength() and ((ICurve)ellipse).GetLength() gave different answers for the same ellipse depending only on the static type at the call site." },
+                { "VEllipse.PointAtAngle", "Returns the world point at the given angle in the ellipse's own frame (degrees), with Rotation applied. This is the single place the parametric form and the orientation are combined, so nothing can honour one and forget the other; Evaluate and EvaluateByAngle both route through it." },
                 { "VEllipse.PointAtParameter", "Returns a point on the ellipse at the given normalized parameter (0 to 1)." },
                 { "VEllipse.ParameterAtPoint", "Returns the normalized parameter (0 to 1) for the closest point on the ellipse to the given point." },
                 { "VEllipse.SetBounds", "Trims the ellipse in place: the parameter sub-range [startParameter, endParameter] becomes the new [0, 1]. The trim is by ARC LENGTH, matching Evaluate — SetBounds(0.25, 0.75) keeps the middle half of the CURVE, not of the sweep angle — and StartAngle/EndAngle are set to the angles at those arc fractions. Parameters are clamped to [0,1] and swapped if reversed." },
-                { "VEllipse.Intersect", "Computes the intersection with another curve, returning an IntersectionResult. Exact only against VLine, VRay and VXLine; every other partner (VCircle, VArc, VPolygon, VRectangle, VPolyline, VBezier, VSpline, another VEllipse) is answered by sampling both curves into up to 1000 segments each. Note the exact line/ellipse routine treats the ellipse as COMPLETE — a partial sweep's StartAngle/EndAngle is not applied there, so filter the points against the drawn arc yourself if that matters." },
+                { "VEllipse.Intersect", "Computes the intersection with another curve, returning an IntersectionResult. Exact only against VLine, VRay and VXLine; every other partner (VCircle, VArc, VPolygon, VRectangle, VPolyline, VBezier, VSpline, another VEllipse) is answered by sampling both curves into up to 1000 segments each. The exact line/ellipse routine honours Rotation (it solves in the ellipse's own frame) but treats the ellipse as COMPLETE — a partial sweep's StartAngle/EndAngle is not applied there, so filter the points against the drawn arc yourself if that matters." },
                 { "VEllipse.ToString", "Returns a string representation of the ellipse." },
 
                 // VPolygon Properties

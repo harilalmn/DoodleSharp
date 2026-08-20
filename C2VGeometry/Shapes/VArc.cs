@@ -1,4 +1,4 @@
-namespace C2VGeometry;
+﻿namespace C2VGeometry;
 
 public class VArc : Shape, ICurve
 {
@@ -288,7 +288,7 @@ public class VArc : Shape, ICurve
 
         double angle = Math.Atan2(cp.Y, cp.X) * 180.0 / Math.PI;
 
-        if (!IsAngleInArc(angle))
+        if (!SweepReaches(angle))
         {
             double distStart = GeometryHelper.AngleDifference(angle, StartAngle);
             double distEnd = GeometryHelper.AngleDifference(angle, EndAngle);
@@ -299,15 +299,16 @@ public class VArc : Shape, ICurve
         return new VXYZ(Center.X + Radius * Math.Cos(rad), Center.Y + Radius * Math.Sin(rad));
     }
 
-    private bool IsAngleInArc(double angle)
-    {
-        double s = GeometryHelper.NormalizeAngle(StartAngle);
-        double e = GeometryHelper.NormalizeAngle(EndAngle);
-        double a = GeometryHelper.NormalizeAngle(angle);
-
-        if (s < e) return a >= s && a <= e;
-        return a >= s || a <= e;
-    }
+    /// <summary>
+    /// True when the arc's sweep passes through <paramref name="angle"/>.
+    /// </summary>
+    /// <remarks>
+    /// Delegates to <see cref="SweepReaches"/>. It used to normalise all three angles into
+    /// [0, 360) and compare them, which cannot distinguish a 20-degree arc written as 350 to 370
+    /// from the 340-degree arc that 350 to 10 describes, and got the direction of every clockwise
+    /// arc backwards — an arc from 90 to 0 was reported as *not* containing 45.
+    /// </remarks>
+    private bool IsAngleInArc(double angle) => SweepReaches(angle);
 
     public VXYZ PointAtSegmentLength(double segmentLength)
     {
@@ -356,17 +357,37 @@ public class VArc : Shape, ICurve
         return results;
     }
 
+    /// <summary>
+    /// Splits the arc at the point on it nearest <paramref name="point"/>, returning the two halves
+    /// in sweep order.
+    /// </summary>
+    /// <remarks>
+    /// The split angle is expressed <b>relative to <see cref="StartAngle"/></b> rather than as the
+    /// raw <c>Atan2</c> value. <c>Atan2</c> answers in (-180, 180], which need not lie between this
+    /// arc's own start and end: splitting an arc written as 350 to 370 at (r, 0) produced the pair
+    /// [350, 0] and [0, 370] — two arcs together 36 times longer than the one they replaced.
+    /// </remarks>
     public (ICurve, ICurve) SplitAtPoint(VXYZ point)
     {
         var proj = Project(point);
         VXYZ cp = proj - Center;
         double angle = Math.Atan2(cp.Y, cp.X) * 180.0 / Math.PI;
+        double splitAngle = StartAngle + RelativeSweepAngle(angle);
 
         return (
-            new VArc(Center, Radius, StartAngle, angle),
-            new VArc(Center, Radius, angle, EndAngle)
+            new VArc(Center, Radius, StartAngle, splitAngle),
+            new VArc(Center, Radius, splitAngle, EndAngle)
         );
     }
+
+    /// <summary>
+    /// How far <paramref name="angleDegrees"/> lies along this arc's sweep, measured from
+    /// <see cref="StartAngle"/> in the direction the arc travels and clamped to the sweep. Signed:
+    /// negative for a clockwise arc, so <c>StartAngle + result</c> is always a valid angle on the
+    /// arc regardless of how the arc was written.
+    /// </summary>
+    internal double RelativeSweepAngle(double angleDegrees) =>
+        GeometryHelper.SweepOffset(StartAngle, EndAngle, angleDegrees);
 
 
 
@@ -421,19 +442,48 @@ public class VArc : Shape, ICurve
         Center = Center + vector;
     }
 
+    /// <summary>
+    /// Rotates the arc about <paramref name="pivot"/>: the centre moves and both ends turn by the
+    /// same amount, so the sweep is untouched.
+    /// </summary>
+    /// <remarks>
+    /// The two angles are shifted, <b>not</b> normalised. Normalising them independently — which is
+    /// what this used to do — folds each into [0, 360) separately, and that silently rewrites any
+    /// arc whose sweep crosses zero: 350 degrees to 370 degrees is a 20-degree arc, but normalising
+    /// gives 350 to 10, which reads as a 340-degree arc going the other way. Rotating by zero was
+    /// enough to turn a short arc into its complement, and every consumer of the sweep — length,
+    /// bounds, hit testing, the DXF writer — then agreed on the wrong answer.
+    /// </remarks>
     public override void Rotate(VXYZ pivot, double angleDegrees)
     {
         Center = GeometryHelper.RotatePoint(Center, pivot, angleDegrees);
-        StartAngle = GeometryHelper.NormalizeAngle(StartAngle + angleDegrees);
-        EndAngle = GeometryHelper.NormalizeAngle(EndAngle + angleDegrees);
+        StartAngle += angleDegrees;
+        EndAngle += angleDegrees;
     }
 
+    /// <summary>
+    /// Mirrors the arc across <paramref name="mirrorLine"/>.
+    /// </summary>
+    /// <remarks>
+    /// Reflecting a direction across a line at angle t maps an angle a to 2t - a, and reflection
+    /// reverses orientation, so the ends swap as well: a counter-clockwise arc comes back
+    /// clockwise. The previous implementation hardcoded <c>2t - a</c> for <c>t = 0</c> — it mirrored
+    /// about the horizontal through the centre no matter which line was passed, so mirroring about
+    /// a vertical axis moved the arc's midpoint to the reflection through the *wrong* axis while
+    /// the centre moved correctly, leaving the arc facing backwards.
+    /// </remarks>
     public override void Flip(VLine mirrorLine)
     {
         Center = GeometryHelper.FlipPoint(Center, mirrorLine);
-        double temp = StartAngle;
-        StartAngle = -EndAngle;
-        EndAngle = -temp;
+
+        double mirrorAngle = Math.Atan2(mirrorLine.End.Y - mirrorLine.Start.Y,
+                                        mirrorLine.End.X - mirrorLine.Start.X) * 180.0 / Math.PI;
+        double twice = 2 * mirrorAngle;
+
+        double newStart = twice - EndAngle;
+        double newEnd = twice - StartAngle;
+        StartAngle = newStart;
+        EndAngle = newEnd;
     }
 
     public override void Scale(VXYZ center, double factor)
@@ -442,13 +492,57 @@ public class VArc : Shape, ICurve
         Radius *= Math.Abs(factor);
     }
 
+    /// <summary>
+    /// The box that actually contains the arc — its two endpoints, plus whichever of the four
+    /// compass extremes (0, 90, 180, 270 degrees) the sweep passes through.
+    /// </summary>
+    /// <remarks>
+    /// This used to return the bounding box of the whole circle, which is correct only for a full
+    /// turn and is four times too large for a quarter arc. Everything downstream reads this box:
+    /// zoom-to-fit framed a circle that was not there, the cull index reserved space for it, the
+    /// selection rectangle claimed the arc when it was nowhere near, and the tiled export sized its
+    /// sheet from it.
+    /// </remarks>
     public override BoundingBox GetBounds()
     {
-        return new BoundingBox(
-            new VXYZ(Center.X - Radius, Center.Y - Radius),
-            new VXYZ(Center.X + Radius, Center.Y + Radius)
-        );
+        var start = StartPoint;
+        var end = EndPoint;
+
+        double minX = Math.Min(start.X, end.X);
+        double maxX = Math.Max(start.X, end.X);
+        double minY = Math.Min(start.Y, end.Y);
+        double maxY = Math.Max(start.Y, end.Y);
+
+        // A compass extreme only widens the box if the sweep actually reaches it.
+        for (int quarter = 0; quarter < 4; quarter++)
+        {
+            double angle = quarter * 90.0;
+            if (!SweepReaches(angle)) continue;
+
+            switch (quarter)
+            {
+                case 0: maxX = Math.Max(maxX, Center.X + Radius); break;
+                case 1: maxY = Math.Max(maxY, Center.Y + Radius); break;
+                case 2: minX = Math.Min(minX, Center.X - Radius); break;
+                default: minY = Math.Min(minY, Center.Y - Radius); break;
+            }
+        }
+
+        return new BoundingBox(new VXYZ(minX, minY), new VXYZ(maxX, maxY));
     }
+
+    /// <summary>
+    /// True when the arc's sweep passes through <paramref name="angleDegrees"/>, honouring both the
+    /// direction of travel and sweeps longer than a full turn.
+    /// </summary>
+    /// <remarks>
+    /// Works on the offset from <see cref="StartAngle"/> rather than on normalised absolute angles,
+    /// which is what keeps it right for an arc written as 350 to 370 (or as -10 to 10, or as 0 to
+    /// 720). <see cref="IsAngleInArc"/> normalises all three angles and so cannot tell a 20-degree
+    /// arc from a 340-degree one; it is kept for the projection path, which is tolerant of that.
+    /// </remarks>
+    internal bool SweepReaches(double angleDegrees) =>
+        GeometryHelper.SweepContains(StartAngle, EndAngle, angleDegrees);
 
     public override string ToString() => $"VArc(Center: {Center}, R: {Radius}, {StartAngle}° to {EndAngle}°)";
 
@@ -468,28 +562,20 @@ public class VArc : Shape, ICurve
     /// <summary>
     /// Returns the normalized parameter (0 to 1) for the closest point on the arc to the given point.
     /// </summary>
+    /// <remarks>
+    /// Measured with <see cref="RelativeSweepAngle"/>, which travels in the arc's own direction.
+    /// Folding the offset into [0, 360) first — as this used to — is only right for a counter-
+    /// clockwise arc: on an arc from 90 to 0, the midpoint at 45 degrees came back as offset 315
+    /// against a sweep of -90 and clamped to parameter 1, so the middle of the arc reported itself
+    /// as the end of it.
+    /// </remarks>
     public double ParameterAtPoint(VXYZ point)
     {
+        double sweep = EndAngle - StartAngle;
+        if (Math.Abs(sweep) < GeometryTolerance.Epsilon) return 0;
+
         double angle = Math.Atan2(point.Y - Center.Y, point.X - Center.X) * 180.0 / Math.PI;
-        double startRad = StartAngle;
-        double endRad = EndAngle;
-
-        double sweep = endRad - startRad;
-        double relativeAngle = angle - startRad;
-
-        while (relativeAngle < 0) relativeAngle += 360;
-        while (relativeAngle > 360) relativeAngle -= 360;
-
-        if (sweep < 0)
-        {
-            if (relativeAngle > -sweep) relativeAngle = -sweep;
-            return Math.Clamp(relativeAngle / -sweep, 0, 1);
-        }
-        else
-        {
-            if (relativeAngle > sweep) relativeAngle = sweep;
-            return Math.Clamp(relativeAngle / sweep, 0, 1);
-        }
+        return Math.Clamp(RelativeSweepAngle(angle) / sweep, 0, 1);
     }
 
     /// <summary>
