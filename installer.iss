@@ -2,7 +2,7 @@
 ; Builds an installer for DoodleSharp - 2D Geometry Visualization Tool
 
 #define MyAppName "DoodleSharp"
-#define MyAppVersion "2026.8.10"
+#define MyAppVersion "2026.8.11"
 #define MyAppPublisher "Nicety"
 #define MyAppExeName "DoodleSharp.exe"
 #define MyAppURL "https://github.com/harilalmn/DoodleSharp"
