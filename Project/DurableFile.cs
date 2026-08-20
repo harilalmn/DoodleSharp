@@ -1,0 +1,96 @@
+using System;
+using System.IO;
+using System.Text;
+
+namespace DoodleSharp.Project;
+
+/// <summary>
+/// Writes a file so that an interrupted write cannot destroy what was already there.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <c>File.WriteAllText</c> truncates the target and then streams into it, so the window between
+/// those two steps is a window in which the file on disk is neither the old content nor the new
+/// one. Anything that ends the process inside that window — a crash in another thread, a power cut,
+/// a full disk, the user killing a hung app — leaves a truncated file, and a truncated file is
+/// indistinguishable from a short one.
+/// </para>
+///
+/// <para>
+/// That risk is not theoretical here. <b>Auto-save rewrites every one of the user's source files on
+/// a timer</b>, so the app spends a fraction of every minute inside that window on files it did not
+/// create and cannot reconstruct; the settings and recent-projects files are rewritten on almost
+/// every UI interaction. A truncated <c>.cs</c> file is lost work. A truncated
+/// <c>appsettings.json</c> is worse than it sounds: the loader catches the parse failure and
+/// silently falls back to defaults, and the next save then writes those defaults over the file, so
+/// the user's whole configuration disappears without a message.
+/// </para>
+///
+/// <para>
+/// Writing to a sibling temporary file and then replacing the target closes the window: the rename
+/// is atomic, so a reader sees either the whole old file or the whole new one. Callers keep their
+/// existing error handling — this throws exactly what <c>File.WriteAllText</c> would.
+/// </para>
+/// </remarks>
+public static class DurableFile
+{
+    /// <summary>
+    /// Writes <paramref name="contents"/> to <paramref name="path"/> atomically: fully, or not at
+    /// all. Creates the file if it does not exist, and creates its directory if it is missing.
+    /// </summary>
+    /// <param name="encoding">
+    /// Defaults to UTF-8 with no byte-order mark, matching <c>File.WriteAllText</c>.
+    /// </param>
+    public static void WriteAllText(string path, string contents, Encoding? encoding = null)
+    {
+        if (string.IsNullOrEmpty(path)) throw new ArgumentException("Path is required.", nameof(path));
+
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            Directory.CreateDirectory(directory);
+
+        // A sibling, so the replace below stays on one volume — File.Replace and File.Move are only
+        // atomic within a volume, and the system temp folder is routinely on a different one.
+        var temporary = path + ".tmp-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+
+        try
+        {
+            if (encoding == null)
+                File.WriteAllText(temporary, contents);
+            else
+                File.WriteAllText(temporary, contents, encoding);
+
+            if (File.Exists(path))
+            {
+                // Replace rather than Delete-then-Move: it is the atomic form, and it carries the
+                // original file's attributes and ACLs across, which a fresh file would not inherit.
+                // ignoreMetadataErrors keeps a file on a share, or one whose ACLs cannot be copied,
+                // from failing a save that would otherwise have succeeded.
+                File.Replace(temporary, path, destinationBackupFileName: null, ignoreMetadataErrors: true);
+            }
+            else
+            {
+                File.Move(temporary, path);
+            }
+        }
+        catch
+        {
+            // The original is untouched either way; all that is left is not to litter beside it.
+            TryDelete(temporary);
+            throw;
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch
+        {
+            // Best effort: a leftover temporary file is untidy, but reporting it would mask the
+            // real failure this is unwinding from.
+        }
+    }
+}

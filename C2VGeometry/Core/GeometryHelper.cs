@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -74,6 +74,55 @@ public static class GeometryHelper
         return new VXYZ(
             center.X + (point.X - center.X) * factor,
             center.Y + (point.Y - center.Y) * factor);
+    }
+
+    /// <summary>
+    /// How far <paramref name="angleDegrees"/> lies along the sweep from
+    /// <paramref name="startDegrees"/> to <paramref name="endDegrees"/>, measured in the direction
+    /// the sweep travels and clamped to it. Signed: negative for a clockwise sweep, so
+    /// <c>start + result</c> is always an angle the sweep actually reaches.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately works on the offset from the start rather than on normalised absolute angles.
+    /// Normalising everything into [0, 360) first cannot tell a 20-degree sweep written as 350 to
+    /// 370 from the 340-degree one that 350 to 10 describes, and it gets the direction of every
+    /// clockwise sweep backwards. Both <see cref="VArc"/> and <see cref="VEllipse"/> shipped that
+    /// bug independently, which is why the rule lives here now.
+    /// </remarks>
+    public static double SweepOffset(double startDegrees, double endDegrees, double angleDegrees)
+    {
+        double sweep = endDegrees - startDegrees;
+        double relative = angleDegrees - startDegrees;
+
+        if (sweep >= 0)
+        {
+            relative -= 360.0 * Math.Floor(relative / 360.0);   // into [0, 360)
+            return Math.Min(relative, sweep);
+        }
+
+        relative -= 360.0 * Math.Ceiling(relative / 360.0);      // into (-360, 0]
+        return Math.Max(relative, sweep);
+    }
+
+    /// <summary>
+    /// True when the sweep from <paramref name="startDegrees"/> to <paramref name="endDegrees"/>
+    /// passes through <paramref name="angleDegrees"/>. Honours direction, and treats a sweep of a
+    /// full turn or more as covering everything.
+    /// </summary>
+    public static bool SweepContains(double startDegrees, double endDegrees, double angleDegrees)
+    {
+        double sweep = endDegrees - startDegrees;
+        if (Math.Abs(sweep) >= 360.0) return true;
+
+        double relative = angleDegrees - startDegrees;
+        if (sweep >= 0)
+        {
+            relative -= 360.0 * Math.Floor(relative / 360.0);
+            return relative <= sweep + GeometryTolerance.Epsilon;
+        }
+
+        relative -= 360.0 * Math.Ceiling(relative / 360.0);
+        return relative >= sweep - GeometryTolerance.Epsilon;
     }
 
     /// <summary>

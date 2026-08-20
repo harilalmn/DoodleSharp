@@ -237,32 +237,53 @@ public class DxfExporter
         WriteDouble(51, endAngle);
     }
 
+    /// <summary>
+    /// A <see cref="VEllipse"/> as a polyline — DXF R12 has no native ELLIPSE entity.
+    /// </summary>
+    /// <remarks>
+    /// Samples the ellipse's actual sweep through <see cref="VEllipse.PointAtAngle"/>, so both a
+    /// partial sweep and <see cref="VEllipse.Rotation"/> survive the export. It used to walk a full
+    /// turn of the unrotated parametric form regardless, which turned every half ellipse into a
+    /// whole one and laid every turned ellipse back down flat.
+    /// </remarks>
     private void WriteEllipse(VEllipse ellipse)
     {
-        // DXF R12 doesn't have native ELLIPSE support
-        // Approximate with polyline
+        double sweep = ellipse.EndAngle - ellipse.StartAngle;
+        bool whole = Math.Abs(Math.Abs(sweep) - 360.0) < 1e-9 || Math.Abs(sweep) < 1e-9;
+        double effective = Math.Abs(sweep) < 1e-9 ? 360.0 : sweep;
+
         var points = new List<(double x, double y)>();
         int segments = 72;
         for (int i = 0; i <= segments; i++)
         {
-            double angle = 2 * Math.PI * i / segments;
-            double x = ellipse.Center.X + ellipse.RadiusX * Math.Cos(angle);
-            double y = ellipse.Center.Y + ellipse.RadiusY * Math.Sin(angle);
-            points.Add((x, y));
+            var p = ellipse.PointAtAngle(ellipse.StartAngle + effective * i / segments);
+            points.Add((p.X, p.Y));
         }
-        WriteLwPolyline(points, closed: true);
+
+        // A closed LWPOLYLINE implies the closing segment, so the duplicated last vertex would draw
+        // a zero-length one on top of the first.
+        if (whole) points.RemoveAt(points.Count - 1);
+
+        WriteLwPolyline(points, closed: whole);
     }
 
+    /// <summary>
+    /// A <see cref="VRectangle"/> as a closed LWPOLYLINE through its four corners.
+    /// </summary>
+    /// <remarks>
+    /// Read straight off <see cref="VPolygon.Points"/>, which already carry the rectangle's
+    /// <c>RotationAngle</c>. Rebuilding the corners from <c>Corner</c>, <c>Width</c> and
+    /// <c>Height</c> — the previous implementation — silently dropped the rotation, so a rectangle
+    /// drawn at an angle came back into CAD axis-aligned.
+    /// </remarks>
     private void WriteRectangle(VRectangle rect)
     {
-        var points = new List<(double x, double y)>
-        {
-            (rect.Corner.X, rect.Corner.Y),
-            (rect.Corner.X + rect.Width, rect.Corner.Y),
-            (rect.Corner.X + rect.Width, rect.Corner.Y + rect.Height),
-            (rect.Corner.X, rect.Corner.Y + rect.Height)
-        };
-        WriteLwPolyline(points, closed: true);
+        var points = new List<(double x, double y)>(rect.Points.Count);
+        foreach (var vertex in rect.Points)
+            points.Add((vertex.X, vertex.Y));
+
+        if (points.Count > 0)
+            WriteLwPolyline(points, closed: true);
     }
 
     private void WritePolygon(VPolygon polygon)

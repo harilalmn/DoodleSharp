@@ -681,115 +681,150 @@ namespace DoodleSharp.Editor
         // Command executions
         private async void GoToDefinition_Executed(object sender, ExecutedRoutedEventArgs e)
         {
-            var project = GetActiveProject();
-            var filePath = GetActiveFilePath() ?? DefaultFileId;
-            if (_refactoringProvider == null) return;
-
-            SetStatusMessage("Finding definition...", false);
-            var offset = _editor.CaretOffset;
-            var result = await _refactoringProvider.GetDefinitionAsync(project, filePath, offset);
-
-            if (result.Success && result.FilePath != null)
+            try
             {
-                NavigateToLocation(result.FilePath, result.Line, result.Column);
-                SetStatusMessage($"Definition: {result.SymbolKind} {result.SymbolName}", false);
+                var project = GetActiveProject();
+                var filePath = GetActiveFilePath() ?? DefaultFileId;
+                if (_refactoringProvider == null) return;
+
+                SetStatusMessage("Finding definition...", false);
+                var offset = _editor.CaretOffset;
+                var result = await _refactoringProvider.GetDefinitionAsync(project, filePath, offset);
+
+                if (result.Success && result.FilePath != null)
+                {
+                    NavigateToLocation(result.FilePath, result.Line, result.Column);
+                    SetStatusMessage($"Definition: {result.SymbolKind} {result.SymbolName}", false);
+                }
+                else
+                {
+                    SetStatusMessage(result.Error ?? "Definition not found", true);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                SetStatusMessage(result.Error ?? "Definition not found", true);
+                DoodleSharp.Diagnostics.Journal.Error("SEC.EDITOR.GOTODEFINITION_FAIL", "GoToDefinition_Executed threw", ex);
             }
         }
 
         private async void PeekDefinition_Executed(object sender, ExecutedRoutedEventArgs e)
         {
-            var project = GetActiveProject();
-            var filePath = GetActiveFilePath() ?? DefaultFileId;
-            if (_refactoringProvider == null) return;
-
-            ClosePeekPopup();
-            SetStatusMessage("Finding definition...", false);
-            var offset = _editor.CaretOffset;
-            var result = await _refactoringProvider.GetDefinitionAsync(project, filePath, offset);
-
-            if (result.Success && result.FilePath != null)
+            try
             {
-                ShowPeekDefinition(result);
+                var project = GetActiveProject();
+                var filePath = GetActiveFilePath() ?? DefaultFileId;
+                if (_refactoringProvider == null) return;
+
+                ClosePeekPopup();
+                SetStatusMessage("Finding definition...", false);
+                var offset = _editor.CaretOffset;
+                var result = await _refactoringProvider.GetDefinitionAsync(project, filePath, offset);
+
+                if (result.Success && result.FilePath != null)
+                {
+                    ShowPeekDefinition(result);
+                }
+                else
+                {
+                    SetStatusMessage(result.Error ?? "Definition not found", true);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                SetStatusMessage(result.Error ?? "Definition not found", true);
+                DoodleSharp.Diagnostics.Journal.Error("SEC.EDITOR.PEEKDEFINITION_FAIL", "PeekDefinition_Executed threw", ex);
             }
         }
 
         private async void FindAllReferences_Executed(object sender, ExecutedRoutedEventArgs e)
         {
-            var project = GetActiveProject();
-            var filePath = GetActiveFilePath() ?? DefaultFileId;
-            if (_refactoringProvider == null) return;
-
-            SetStatusMessage("Finding references...", false);
-            var offset = _editor.CaretOffset;
-            var result = await _refactoringProvider.FindAllReferencesAsync(project, filePath, offset);
-
-            if (result.Success)
+            try
             {
-                if (result.References.Count == 0)
-                {
-                    SetStatusMessage("No references found", true);
-                    return;
-                }
+                var project = GetActiveProject();
+                var filePath = GetActiveFilePath() ?? DefaultFileId;
+                if (_refactoringProvider == null) return;
 
-                if (result.References.Count == 1)
-                {
-                    var singleRef = result.References[0];
-                    NavigateToLocation(singleRef.FilePath, singleRef.Line, singleRef.Column);
-                    SetStatusMessage($"Found 1 reference to '{result.SymbolName}'", false);
-                    return;
-                }
+                SetStatusMessage("Finding references...", false);
+                var offset = _editor.CaretOffset;
+                var result = await _refactoringProvider.FindAllReferencesAsync(project, filePath, offset);
 
-                ShowReferences(result.SymbolName ?? "Symbol", result.References);
-                SetStatusMessage($"Found {result.References.Count} references to '{result.SymbolName}'", false);
+                if (result.Success)
+                {
+                    if (result.References.Count == 0)
+                    {
+                        SetStatusMessage("No references found", true);
+                        return;
+                    }
+
+                    if (result.References.Count == 1)
+                    {
+                        var singleRef = result.References[0];
+                        NavigateToLocation(singleRef.FilePath, singleRef.Line, singleRef.Column);
+                        SetStatusMessage($"Found 1 reference to '{result.SymbolName}'", false);
+                        return;
+                    }
+
+                    ShowReferences(result.SymbolName ?? "Symbol", result.References);
+                    SetStatusMessage($"Found {result.References.Count} references to '{result.SymbolName}'", false);
+                }
+                else
+                {
+                    SetStatusMessage(result.Error ?? "Find references failed", true);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                SetStatusMessage(result.Error ?? "Find references failed", true);
+                DoodleSharp.Diagnostics.Journal.Error("SEC.EDITOR.FINDALLREFERENCES_FAIL", "FindAllReferences_Executed threw", ex);
             }
         }
 
         private async void DocumentSymbols_Executed(object sender, ExecutedRoutedEventArgs e)
         {
-            var project = GetActiveProject();
-            var filePath = GetActiveFilePath() ?? DefaultFileId;
-            if (_refactoringProvider == null) return;
-
-            SetStatusMessage("Loading document symbols...", false);
-            var result = await _refactoringProvider.GetDocumentSymbolsAsync(project, filePath);
-
-            if (result.Success)
+            try
             {
-                ShowSymbolPickerPopup(result.Symbols, "Go to Symbol in Editor", false);
+                var project = GetActiveProject();
+                var filePath = GetActiveFilePath() ?? DefaultFileId;
+                if (_refactoringProvider == null) return;
+
+                SetStatusMessage("Loading document symbols...", false);
+                var result = await _refactoringProvider.GetDocumentSymbolsAsync(project, filePath);
+
+                if (result.Success)
+                {
+                    ShowSymbolPickerPopup(result.Symbols, "Go to Symbol in Editor", false);
+                }
+                else
+                {
+                    SetStatusMessage(result.Error ?? "Failed to load symbols", true);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                SetStatusMessage(result.Error ?? "Failed to load symbols", true);
+                DoodleSharp.Diagnostics.Journal.Error("SEC.EDITOR.DOCUMENTSYMBOLS_FAIL", "DocumentSymbols_Executed threw", ex);
             }
         }
 
         private async void WorkspaceSymbols_Executed(object sender, ExecutedRoutedEventArgs e)
         {
-            var project = GetActiveProject();
-            if (_refactoringProvider == null) return;
-
-            SetStatusMessage("Loading workspace symbols...", false);
-            var result = await _refactoringProvider.GetWorkspaceSymbolsAsync(project);
-
-            if (result.Success)
+            try
             {
-                ShowSymbolPickerPopup(result.Symbols, "Go to Symbol in Workspace", true);
+                var project = GetActiveProject();
+                if (_refactoringProvider == null) return;
+
+                SetStatusMessage("Loading workspace symbols...", false);
+                var result = await _refactoringProvider.GetWorkspaceSymbolsAsync(project);
+
+                if (result.Success)
+                {
+                    ShowSymbolPickerPopup(result.Symbols, "Go to Symbol in Workspace", true);
+                }
+                else
+                {
+                    SetStatusMessage(result.Error ?? "Failed to load symbols", true);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                SetStatusMessage(result.Error ?? "Failed to load symbols", true);
+                DoodleSharp.Diagnostics.Journal.Error("SEC.EDITOR.WORKSPACESYMBOLS_FAIL", "WorkspaceSymbols_Executed threw", ex);
             }
         }
 
@@ -849,180 +884,201 @@ namespace DoodleSharp.Editor
 
         private async void ExecuteRename(string newName, int offset)
         {
-            var project = GetActiveProject();
-            var filePath = GetActiveFilePath() ?? DefaultFileId;
-            if (_refactoringProvider == null) return;
-
-            SetStatusMessage("Renaming...", false);
-            string currentContent = _editor.Text;
-            var result = await _refactoringProvider.GetRenameEditsAsync(project, filePath, offset, newName, currentContent);
-
-            if (result.Success && result.Changes != null)
+            try
             {
-                ApplyRefactoring(result.Changes);
-                SetStatusMessage("Rename applied", false);
+                var project = GetActiveProject();
+                var filePath = GetActiveFilePath() ?? DefaultFileId;
+                if (_refactoringProvider == null) return;
+
+                SetStatusMessage("Renaming...", false);
+                string currentContent = _editor.Text;
+                var result = await _refactoringProvider.GetRenameEditsAsync(project, filePath, offset, newName, currentContent);
+
+                if (result.Success && result.Changes != null)
+                {
+                    ApplyRefactoring(result.Changes);
+                    SetStatusMessage("Rename applied", false);
+                }
+                else
+                {
+                    SetStatusMessage(result.Error ?? "Rename failed", true);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                SetStatusMessage(result.Error ?? "Rename failed", true);
+                DoodleSharp.Diagnostics.Journal.Error("SEC.EDITOR.EXECUTERENAME_FAIL", "ExecuteRename threw", ex);
             }
         }
 
         private async void Rename_Executed(object sender, ExecutedRoutedEventArgs e)
         {
-            if (_refactoringProvider == null) return;
-
-            var currentContent = _editor.Text;
-            var offset = _editor.CaretOffset;
-            var selectionLength = _editor.SelectionLength;
-
-            SetStatusMessage("Analyzing...", false);
-            var project = GetActiveProject();
-            var filePath = GetActiveFilePath() ?? DefaultFileId;
-            var quickActions = await _refactoringProvider.GetQuickActionsAsync(project, filePath, currentContent, offset, selectionLength);
-            SetStatusMessage("Ready", false);
-
-            var contextMenu = new ContextMenu();
-            bool hasItems = false;
-
-            foreach (var action in quickActions)
+            try
             {
-                var item = new MenuItem { Header = action.Title };
-                if (action.ActionId == "Rename") item.InputGestureText = "F2";
+                if (_refactoringProvider == null) return;
 
-                item.Click += (s, args) => PerformQuickAction(action);
-                contextMenu.Items.Add(item);
-                hasItems = true;
-            }
+                var currentContent = _editor.Text;
+                var offset = _editor.CaretOffset;
+                var selectionLength = _editor.SelectionLength;
 
-            var word = GetWordAtOffset(_editor.Document, offset);
-            if (!string.IsNullOrEmpty(word))
-            {
-                var currentCode = _editor.Text;
-                var namespaces = TypeInspector.FindNamespacesForType(word);
-                var extensionNamespaces = TypeInspector.FindNamespacesForExtensionMethod(word);
-                foreach (var ns in extensionNamespaces)
+                SetStatusMessage("Analyzing...", false);
+                var project = GetActiveProject();
+                var filePath = GetActiveFilePath() ?? DefaultFileId;
+                var quickActions = await _refactoringProvider.GetQuickActionsAsync(project, filePath, currentContent, offset, selectionLength);
+                SetStatusMessage("Ready", false);
+
+                var contextMenu = new ContextMenu();
+                bool hasItems = false;
+
+                foreach (var action in quickActions)
                 {
-                    namespaces.Add(ns);
-                }
+                    var item = new MenuItem { Header = action.Title };
+                    if (action.ActionId == "Rename") item.InputGestureText = "F2";
 
-                var newNamespaces = namespaces.Distinct()
-                    .Where(ns => !currentCode.Contains($"using {ns};"))
-                    .OrderByDescending(n => n.StartsWith("DoodleSharp") || n.StartsWith("C2VGeometry"))
-                    .ThenBy(n => n)
-                    .ToList();
-
-                if (newNamespaces.Count > 0)
-                {
-                    if (hasItems) contextMenu.Items.Add(new Separator());
-
-                    foreach (var ns in newNamespaces)
-                    {
-                        var item = new MenuItem { Header = $"using {ns};" };
-                        item.Click += (s, args) => AddUsingStatement(ns);
-                        contextMenu.Items.Add(item);
-                    }
+                    item.Click += (s, args) => PerformQuickAction(action);
+                    contextMenu.Items.Add(item);
                     hasItems = true;
                 }
+
+                var word = GetWordAtOffset(_editor.Document, offset);
+                if (!string.IsNullOrEmpty(word))
+                {
+                    var currentCode = _editor.Text;
+                    var namespaces = TypeInspector.FindNamespacesForType(word);
+                    var extensionNamespaces = TypeInspector.FindNamespacesForExtensionMethod(word);
+                    foreach (var ns in extensionNamespaces)
+                    {
+                        namespaces.Add(ns);
+                    }
+
+                    var newNamespaces = namespaces.Distinct()
+                        .Where(ns => !currentCode.Contains($"using {ns};"))
+                        .OrderByDescending(n => n.StartsWith("DoodleSharp") || n.StartsWith("C2VGeometry"))
+                        .ThenBy(n => n)
+                        .ToList();
+
+                    if (newNamespaces.Count > 0)
+                    {
+                        if (hasItems) contextMenu.Items.Add(new Separator());
+
+                        foreach (var ns in newNamespaces)
+                        {
+                            var item = new MenuItem { Header = $"using {ns};" };
+                            item.Click += (s, args) => AddUsingStatement(ns);
+                            contextMenu.Items.Add(item);
+                        }
+                        hasItems = true;
+                    }
+                }
+
+                if (hasItems)
+                {
+                    var textView = _editor.TextArea.TextView;
+                    var pos = textView.GetVisualPosition(
+                        new TextViewPosition(_editor.TextArea.Caret.Line, _editor.TextArea.Caret.Column),
+                        ICSharpCode.AvalonEdit.Rendering.VisualYPosition.LineBottom);
+
+                    pos = new System.Windows.Point(pos.X - textView.ScrollOffset.X, pos.Y - textView.ScrollOffset.Y);
+
+                    contextMenu.PlacementTarget = textView;
+                    contextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.RelativePoint;
+                    contextMenu.HorizontalOffset = pos.X;
+                    contextMenu.VerticalOffset = pos.Y;
+                    contextMenu.IsOpen = true;
+                    SetStatusMessage("Quick actions available", false);
+                }
+                else
+                {
+                    SetStatusMessage("No quick actions available", false);
+                }
             }
-
-            if (hasItems)
+            catch (Exception ex)
             {
-                var textView = _editor.TextArea.TextView;
-                var pos = textView.GetVisualPosition(
-                    new TextViewPosition(_editor.TextArea.Caret.Line, _editor.TextArea.Caret.Column),
-                    ICSharpCode.AvalonEdit.Rendering.VisualYPosition.LineBottom);
-
-                pos = new System.Windows.Point(pos.X - textView.ScrollOffset.X, pos.Y - textView.ScrollOffset.Y);
-
-                contextMenu.PlacementTarget = textView;
-                contextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.RelativePoint;
-                contextMenu.HorizontalOffset = pos.X;
-                contextMenu.VerticalOffset = pos.Y;
-                contextMenu.IsOpen = true;
-                SetStatusMessage("Quick actions available", false);
-            }
-            else
-            {
-                SetStatusMessage("No quick actions available", false);
+                DoodleSharp.Diagnostics.Journal.Error("SEC.EDITOR.RENAME_FAIL", "Rename_Executed threw", ex);
             }
         }
 
         private async void PerformQuickAction(RefactoringProvider.QuickActionItem action)
         {
-            var project = GetActiveProject();
-            var filePath = GetActiveFilePath() ?? DefaultFileId;
-            if (_refactoringProvider == null) return;
+            try
+            {
+                var project = GetActiveProject();
+                var filePath = GetActiveFilePath() ?? DefaultFileId;
+                if (_refactoringProvider == null) return;
 
-            if (action.ActionId == "Rename")
-            {
-                if (action.Data.TryGetValue("Name", out var name))
+                if (action.ActionId == "Rename")
                 {
-                    PerformRename(name);
-                }
-                else
-                {
-                    var nameFromTitle = action.Title.Substring("Rename to '".Length);
-                    nameFromTitle = nameFromTitle.Substring(0, nameFromTitle.Length - 1);
-                    PerformRename(nameFromTitle);
-                }
-            }
-            else if (action.ActionId == "FixFormatting")
-            {
-                try 
-                {
-                    var newText = DoodleSharp.Editor.CodeFormatter.Format(_editor.Text);
-                    _editor.Document.Replace(0, _editor.Document.TextLength, newText);
-                }
-                catch (Exception ex)
-                {
-                    SetStatusMessage($"Formatting failed: {ex.Message}", true);
-                }
-            }
-            else if (action.ActionId == "GenerateMethod")
-            {
-                if (action.Data.TryGetValue("MethodName", out var methodName))
-                {
-                    action.Data.TryGetValue("IsStatic", out var isStaticStr);
-                    bool isStatic = isStaticStr == "True";
-                    action.Data.TryGetValue("Parameters", out var parameters);
-                    parameters ??= "";
-                    action.Data.TryGetValue("ReturnType", out var returnType);
-                    returnType = string.IsNullOrEmpty(returnType) ? "void" : returnType;
-                    
-                    var staticModifier = isStatic ? "static " : "";
-                    var stub = $"\r\n\r\n        private {staticModifier}{returnType} {methodName}({parameters})\r\n        {{\r\n            throw new NotImplementedException();\r\n        }}";
-                    
-                    var text = _editor.Text;
-                    var braceCount = 0;
-                    var insertPosition = -1;
-                    
-                    for (int i = text.Length - 1; i >= 0; i--)
+                    if (action.Data.TryGetValue("Name", out var name))
                     {
-                        if (text[i] == '}')
+                        PerformRename(name);
+                    }
+                    else
+                    {
+                        var nameFromTitle = action.Title.Substring("Rename to '".Length);
+                        nameFromTitle = nameFromTitle.Substring(0, nameFromTitle.Length - 1);
+                        PerformRename(nameFromTitle);
+                    }
+                }
+                else if (action.ActionId == "FixFormatting")
+                {
+                    try 
+                    {
+                        var newText = DoodleSharp.Editor.CodeFormatter.Format(_editor.Text);
+                        _editor.Document.Replace(0, _editor.Document.TextLength, newText);
+                    }
+                    catch (Exception ex)
+                    {
+                        SetStatusMessage($"Formatting failed: {ex.Message}", true);
+                    }
+                }
+                else if (action.ActionId == "GenerateMethod")
+                {
+                    if (action.Data.TryGetValue("MethodName", out var methodName))
+                    {
+                        action.Data.TryGetValue("IsStatic", out var isStaticStr);
+                        bool isStatic = isStaticStr == "True";
+                        action.Data.TryGetValue("Parameters", out var parameters);
+                        parameters ??= "";
+                        action.Data.TryGetValue("ReturnType", out var returnType);
+                        returnType = string.IsNullOrEmpty(returnType) ? "void" : returnType;
+                    
+                        var staticModifier = isStatic ? "static " : "";
+                        var stub = $"\r\n\r\n        private {staticModifier}{returnType} {methodName}({parameters})\r\n        {{\r\n            throw new NotImplementedException();\r\n        }}";
+                    
+                        var text = _editor.Text;
+                        var braceCount = 0;
+                        var insertPosition = -1;
+                    
+                        for (int i = text.Length - 1; i >= 0; i--)
                         {
-                            braceCount++;
-                            if (braceCount == 2)
+                            if (text[i] == '}')
                             {
-                                insertPosition = i;
-                                break;
+                                braceCount++;
+                                if (braceCount == 2)
+                                {
+                                    insertPosition = i;
+                                    break;
+                                }
                             }
                         }
-                    }
                     
-                    if (insertPosition > 0)
-                    {
-                        _editor.Document.Insert(insertPosition, stub);
-                    }
-                    else if (text.LastIndexOf('}') > 0)
-                    {
-                        _editor.Document.Insert(text.LastIndexOf('}'), stub);
+                        if (insertPosition > 0)
+                        {
+                            _editor.Document.Insert(insertPosition, stub);
+                        }
+                        else if (text.LastIndexOf('}') > 0)
+                        {
+                            _editor.Document.Insert(text.LastIndexOf('}'), stub);
+                        }
                     }
                 }
+                else if (CustomQuickActionHandler != null)
+                {
+                    await CustomQuickActionHandler(action);
+                }
             }
-            else if (CustomQuickActionHandler != null)
+            catch (Exception ex)
             {
-                await CustomQuickActionHandler(action);
+                DoodleSharp.Diagnostics.Journal.Error("SEC.EDITOR.PERFORMQUICKACTION_FAIL", "PerformQuickAction threw", ex);
             }
         }
 
@@ -1294,124 +1350,131 @@ namespace DoodleSharp.Editor
         // Completion implementation
         private async void ShowCompletionWindow(bool autoTrigger)
         {
-            if (_completionWindow != null) return;
-
-            var offset = _editor.CaretOffset;
-            var code = _editor.Text;
-            var activeFile = GetActiveFilePath() ?? DefaultFileId;
-            var workspace = GetWorkspace();
-
             try
             {
-                List<ICompletionData> completions = new List<ICompletionData>();
-                bool isAfterNew = false;
-                string prefix = "";
-                string? expectedType = null;
+                if (_completionWindow != null) return;
 
-                // Semantic completion driven by the cached workspace: it carries the right
-                // references, and `activeFile` is the workspace's file-id key, so the correct
-                // syntax tree and semantic model are used. Gives fuzzy matching, the doc sidecar,
-                // and noise filtering.
-                if (workspace != null)
+                var offset = _editor.CaretOffset;
+                var code = _editor.Text;
+                var activeFile = GetActiveFilePath() ?? DefaultFileId;
+                var workspace = GetWorkspace();
+
+                try
                 {
-                    var service = new RoslynCompletionService(workspace);
-                    // The fourth value is the expected type at the caret. The list stays
-                    // alphabetical — nothing ranks by it (note 115) — but it decides which row opens
-                    // highlighted, so `VXYZ p = new ` puts Tab on VXYZ (note 122).
-                    (completions, isAfterNew, prefix, expectedType) = await service.GetCompletionsAsync(code, offset, workspace, activeFile);
-                }
+                    List<ICompletionData> completions = new List<ICompletionData>();
+                    bool isAfterNew = false;
+                    string prefix = "";
+                    string? expectedType = null;
 
-                if (completions.Count > 0)
-                {
-                    // Fuzzy-filter, then order alphabetically.
-                    var sorted = SortCompletions(completions, prefix);
-
-                    // Snippets are added FIRST. AvalonEdit renders items in insertion order and
-                    // never consults Priority for it, and the initial selection is item 0 — so
-                    // appending them (as this did) left `for`/`foreach` below every symbol in the
-                    // list, where a snippet can be neither discovered nor taken with one key. Same
-                    // rule the main window follows (note 101); this is the parallel implementation
-                    // of the same editor (note 43), so it has to follow it too.
-                    var isMemberAccess = offset > prefix.Length && code.Length > offset - prefix.Length - 1 && code[offset - prefix.Length - 1] == '.';
-                    var snippets = new List<ICompletionData>();
-                    if (!isAfterNew && !isMemberAccess)
+                    // Semantic completion driven by the cached workspace: it carries the right
+                    // references, and `activeFile` is the workspace's file-id key, so the correct
+                    // syntax tree and semantic model are used. Gives fuzzy matching, the doc sidecar,
+                    // and noise filtering.
+                    if (workspace != null)
                     {
-                        foreach (var (trigger, description) in CodeSnippets.GetAll())
+                        var service = new RoslynCompletionService(workspace);
+                        // The fourth value is the expected type at the caret. The list stays
+                        // alphabetical — nothing ranks by it (note 115) — but it decides which row opens
+                        // highlighted, so `VXYZ p = new ` puts Tab on VXYZ (note 122).
+                        (completions, isAfterNew, prefix, expectedType) = await service.GetCompletionsAsync(code, offset, workspace, activeFile);
+                    }
+
+                    if (completions.Count > 0)
+                    {
+                        // Fuzzy-filter, then order alphabetically.
+                        var sorted = SortCompletions(completions, prefix);
+
+                        // Snippets are added FIRST. AvalonEdit renders items in insertion order and
+                        // never consults Priority for it, and the initial selection is item 0 — so
+                        // appending them (as this did) left `for`/`foreach` below every symbol in the
+                        // list, where a snippet can be neither discovered nor taken with one key. Same
+                        // rule the main window follows (note 101); this is the parallel implementation
+                        // of the same editor (note 43), so it has to follow it too.
+                        var isMemberAccess = offset > prefix.Length && code.Length > offset - prefix.Length - 1 && code[offset - prefix.Length - 1] == '.';
+                        var snippets = new List<ICompletionData>();
+                        if (!isAfterNew && !isMemberAccess)
                         {
-                            if (!string.IsNullOrEmpty(prefix) &&
-                                !trigger.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                                continue;
+                            foreach (var (trigger, description) in CodeSnippets.GetAll())
+                            {
+                                if (!string.IsNullOrEmpty(prefix) &&
+                                    !trigger.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                                    continue;
 
-                            snippets.Add(new SnippetCompletionData(trigger, description, CodeSnippets.GetSnippet(trigger)!));
+                                snippets.Add(new SnippetCompletionData(trigger, description, CodeSnippets.GetSnippet(trigger)!));
+                            }
                         }
-                    }
 
-                    // Nothing survived the filter, so there is nothing to offer. The guard above
-                    // counts the UNFILTERED symbols, which is why this is a second check and not a
-                    // tightening of the first: Roslyn nearly always returns something, so building
-                    // the window on that count alone put an empty popup on screen — covering the
-                    // code, swallowing Enter and Tab, and telling the user nothing. The main window
-                    // has always tested the filtered count instead (note 43 — same editor, two
-                    // implementations, and this is the half that was wrong).
-                    if (sorted.Count == 0 && snippets.Count == 0)
-                        return;
+                        // Nothing survived the filter, so there is nothing to offer. The guard above
+                        // counts the UNFILTERED symbols, which is why this is a second check and not a
+                        // tightening of the first: Roslyn nearly always returns something, so building
+                        // the window on that count alone put an empty popup on screen — covering the
+                        // code, swallowing Enter and Tab, and telling the user nothing. The main window
+                        // has always tested the filtered count instead (note 43 — same editor, two
+                        // implementations, and this is the half that was wrong).
+                        if (sorted.Count == 0 && snippets.Count == 0)
+                            return;
 
-                    _completionWindow = new CompletionWindow(_editor.TextArea);
-                    _completionWindow.StartOffset = offset - prefix.Length;
-                    var data = _completionWindow.CompletionList.CompletionData;
+                        _completionWindow = new CompletionWindow(_editor.TextArea);
+                        _completionWindow.StartOffset = offset - prefix.Length;
+                        var data = _completionWindow.CompletionList.CompletionData;
 
-                    foreach (var snippet in snippets)
-                    {
-                        data.Add(snippet);
-                    }
+                        foreach (var snippet in snippets)
+                        {
+                            data.Add(snippet);
+                        }
 
-                    foreach (var item in sorted)
-                    {
-                        data.Add(item);
-                    }
+                        foreach (var item in sorted)
+                        {
+                            data.Add(item);
+                        }
 
-                    // Select the row the caret is actually about rather than whatever the alphabet
-                    // put first. Same rule as the main window (note 43 — this is the parallel
-                    // implementation of the same editor).
-                    var preselect = CompletionPreselect.IndexOf(data, expectedType);
-                    var preselectedItem = preselect >= 0 ? data[preselect] : null;
-                    if (preselectedItem != null)
-                        _completionWindow.CompletionList.SelectedItem = preselectedItem;
-
-                    StyleCompletionWindow(_completionWindow);
-                    _docSidecar?.TrackCompletionWindow(_completionWindow);
-
-                    // Show the selected item's documentation beside the list as the user navigates.
-                    _completionWindow.CompletionList.ListBox.SelectionChanged += (s, e) =>
-                    {
-                        if (_completionWindow?.CompletionList.SelectedItem is CompletionData sel && sel.Symbol != null)
-                            _docSidecar?.ShowForItem(sel);
-                        else
-                            _docSidecar?.Hide();
-                    };
-                    _completionWindow.Loaded += (s, e) =>
-                    {
-                        _docSidecar?.UpdatePosition();
-                        // Selecting a row does not scroll to it; a preselected type hundreds of rows
-                        // down would otherwise be highlighted off-screen.
+                        // Select the row the caret is actually about rather than whatever the alphabet
+                        // put first. Same rule as the main window (note 43 — this is the parallel
+                        // implementation of the same editor).
+                        var preselect = CompletionPreselect.IndexOf(data, expectedType);
+                        var preselectedItem = preselect >= 0 ? data[preselect] : null;
                         if (preselectedItem != null)
-                            _completionWindow?.CompletionList.ListBox?.ScrollIntoView(preselectedItem);
-                        if (_completionWindow?.CompletionList.SelectedItem is CompletionData init && init.Symbol != null)
-                            _docSidecar?.ShowForItem(init);
-                    };
+                            _completionWindow.CompletionList.SelectedItem = preselectedItem;
 
-                    _completionWindow.Show();
+                        StyleCompletionWindow(_completionWindow);
+                        _docSidecar?.TrackCompletionWindow(_completionWindow);
 
-                    _completionWindow.Closed += (s, e) =>
-                    {
-                        _completionWindow = null;
-                        _docSidecar?.Close();
-                    };
+                        // Show the selected item's documentation beside the list as the user navigates.
+                        _completionWindow.CompletionList.ListBox.SelectionChanged += (s, e) =>
+                        {
+                            if (_completionWindow?.CompletionList.SelectedItem is CompletionData sel && sel.Symbol != null)
+                                _docSidecar?.ShowForItem(sel);
+                            else
+                                _docSidecar?.Hide();
+                        };
+                        _completionWindow.Loaded += (s, e) =>
+                        {
+                            _docSidecar?.UpdatePosition();
+                            // Selecting a row does not scroll to it; a preselected type hundreds of rows
+                            // down would otherwise be highlighted off-screen.
+                            if (preselectedItem != null)
+                                _completionWindow?.CompletionList.ListBox?.ScrollIntoView(preselectedItem);
+                            if (_completionWindow?.CompletionList.SelectedItem is CompletionData init && init.Symbol != null)
+                                _docSidecar?.ShowForItem(init);
+                        };
+
+                        _completionWindow.Show();
+
+                        _completionWindow.Closed += (s, e) =>
+                        {
+                            _completionWindow = null;
+                            _docSidecar?.Close();
+                        };
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"ShowCompletionWindow error: {ex.Message}");
                 }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"ShowCompletionWindow error: {ex.Message}");
+                DoodleSharp.Diagnostics.Journal.Error("SEC.EDITOR.SHOWCOMPLETIONWINDOW_FAIL", "ShowCompletionWindow threw", ex);
             }
         }
 

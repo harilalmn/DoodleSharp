@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace C2VGeometry;
@@ -170,16 +170,73 @@ public class VRectangle : VPolygon
         UpdatePoints();
     }
 
+    /// <summary>
+    /// The centre of the rectangle — the point <see cref="ComputeCorners"/> rotates its four
+    /// corners about, and therefore the only point on the shape that a transform can be applied to
+    /// directly.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Corner"/> is the <b>unrotated</b> bottom-left: an artefact of how the rectangle is
+    /// parameterised, not a point that stays put as the shape turns. Transforming it and rebuilding
+    /// the box from it is what broke <see cref="Rotate"/> and <see cref="Flip"/> below.
+    /// </remarks>
+    private VXYZ Centre => new VXYZ(_corner.X + _width / 2, _corner.Y + _height / 2);
+
+    /// <summary>Moves the rectangle so its centre lands on <paramref name="centre"/>.</summary>
+    private void SetCentre(VXYZ centre) =>
+        _corner = new VXYZ(centre.X - _width / 2, centre.Y - _height / 2);
+
+    /// <summary>
+    /// Rotates the rectangle about <paramref name="pivot"/>: the centre travels, and the rectangle
+    /// turns by the same amount about its new centre.
+    /// </summary>
+    /// <remarks>
+    /// This used to rotate <see cref="Corner"/> and rebuild the box from it, which is wrong for
+    /// every pivot including the rectangle's own centre — the rebuilt box grows from the rotated
+    /// corner in unrotated axes, so its centre ends up somewhere else entirely. A 10x4 rectangle at
+    /// (2, 1) turned a quarter turn about the origin landed with its corners at (6, -1)..(2, 9)
+    /// instead of (-1, 2)..(-5, 12): correctly oriented, and nowhere near where it belonged.
+    /// </remarks>
     public override void Rotate(VXYZ pivot, double angleDegrees)
     {
-        _corner = GeometryHelper.RotatePoint(_corner, pivot, angleDegrees);
+        SetCentre(GeometryHelper.RotatePoint(Centre, pivot, angleDegrees));
         _rotationAngle += angleDegrees;
         UpdatePoints();
     }
 
+    /// <summary>
+    /// Mirrors the rectangle across <paramref name="mirrorLine"/>.
+    /// </summary>
+    /// <remarks>
+    /// Two separate faults, both from transforming <see cref="Corner"/>. The rotation was left
+    /// alone, so a rectangle drawn at 30 degrees came back still at 30 rather than at its mirror
+    /// image; and even an unrotated one landed in the wrong place, because the mirrored corner is
+    /// the mirror of the bottom-left, and the box was then grown to the right and upward from it —
+    /// a rectangle spanning x from 2 to 12, mirrored about the Y axis, came back spanning -2 to 8
+    /// instead of -12 to -2.
+    ///
+    /// <para>
+    /// Reflecting across a line at angle t maps a direction a to 2t - a, so the orientation becomes
+    /// <c>2t - RotationAngle</c>. The height axis of the mirrored box points the opposite way from
+    /// the one that convention rebuilds, but a rectangle is symmetric about its centre, so the two
+    /// describe the same four corners.
+    /// </para>
+    /// </remarks>
     public override void Flip(VLine mirrorLine)
     {
-        _corner = GeometryHelper.FlipPoint(_corner, mirrorLine);
+        SetCentre(GeometryHelper.FlipPoint(Centre, mirrorLine));
+
+        double mirrorAngle = Math.Atan2(mirrorLine.End.Y - mirrorLine.Start.Y,
+                                        mirrorLine.End.X - mirrorLine.Start.X) * 180.0 / Math.PI;
+
+        // Folded into [0, 180) because a rectangle is symmetric about its centre, so t and t + 180
+        // describe the same four corners. Without it, mirroring an axis-aligned rectangle about an
+        // axis reports a rotation of 180 for a rectangle that is plainly still square to the page —
+        // right shape, alarming number.
+        double turned = (2 * mirrorAngle - _rotationAngle) % 180.0;
+        if (turned < 0) turned += 180.0;
+        _rotationAngle = turned;
+
         UpdatePoints();
     }
 

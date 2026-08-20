@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using C2VGeometry;
 using Xunit;
 
@@ -163,7 +163,9 @@ public class TextMaskTests
 
         var pdf = File.ReadAllText(Path.Combine(root, "Export", "PdfExporter.cs"));
         var pdfMask = pdf.IndexOf("if (text.Mask)", System.StringComparison.Ordinal);
-        var pdfText = pdf.IndexOf("gfx.DrawString(text.Content ?? \"\", font, brush, 0, 0);", System.StringComparison.Ordinal);
+        // The label is emitted a line at a time (PDF has no line break inside a run), so this
+        // anchors on the loop's DrawString rather than on a single whole-Content one.
+        var pdfText = pdf.IndexOf("gfx.DrawString(lines[i], font, brush, justifyOffset, baseline);", System.StringComparison.Ordinal);
         Assert.True(pdfMask > 0 && pdfText > 0, "both sites must exist in the PDF exporter");
         Assert.True(pdfMask < pdfText, "the PDF exporter must fill the mask before drawing the string");
     }

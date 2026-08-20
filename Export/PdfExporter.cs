@@ -470,25 +470,74 @@ public class PdfExporter
         gfx.DrawArc(pen, x, y, size, size, startAngle, sweepAngle);
     }
 
+    /// <summary>
+    /// A <see cref="VEllipse"/>: PDFsharp's own ellipse for a whole, unrotated one, and a sampled
+    /// path for anything else.
+    /// </summary>
+    /// <remarks>
+    /// <c>XGraphics.DrawEllipse</c> takes an axis-aligned box, so it can express neither a sweep
+    /// nor an orientation. Passing one anyway — which is what this did — exported a half ellipse as
+    /// a whole one and a turned ellipse flat, silently disagreeing with the canvas.
+    /// </remarks>
     private void DrawEllipse(XGraphics gfx, VEllipse ellipse, XPen pen, XBrush? brush)
     {
-        var x = ellipse.Center.X - ellipse.RadiusX;
-        var y = ellipse.Center.Y - ellipse.RadiusY;
+        var sweep = ellipse.EndAngle - ellipse.StartAngle;
+        var whole = Math.Abs(Math.Abs(sweep) - 360.0) < 1e-9 || Math.Abs(sweep) < 1e-9;
 
-        if (brush != null)
+        if (whole && ellipse.Rotation == 0)
         {
-            gfx.DrawEllipse(brush, x, y, ellipse.RadiusX * 2, ellipse.RadiusY * 2);
+            var x = ellipse.Center.X - ellipse.RadiusX;
+            var y = ellipse.Center.Y - ellipse.RadiusY;
+
+            if (brush != null)
+            {
+                gfx.DrawEllipse(brush, x, y, ellipse.RadiusX * 2, ellipse.RadiusY * 2);
+            }
+            gfx.DrawEllipse(pen, x, y, ellipse.RadiusX * 2, ellipse.RadiusY * 2);
+            return;
         }
-        gfx.DrawEllipse(pen, x, y, ellipse.RadiusX * 2, ellipse.RadiusY * 2);
+
+        const int segments = 72;
+        var effective = Math.Abs(sweep) < 1e-9 ? 360.0 : sweep;
+        var points = new XPoint[segments + 1];
+        for (int i = 0; i <= segments; i++)
+        {
+            var pt = ellipse.PointAtAngle(ellipse.StartAngle + effective * (i / (double)segments));
+            points[i] = new XPoint(pt.X, pt.Y);
+        }
+
+        if (whole)
+        {
+            if (brush != null) gfx.DrawPolygon(brush, points, XFillMode.Alternate);
+            gfx.DrawPolygon(pen, points);
+        }
+        else
+        {
+            gfx.DrawLines(pen, points);
+        }
     }
 
+    /// <summary>
+    /// A <see cref="VRectangle"/>, drawn from its four <see cref="VPolygon.Points"/>.
+    /// </summary>
+    /// <remarks>
+    /// Those points already carry the rectangle's <c>RotationAngle</c>. Rebuilding the box from
+    /// <c>Corner</c>, <c>Width</c> and <c>Height</c> instead — which is what this did — threw the
+    /// rotation away, so a rectangle drawn at an angle on the canvas exported square to the page.
+    /// </remarks>
     private void DrawRectangle(XGraphics gfx, VRectangle rect, XPen pen, XBrush? brush)
     {
-        if (brush != null)
+        if (Math.Abs(rect.RotationAngle) < 1e-9)
         {
-            gfx.DrawRectangle(brush, rect.Corner.X, rect.Corner.Y, rect.Width, rect.Height);
+            if (brush != null)
+            {
+                gfx.DrawRectangle(brush, rect.Corner.X, rect.Corner.Y, rect.Width, rect.Height);
+            }
+            gfx.DrawRectangle(pen, rect.Corner.X, rect.Corner.Y, rect.Width, rect.Height);
+            return;
         }
-        gfx.DrawRectangle(pen, rect.Corner.X, rect.Corner.Y, rect.Width, rect.Height);
+
+        DrawPolygon(gfx, rect, pen, brush);
     }
 
     private void DrawPolygon(XGraphics gfx, VPolygon polygon, XPen pen, XBrush? brush)
@@ -588,9 +637,20 @@ public class PdfExporter
         var fontStyle = text.FontWeight == VFontWeight.Bold ? XFontStyleEx.Bold : XFontStyleEx.Regular;
         var font = new XFont(fontFamily, Math.Max(text.Height, 0.1), fontStyle);
 
-        // Measure text for anchor offset
-        var measuredWidth = gfx.MeasureString(text.Content ?? "", font).Width;
-        var measuredHeight = text.Height;
+        // Laid out line by line, because PDF has no concept of a line break inside a run:
+        // DrawString would have put a two-line label onto a single line, so a multi-line
+        // label -- exactly what VText.Justify exists to encourage -- exported as one
+        // long unreadable row.
+        var lines = SplitLines(text.Content);
+        var lineWidths = new double[lines.Length];
+        var measuredWidth = 0.0;
+        for (int i = 0; i < lines.Length; i++)
+        {
+            lineWidths[i] = gfx.MeasureString(lines[i], font).Width;
+            if (lineWidths[i] > measuredWidth) measuredWidth = lineWidths[i];
+        }
+
+        var measuredHeight = text.Height * lines.Length;
         var (anchorOffsetX, anchorOffsetY) = text.GetAnchorOffset(measuredWidth, measuredHeight);
 
         // Text drawing with Y-flip correction. Angle rotates around Location (CCW in world Y-up).
@@ -616,8 +676,35 @@ public class PdfExporter
         }
 
         gfx.ScaleTransform(1, -1); // Un-flip for text
-        gfx.DrawString(text.Content ?? "", font, brush, 0, 0);
+
+        // Y grows downward inside the un-flipped frame, and the block's origin is its bottom-left,
+        // so the first line sits (n-1) line heights above the baseline. Justify shifts each line
+        // inside the block's own width -- the same rule the canvas applies via TextAlignment.
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var slack = measuredWidth - lineWidths[i];
+            var justifyOffset = text.Justify switch
+            {
+                VTextJustify.Center => slack / 2,
+                VTextJustify.Right => slack,
+                _ => 0.0
+            };
+            var baseline = -(lines.Length - 1 - i) * text.Height;
+            gfx.DrawString(lines[i], font, brush, justifyOffset, baseline);
+        }
+
         gfx.Restore();
+    }
+
+    /// <summary>
+    /// Splits a label into its lines, tolerating any of the three line-ending conventions and
+    /// never returning an empty array — a label with no content is still one (empty) line, which
+    /// keeps the height arithmetic above from collapsing to zero.
+    /// </summary>
+    private static string[] SplitLines(string? content)
+    {
+        if (string.IsNullOrEmpty(content)) return new[] { string.Empty };
+        return content.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
     }
 
     private void DrawRadialDimension(XGraphics gfx, VRadialDimension dim)

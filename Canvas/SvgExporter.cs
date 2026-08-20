@@ -114,9 +114,12 @@ public static class SvgExporter
             
             VCircle c => $"<circle cx=\"{F(c.Center.X)}\" cy=\"{F(c.Center.Y)}\" r=\"{F(c.Radius)}\" fill=\"{c.FillColor}\" stroke=\"{c.Color}\" stroke-width=\"{F(c.LineWeight)}\"{StrokeExtras(c)} />",
             
-            VEllipse e => $"<ellipse cx=\"{F(e.Center.X)}\" cy=\"{F(e.Center.Y)}\" rx=\"{F(e.RadiusX)}\" ry=\"{F(e.RadiusY)}\" fill=\"{e.FillColor}\" stroke=\"{e.Color}\" stroke-width=\"{F(e.LineWeight)}\"{StrokeExtras(e)} />",
-            
-            VRectangle r => $"<rect x=\"{F(r.Corner.X)}\" y=\"{F(r.Corner.Y)}\" width=\"{F(r.Width)}\" height=\"{F(r.Height)}\" fill=\"{r.FillColor}\" stroke=\"{r.Color}\" stroke-width=\"{F(r.LineWeight)}\"{StrokeExtras(r)} />",
+            VEllipse e => EllipseToSvg(e),
+
+            // Before VRectangle, because a rectangle IS a polygon and its Points already carry its
+            // rotation. This arm used to rebuild an axis-aligned box from Corner/Width/Height, so a
+            // rotated rectangle exported flat while the canvas drew it turned.
+            VRectangle r => PolygonToSvg(r),
             
             VArc a => ArcToSvg(a),
             VPolygon pg => PolygonToSvg(pg),
@@ -167,13 +170,75 @@ public static class SvgExporter
         return sb.ToString();
     }
 
+    /// <summary>
+    /// A label as SVG: one <c>&lt;tspan&gt;</c> per line, positioned against the label's own layout
+    /// box so that <see cref="VText.Anchor"/>, <see cref="VText.Justify"/> and
+    /// <see cref="VText.Angle"/> all survive the export.
+    /// </summary>
+    /// <remarks>
+    /// The whole of <c>Content</c> used to go into a single <c>&lt;text&gt;</c> element at
+    /// <c>Location</c>. SVG treats a newline inside a text element as ordinary whitespace, so a
+    /// multi-line label collapsed onto one line; and because the element was placed at
+    /// <c>Location</c> directly, <c>Anchor</c> was ignored, so every label that was not
+    /// <c>BottomLeft</c> exported somewhere the canvas had not drawn it.
+    /// </remarks>
     private static string TextToSvg(VText t)
     {
-        var inner = $"<text x=\"{F(t.Location.X)}\" y=\"{F(t.Location.Y)}\" fill=\"{t.Color}\" font-size=\"{F(t.Height)}\" transform=\"scale(1,-1)\">{EscapeXml(t.Content)}</text>";
+        var lines = SplitLines(t.Content);
+        var (blockWidth, blockHeight) = t.MeasureBlock();
+        var (anchorX, anchorY) = t.GetAnchorOffset(blockWidth, blockHeight);
+
+        var originX = t.Location.X + anchorX;
+        var originY = t.Location.Y + anchorY;
+
+        // SVG's own text-anchor does the per-line alignment, which is the same job Justify names.
+        var textAnchor = t.Justify switch
+        {
+            VTextJustify.Center => "middle",
+            VTextJustify.Right => "end",
+            _ => "start"
+        };
+        var alignX = t.Justify switch
+        {
+            VTextJustify.Center => originX + blockWidth / 2,
+            VTextJustify.Right => originX + blockWidth,
+            _ => originX
+        };
+
+        var sb = new StringBuilder();
+        for (int i = 0; i < lines.Length; i++)
+        {
+            // The block's origin is its bottom-left, so the first line's baseline sits (n-1) line
+            // heights above it.
+            //
+            // The element carries its own scale(1,-1) so the glyphs read the right way up, and the
+            // baseline is ALSO negated. Both, not one or the other: SVG transforms compose rather
+            // than replace, so the element's flip and the enclosing group's flip multiply out to
+            // the identity, leaving x/y to be read in document space — where y grows downward.
+            // Emitting the un-negated world Y (as this did) therefore placed every label at the
+            // reflection of its position through the X axis, while its own mask rect — which has no
+            // counter-flip and so was always negated — stayed correctly under where the label
+            // should have been. A masked label, the default, exported as a plate with no text on it
+            // and the text somewhere else entirely.
+            var baseline = -(originY + (lines.Length - 1 - i) * t.Height);
+            sb.Append($"<text x=\"{F(alignX)}\" y=\"{F(baseline)}\" fill=\"{t.Color}\" font-size=\"{F(t.Height)}\" text-anchor=\"{textAnchor}\" transform=\"scale(1,-1)\">{EscapeXml(lines[i])}</text>");
+        }
+
+        var inner = sb.ToString();
         if (t.Mask) inner = MaskToSvg(t) + inner;
         if (t.Angle == 0) return inner;
         // World Angle is CCW (Y-up); parent group's scale(1,-1) flips Y, so we negate to keep CCW visually.
         return $"<g transform=\"rotate({F(-t.Angle)}, {F(t.Location.X)}, {F(t.Location.Y)})\">{inner}</g>";
+    }
+
+    /// <summary>
+    /// Splits a label into its lines, tolerating any of the three line-ending conventions. Never
+    /// empty: a label with no content is still one (empty) line.
+    /// </summary>
+    private static string[] SplitLines(string? content)
+    {
+        if (string.IsNullOrEmpty(content)) return new[] { string.Empty };
+        return content.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
     }
 
     /// <summary>
@@ -186,26 +251,75 @@ public static class SvgExporter
     /// close fit, not an exact one. It is positioned against the text's <b>drawn</b> box, which
     /// means it ignores <c>Anchor</c> exactly as the exported text element does, so the two stay
     /// glued together whatever the anchor. The rect is written in the document's own flipped-Y
-    /// space (the enclosing group applies <c>scale(1,-1)</c>), which is why its Y is negated here
-    /// while the text element carries its own <c>scale(1,-1)</c> instead.
+    /// space (the enclosing group applies <c>scale(1,-1)</c>), which is why its Y is negated here.
+    /// The text element negates too — its own <c>scale(1,-1)</c> is what keeps the glyphs upright,
+    /// not a substitute for the negation, because SVG transforms compose.
     /// </remarks>
     private static string MaskToSvg(VText t)
     {
-        var width = t.Width > 0 ? t.Width : t.Height * (t.Content?.Length ?? 0) * 0.6;
+        var (width, blockHeight) = t.MeasureBlock();
         var pad = t.MaskOffset * t.Height;
+        var (anchorX, anchorY) = t.GetAnchorOffset(width, blockHeight);
 
         // A null MaskColor means "the canvas background". There is no canvas here, so it resolves
         // against the colour the host publishes (VText.CanvasBackgroundColor) — otherwise a default
         // masked label would export with no plate at all and the SVG would not match the screen.
         var fill = string.IsNullOrEmpty(t.MaskColor) ? VText.CanvasBackgroundColor : t.MaskColor;
 
-        var minX = t.Location.X - pad;
-        var minY = t.Location.Y - pad;
+        var minX = t.Location.X + anchorX - pad;
+        var minY = t.Location.Y + anchorY - pad;
         var w = width + 2 * pad;
-        var h = t.Height + 2 * pad;
+        var h = blockHeight + 2 * pad;
 
         // y is negated (and the top edge used) because the parent group flips Y.
         return $"<rect x=\"{F(minX)}\" y=\"{F(-(minY + h))}\" width=\"{F(w)}\" height=\"{F(h)}\" fill=\"{fill}\" stroke=\"none\" />";
+    }
+
+    /// <summary>
+    /// A <see cref="VEllipse"/> as SVG: the native <c>&lt;ellipse&gt;</c> element for a whole one,
+    /// and a sampled path for a partial sweep, which SVG has no element for.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="VEllipse.Rotation"/> becomes an SVG <c>rotate</c> about the centre. It is negated
+    /// because the enclosing group applies <c>scale(1,-1)</c>, the same reason
+    /// <see cref="TextToSvg"/> negates <c>VText.Angle</c>.
+    ///
+    /// <para>
+    /// This used to be a bare <c>&lt;ellipse&gt;</c> on the centre and radii, so a half ellipse
+    /// exported as a whole one and a turned ellipse exported flat — a silent disagreement with what
+    /// the canvas had drawn.
+    /// </para>
+    /// </remarks>
+    private static string EllipseToSvg(VEllipse e)
+    {
+        var sweep = e.EndAngle - e.StartAngle;
+        var whole = Math.Abs(Math.Abs(sweep) - 360.0) < 1e-9 || Math.Abs(sweep) < 1e-9;
+
+        string inner;
+        if (whole)
+        {
+            inner = $"<ellipse cx=\"{F(e.Center.X)}\" cy=\"{F(e.Center.Y)}\" rx=\"{F(e.RadiusX)}\" ry=\"{F(e.RadiusY)}\" fill=\"{e.FillColor}\" stroke=\"{e.Color}\" stroke-width=\"{F(e.LineWeight)}\"{StrokeExtras(e)} />";
+        }
+        else
+        {
+            const int segments = 72;
+            var d = new StringBuilder("M ");
+            for (int i = 0; i <= segments; i++)
+            {
+                // Sampled in the ellipse's own frame; the rotate transform below turns the result,
+                // so the path and the whole-ellipse element are oriented the same way.
+                var angle = e.StartAngle + sweep * (i / (double)segments);
+                var rad = angle * Math.PI / 180.0;
+                var x = e.Center.X + e.RadiusX * Math.Cos(rad);
+                var y = e.Center.Y + e.RadiusY * Math.Sin(rad);
+                if (i > 0) d.Append(" L ");
+                d.Append(F(x)).Append(' ').Append(F(y));
+            }
+            inner = $"<path d=\"{d}\" fill=\"none\" stroke=\"{e.Color}\" stroke-width=\"{F(e.LineWeight)}\"{StrokeExtras(e)} />";
+        }
+
+        if (e.Rotation == 0) return inner;
+        return $"<g transform=\"rotate({F(-e.Rotation)}, {F(e.Center.X)}, {F(e.Center.Y)})\">{inner}</g>";
     }
 
     private static string ArcToSvg(VArc arc)
@@ -289,7 +403,9 @@ public static class SvgExporter
         sb.Append(DimensionArrowheadSvg(ds, de, dim.ArrowSize, dim.Color, dim.LineWeight));
         sb.Append(DimensionArrowheadSvg(de, ds, dim.ArrowSize, dim.Color, dim.LineWeight));
         // Text
-        sb.Append($"<text x=\"{F(tp.X)}\" y=\"{F(tp.Y)}\" fill=\"{dim.Color}\" font-size=\"{F(dim.TextHeight)}\" text-anchor=\"middle\" transform=\"scale(1,-1)\">{dim.DisplayText}</text>");
+        // Negated for the same reason the label text above is: the element's scale(1,-1) cancels
+        // the group's, so these coordinates are read in document space, where Y grows downward.
+        sb.Append($"<text x=\"{F(tp.X)}\" y=\"{F(-tp.Y)}\" fill=\"{dim.Color}\" font-size=\"{F(dim.TextHeight)}\" text-anchor=\"middle\" transform=\"scale(1,-1)\">{dim.DisplayText}</text>");
         return $"<g>{sb}</g>";
     }
 

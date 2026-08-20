@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 All notable user-facing changes to DoodleSharp are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses calendar
@@ -8,6 +8,71 @@ Each GitHub release also carries auto-generated notes built from the commit log 
 tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
+
+A correctness pass over geometry, rendering, export and file handling. Most of what follows was
+silently wrong rather than visibly broken — a shape in the wrong place, a file that exported
+cleanly with the wrong contents — which is why it survived so long. Nothing here changes an API
+you were already using correctly; the one addition is `VEllipse.Rotation`.
+
+### Added
+
+- **`VEllipse.Rotation`** turns an ellipse. Degrees counter-clockwise, `0` by default, and
+  `StartAngle`/`EndAngle` are measured in the ellipse's own frame, so a half ellipse turns with
+  the ellipse rather than being re-cut. `VEllipse.PointAtAngle(degrees)` gives the world point at
+  an angle in that frame. Rotation is honoured by the canvas, all three backends, every exporter,
+  and both the line/ellipse intersection and the ray caster.
+
+### Fixed
+
+- **Rotating an ellipse did nothing.** `Rotate` moved the centre and stopped, so rotating about
+  the ellipse's own centre was a no-op and rotating about any other point made the ellipse orbit
+  without turning.
+- **Rotating a rectangle put it in the wrong place.** `VRectangle.Rotate` transformed the
+  unrotated corner rather than the centre, so a 10x4 rectangle at (2, 1) turned a quarter turn
+  about the origin landed nowhere near where it belonged — correctly oriented, wrongly positioned.
+  Mirroring had the same fault, and additionally kept the old rotation, so a mirrored rectangle
+  came back tilted the same way instead of its mirror image.
+- **Rotating an arc could turn it into a different arc.** `VArc.Rotate` normalised its two ends
+  independently, so any arc whose sweep crosses zero flipped to its complement — a 20-degree arc
+  became a 340-degree one, and even `Rotate(pivot, 0)` did it.
+- **Mirroring an arc ignored the mirror line.** It always mirrored about the horizontal, whichever
+  line you passed.
+- **Zoom-to-fit framed the wrong thing, and sometimes nothing.** It carried its own bounds
+  arithmetic that had drifted from the shapes': regions, hatches and grids contributed nothing at
+  all (so a drawing built from regions zoomed to empty canvas), a text label counted as a point,
+  an arc was framed as its whole circle, and a rotated rectangle as its unrotated box.
+- **A multi-line label reported the wrong size** — one line tall, and as wide as all its lines end
+  to end. That box is what selection clicks, zoom-to-fit and culling use, so clicking a label
+  missed it and scrolling could make it vanish.
+- **A partial ellipse drew as a whole one** on the default canvas backend, while the other two
+  backends drew the sweep correctly — so the same drawing looked different depending on the
+  renderer.
+- **`MoveAnimation` did nothing to text, ellipses or dimensions.** Four renderers ignored the
+  animation offsets, so those shapes sat still while everything animated alongside them moved.
+- **A construction line inside a group was not drawn at all**, and a rotate animation on any
+  grouped shape had no effect. The group path used a stale copy of the renderer's type switch.
+- **Rotated rectangles exported unrotated** to SVG, PDF and DXF, and **partial ellipses exported
+  as whole ellipses** to all three.
+- **Text in an exported SVG was placed at the mirror of its position** through the X axis, so a
+  masked label — the default — exported as a background plate with the text somewhere else.
+  Exported SVG text also ignored `Anchor`.
+- **Multi-line labels exported unreadable** to SVG (newlines collapsed to spaces) and PDF (all
+  lines on top of one another). Both now lay the lines out and honour `Anchor` and `Justify`.
+- **Clicking a label missed it** unless it was bottom-left anchored, unrotated and single-line —
+  selection used its own approximation of the text box rather than the label's real one.
+- **An interrupted save could truncate your source file.** Every write to a file you own — project
+  sources (auto-save included), `.vizproj`, settings, recent projects — is now atomic: it either
+  completes or leaves the previous file untouched. An unreadable `appsettings.json` is also copied
+  aside as `appsettings.bad` instead of being silently overwritten with defaults on the next save.
+- **An error in an editor feature could close the app**, taking unsaved work with it. Nineteen
+  handlers — Go To Definition, Find All References, Rename, Quick Actions, signature help, the
+  completion popup, Auto-Run, global parameters and the Run button itself — could crash the process
+  instead of reporting a failure. They now report to the status bar and the journal.
+- **`VEllipse.GetLength()` disagreed with itself**, returning a different number depending on
+  whether it was called through `VEllipse` or through `ICurve`.
+- Splitting an arc or an ellipse whose sweep crossed zero produced two pieces that together covered
+  far more than the original; `ParameterAtPoint` reported the middle of a clockwise arc as its end;
+  and the ray caster missed clockwise arcs entirely.
 
 ## [2026.8.11] - 2026-08-20
 

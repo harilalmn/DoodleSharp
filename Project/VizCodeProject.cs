@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using DoodleSharp.Diagnostics;
 
 namespace DoodleSharp.Project;
@@ -134,7 +134,7 @@ public class VizCodeProject
         // Write it immediately so it exists on disk? 
         // Or keep purely in memory until save? 
         // CreateNew usually implies creating on disk.
-        File.WriteAllText(entryPointPath, entryPointFile.Content);
+        DurableFile.WriteAllText(entryPointPath, entryPointFile.Content);
         entryPointFile.HasUnsavedChanges = false;
         
         project.Files.Add(entryPointFile);
@@ -154,7 +154,9 @@ public class VizCodeProject
 
         try
         {
-            File.WriteAllText(file.FilePath, file.Content);
+            // Atomic: auto-save rewrites the user's source on a timer, and a half-written .cs
+            // file is lost work that nothing can reconstruct. See DurableFile.
+            DurableFile.WriteAllText(file.FilePath, file.Content);
             file.HasUnsavedChanges = false;
             Journal.Info("PROJ.SAVE.FILE", "File written", Journal.DescribeFile(file.FilePath, file.Content));
         }

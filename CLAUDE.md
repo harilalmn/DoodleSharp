@@ -258,6 +258,14 @@ number, and gets **both** a body in `docs/NOTES.md` and a line here.
 124. The completion filter **anchors the first typed character to a word start**; an empty filtered list opens no window. Open-time only — an already-open list is AvalonEdit's own looser filter.
 125. `VText.Justify` is the ragged edge **inside** the block, `Anchor` is where the block sits; `TextAlignment` needs `MaxTextWidth` or it is inert; exporters do not lay multi-line text out.
 126. A DXF group value is **a whole line**, so a multi-line `VText` is written as one TEXT entity per line — writing it as one value corrupted the file. `Justify` is deliberately not honoured there.
+127. A sweep is a **start plus a signed offset**, never two normalised angles; `GeometryHelper.SweepContains`/`SweepOffset` own the rule.
+128. `GetBounds` bounds what is **drawn** (arc sweep, ellipse sweep and rotation, multi-line text); `ZoomExtents` asks it instead of re-deriving.
+129. `VEllipse.Rotation` — `Rotate` had nothing to write to. Same absent-orientation bug in `VRectangle.Rotate`/`Flip`, which transformed `Corner` instead of the centre.
+130. An exporter must not draw a **different shape** from the canvas: rotated rectangles, ellipse sweeps, and SVG's composing (not replacing) transforms.
+131. **One** shape-type switch in the renderer (`DispatchShapeDraw`); `DrawPreviewShape` is a different job, not a copy.
+132. Note 7 is now enforced by a test — four `Draw*` methods ignored `OffsetX`/`OffsetY`, so `MoveAnimation` did nothing for them.
+133. `DurableFile` — every write to a file the **user** owns is atomic; auto-save rewrites their source on a timer.
+134. An `async void` that lets an exception escape **closes the app**; all of them are guarded and a Roslyn test keeps them that way.
 
 ## Keyboard Shortcuts (Key Bindings)
 
