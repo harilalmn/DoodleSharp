@@ -60,6 +60,17 @@ public class ProjectSettings
     public double? DefaultLineWeight { get; set; }
     public double? DefaultLineTypeScale { get; set; }
 
+    /// <summary>
+    /// Re-run the project's code on a timer instead of waiting for F5. Off unless the project says
+    /// otherwise, so a project opened without the key behaves exactly as before.
+    /// <para>
+    /// Per-project rather than per-application: whether a sketch is worth re-running twice a second
+    /// is a property of that sketch, and leaving it armed globally would recompile whatever project
+    /// happened to be open next.
+    /// </para>
+    /// </summary>
+    public bool? AutoRun { get; set; }
+
     // Dimension style defaults
     public double? DimOffset { get; set; }
     public double? DimArrowSize { get; set; }

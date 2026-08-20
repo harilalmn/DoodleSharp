@@ -595,14 +595,16 @@ public class RenderCanvas : FrameworkElement
     {
         var mouseScreenPos = e.GetPosition(this);
 
-        if (AllowUserMouse)
+        // The wheel is the one gesture interactive mode does NOT take by default. Suppressing it for
+        // any handler cost a script that merely watched clicks the only way to navigate a drawing
+        // larger than the viewport, and the floating nav panel is a poor substitute for a wheel.
+        // So the canvas stands aside only when user code has explicitly claimed the wheel.
+        if (AllowUserMouse && UserMouse.HasWheelHandler)
         {
             var world = ScreenToWorld(mouseScreenPos.X, mouseScreenPos.Y);
             UserMouse.RaiseWheel(BuildMouseInfo(
                 MouseEventKind.Wheel, e, mouseScreenPos, new VXYZ(world.X, world.Y), e.Delta));
 
-            // The wheel belongs to user code in interactive mode; the floating canvas controls are how
-            // the user zooms instead.
             e.Handled = true;
             return;
         }

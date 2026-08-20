@@ -69,6 +69,11 @@ public static class Mouse
     // modifiers or hit-testing. Writes happen in the setters, under the lock, and are rare.
     private static volatile bool _hasHandlers;
 
+    // Tracked separately from _hasHandlers because the wheel is the one gesture the canvas keeps for
+    // itself unless user code explicitly claims it: registering a click handler must not cost the user
+    // wheel zoom, which is the only way to navigate a drawing larger than the viewport.
+    private static volatile bool _hasWheelHandler;
+
     // volatile for the same reason as _hasHandlers: written from Dispatch and read from the frame
     // loop. Both are the UI thread today, so this is about not depending on that remaining true.
     private static volatile bool _sceneDirty;
@@ -93,6 +98,13 @@ public static class Mouse
     /// interactive mode. The host reads this on every mouse event, so it is a plain field read.
     /// </summary>
     public static bool HasHandlers => _hasHandlers;
+
+    /// <summary>
+    /// True while a wheel handler is registered. The canvas keeps its own wheel zoom in interactive
+    /// mode and only stands aside when this is true, so a sketch that handles clicks or moves does not
+    /// silently lose the ability to zoom.
+    /// </summary>
+    public static bool HasWheelHandler => _hasWheelHandler;
 
     /// <summary>Last known cursor X in world coordinates. Tracked even with no handlers registered.</summary>
     public static double X { get; private set; }
@@ -147,8 +159,13 @@ public static class Mouse
     public static void OnDrag(Action<MouseInfo>? handler) => Assign(ref _onDrag, handler);
 
     /// <summary>
-    /// Called when the wheel turns. Read <c>e.WheelNotches</c> for the amount. In interactive mode the
-    /// canvas does not zoom on the wheel, so it is yours to use.
+    /// Called when the wheel turns. Read <c>e.WheelNotches</c> for the amount.
+    /// <para>
+    /// Registering a wheel handler is what takes the wheel away from the canvas: with one attached the
+    /// canvas stops zooming on the wheel and the turn is yours alone. Interactive mode on its own does
+    /// <b>not</b> suppress wheel zoom — a sketch that only handles clicks or moves keeps it, since the
+    /// wheel is the main way to navigate a drawing larger than the viewport.
+    /// </para>
     /// <para>Pass null to detach. Replaces any previously registered wheel handler.</para>
     /// </summary>
     public static void OnWheel(Action<MouseInfo>? handler) => Assign(ref _onWheel, handler);
@@ -194,6 +211,7 @@ public static class Mouse
             _onEnter = null;
             _onLeave = null;
             _hasHandlers = false;
+            _hasWheelHandler = false;
 
             // Gesture state belongs to the handlers that are going away, so it is reset -- including
             // IsDown, since a stuck "a button is held" would read to the next run's code as a drag
@@ -218,6 +236,7 @@ public static class Mouse
             _hasHandlers = _onMove != null || _onDown != null || _onUp != null || _onClick != null
                 || _onDoubleClick != null || _onDrag != null || _onWheel != null
                 || _onEnter != null || _onLeave != null;
+            _hasWheelHandler = _onWheel != null;
             changed = had != _hasHandlers;
         }
 

@@ -130,6 +130,12 @@ public partial class MainWindow : Window
     private const int MinAutoSaveSeconds = 5;
     private const int MaxAutoSaveSeconds = 3600;
 
+    // Auto-Run (periodic re-execution of the project's code, per-project setting)
+    private DispatcherTimer? _autoRunTimer;
+    private bool _autoRunInFlight;           // a tick's run is still going - don't stack another
+    private string? _lastAutoRunSignature;   // source as of the last full compile; unchanged -> resident re-run
+    private const int AutoRunIntervalMs = 500;
+
     // Code Lens
     private Editor.CodeLensGenerator? _codeLensGenerator;
 
@@ -1298,6 +1304,11 @@ public partial class MainWindow : Window
         _autoSaveTimer = new DispatcherTimer();
         _autoSaveTimer.Tick += AutoSaveTimer_Tick;
         ApplyAutoSaveSettings();
+
+        // Auto-Run timer (periodic re-execution of the code; armed per project)
+        _autoRunTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(AutoRunIntervalMs) };
+        _autoRunTimer.Tick += AutoRunTimer_Tick;
+        ApplyAutoRunSetting();
 
         // Ctrl+MouseWheel to change font size
         CodeEditor.PreviewMouseWheel += CodeEditor_PreviewMouseWheel;
@@ -3393,6 +3404,137 @@ public partial class MainWindow : Window
         _autoSaveTimer.Start();
     }
 
+    /// <summary>
+    /// Brings the Auto-Run checkbox and its timer in line with the current project. Called after every
+    /// settings load, which is also every project open, so it needs no hook into the several places
+    /// <c>_currentProject</c> is assigned.
+    ///
+    /// <para>
+    /// The checkbox is written here rather than by the handler, so it is assigned only while
+    /// <see cref="_loadingSettings"/> is up and the handler is suppressed — otherwise loading a project
+    /// would write the loaded value straight back and save the project file for nothing.
+    /// </para>
+    /// </summary>
+    private void ApplyAutoRunSetting()
+    {
+        if (_autoRunTimer == null || AutoRunCheck == null) return;
+
+        var enabled = _currentProject?.ProjectFile.Settings.AutoRun == true;
+
+        // Auto-Run is a project setting, so with no project there is nothing to arm.
+        AutoRunCheck.IsEnabled = _currentProject != null;
+        if (AutoRunCheck.IsChecked != enabled)
+        {
+            var wasLoading = _loadingSettings;
+            _loadingSettings = true;
+            try { AutoRunCheck.IsChecked = enabled; }
+            finally { _loadingSettings = wasLoading; }
+        }
+
+        // Dropped because this runs on every settings load, i.e. every project open: the signature is
+        // process-global, so a project opened whose source happens to match the last one's would
+        // otherwise take the resident path against the PREVIOUS project's assembly. Realistic for two
+        // projects from the same template, and silent when it happens. The cost of clearing it is one
+        // full compile on the first tick, which is what a newly opened project needs anyway.
+        _lastAutoRunSignature = null;
+
+        _autoRunTimer.Stop();
+        if (enabled) _autoRunTimer.Start();
+    }
+
+    /// <summary>
+    /// A cheap stand-in for "has the code changed since the last compile" — every file's name and
+    /// content, concatenated. Auto-Run compares it to decide between a full Roslyn run and a resident
+    /// re-invoke, which is not merely a cost question: a full run blanks the canvas for the whole
+    /// compile (<c>CompileAndExecuteAsync</c> clears before it compiles), and at 500 ms intervals that
+    /// is most of the time, so re-compiling unchanged source would make the drawing flicker.
+    ///
+    /// <para>
+    /// Deliberately the text and not a timestamp or a dirty flag: an external edit, an undo back to
+    /// the original text, and a file added or removed all have to be caught, and only the text sees
+    /// all three. Projects here are a handful of small files, so the concatenation is cheap.
+    /// </para>
+    /// </summary>
+    private string CurrentSourceSignature()
+    {
+        if (_currentProject == null) return string.Empty;
+
+        var sb = new System.Text.StringBuilder();
+        foreach (var file in _currentProject.Files)
+        {
+            sb.Append(file.FileName).Append('\u0000').Append(file.Content).Append('\u0001');
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Persists the Auto-Run toggle onto the project and arms or disarms the timer. Guarded by
+    /// <see cref="SettingsUiBusy"/> like every other settings handler: the loader drives this control
+    /// too, and an unguarded handler would write the markup's or the loader's value back over the
+    /// user's (CLAUDE.md note 103).
+    /// </summary>
+    private void AutoRunCheck_Changed(object sender, RoutedEventArgs e)
+    {
+        if (SettingsUiBusy || _currentProject == null) return;
+
+        var enabled = AutoRunCheck.IsChecked == true;
+        _currentProject.ProjectFile.Settings.AutoRun = enabled ? true : null;
+        _currentProject.SaveProjectFile();
+
+        _autoRunTimer?.Stop();
+        if (enabled) _autoRunTimer?.Start();
+
+        SetStatus(enabled ? $"Auto-Run on - re-running every {AutoRunIntervalMs} ms" : "Auto-Run off", isError: false);
+        Journal.Info("MW.AUTORUN.TOGGLE", "Auto-Run toggled", $"enabled={enabled}");
+    }
+
+    /// <summary>
+    /// One Auto-Run tick: exactly what pressing Run does, minus the dialogs.
+    ///
+    /// <para>
+    /// A run can easily outlast the interval — a Roslyn compile is tens to hundreds of milliseconds —
+    /// so a tick that arrives while the last one is still going is dropped rather than queued. Without
+    /// that, a slow project would stack runs faster than it could finish them.
+    /// </para>
+    /// </summary>
+    private async void AutoRunTimer_Tick(object? sender, EventArgs e)
+    {
+        if (_autoRunInFlight) return;
+        if (_currentProject?.ProjectFile.Settings.AutoRun != true)
+        {
+            _autoRunTimer?.Stop();
+            return;
+        }
+
+        _autoRunInFlight = true;
+        try
+        {
+            // Flush the editor first: the signature below has to describe the text on screen, and
+            // both run paths would do this anyway.
+            SaveCurrentEditorContent();
+
+            var signature = CurrentSourceSignature();
+            if (signature != _lastAutoRunSignature || !ModuleCompiler.HasResidentAssembly)
+            {
+                _lastAutoRunSignature = signature;
+                await RunSilentlyAsync("Auto-Run");
+            }
+            else
+            {
+                await ReExecuteResidentSilentlyAsync("Auto-Run");
+            }
+        }
+        catch (Exception ex)
+        {
+            // A throw out of an async void tick would reach the dispatcher and take the app down.
+            Journal.Error("MW.AUTORUN.TICK_FAIL", "Auto-Run tick failed", ex);
+        }
+        finally
+        {
+            _autoRunInFlight = false;
+        }
+    }
+
     private void AutoSaveTimer_Tick(object? sender, EventArgs e)
     {
         if (!ApplicationSettings.Instance.AutoSaveEnabled)
@@ -3835,6 +3977,11 @@ public partial class MainWindow : Window
                     SelectFile(_currentProject.EntryPointFile);
                 }
 
+                // The other project-open path already does this. Without it the Settings tab — and
+                // the Auto-Run checkbox, which arms a timer — kept showing the *previous* project's
+                // values after switching projects through this dialog.
+                LoadSettingsToUI();
+
                 // Initialize cached compilation workspace for IntelliSense
                 InitializeCompletionWorkspace();
             }
@@ -4167,6 +4314,7 @@ public partial class MainWindow : Window
         finally { _loadingSettings = false; }
 
         ApplyAutoSaveSettings();
+        ApplyAutoRunSetting();
     }
 
     private void ColorBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -4614,6 +4762,9 @@ public partial class MainWindow : Window
         // Stop auto-save so it can't fire a prompt while the window is closing
         _autoSaveTimer?.Stop();
 
+        // Same for Auto-Run: a tick during teardown would compile and execute into a dying window.
+        _autoRunTimer?.Stop();
+
         // After the prompt, so a cancelled close does not persist a layout the user keeps editing.
         SaveLayout();
 
@@ -4837,7 +4988,12 @@ public partial class MainWindow : Window
     /// status updates. Used by the Global Parameters paths, which re-run the program in response to
     /// a value change rather than to a user pressing Run.
     /// </summary>
-    private async Task RunSilentlyAsync()
+    /// <param name="label">
+    /// Status/console tag naming the mechanism that asked for this run. It is a parameter rather
+    /// than a constant because three unrelated things re-run the code silently, and reporting an
+    /// Auto-Run tick as "Parameters:" names a panel the user may not even have open.
+    /// </param>
+    private async Task RunSilentlyAsync(string label)
     {
         if (_currentProject == null || _currentProject.Files.Count == 0)
             return;
@@ -4880,7 +5036,7 @@ public partial class MainWindow : Window
                         c.ZoomExtents(CanvasRenderer.Instance.GetShapes(c.OwningViewport!)));
                 }
 
-                SetStatus($"Parameters: {shapes.Count} shape{(shapes.Count != 1 ? "s" : "")}", isError: false);
+                SetStatus($"{label}: {shapes.Count} shape{(shapes.Count != 1 ? "s" : "")}", isError: false);
                 PopulateOutliner(shapes);
             }
             else
@@ -4889,7 +5045,7 @@ public partial class MainWindow : Window
                 var errorCount = result.Diagnostics?.Count(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error) ?? 0;
                 if (errorCount > 0)
                 {
-                    SetStatus($"Parameters: {errorCount} error{(errorCount != 1 ? "s" : "")}", isError: true);
+                    SetStatus($"{label}: {errorCount} error{(errorCount != 1 ? "s" : "")}", isError: true);
                 }
 
                 // Add error markers to editor silently
@@ -6291,7 +6447,26 @@ public partial class MainWindow : Window
     /// available — a parameter change does not touch the source, so the compiled IL is still valid
     /// and skipping Roslyn is what keeps a slider drag interactive.
     /// </summary>
-    private async Task ReExecuteForParametersAsync()
+    private Task ReExecuteForParametersAsync() => ReExecuteResidentSilentlyAsync("Parameters");
+
+    /// <summary>
+    /// Re-invokes <c>Main()</c> on the already-loaded assembly, falling back to a full run when there
+    /// is none. Shared by the Global Parameters tiers and by Auto-Run, which want the same thing for
+    /// different reasons: neither has touched the source, so Roslyn has nothing to do.
+    ///
+    /// <para>
+    /// The reason this is not merely an optimisation for Auto-Run is that
+    /// <c>CompileAndExecuteAsync</c> clears the canvas <b>before</b> it compiles — so a full run
+    /// leaves the drawing blank for the whole compile, which at one run every 500 ms is most of the
+    /// time. Here the clear and the re-execute are microseconds apart and nothing is visible.
+    /// </para>
+    ///
+    /// <para>
+    /// <paramref name="label"/> is the console/status tag, so the user can tell which mechanism is
+    /// re-running their code.
+    /// </para>
+    /// </summary>
+    private async Task ReExecuteResidentSilentlyAsync(string label)
     {
         if (_currentProject == null || _paramReExecuteInFlight) return;
 
@@ -6300,7 +6475,7 @@ public partial class MainWindow : Window
         {
             if (!ModuleCompiler.HasResidentAssembly)
             {
-                await RunSilentlyAsync();
+                await RunSilentlyAsync(label);
                 return;
             }
 
@@ -6311,12 +6486,12 @@ public partial class MainWindow : Window
                 var shapes = CanvasRenderer.Instance.GetShapes();
                 CanvasRenderer.Instance.RenderTo(ViewportHost);
                 PopulateOutliner(shapes);
-                SetStatus($"Parameters: {shapes.Count} shape{(shapes.Count != 1 ? "s" : "")}", isError: false);
+                SetStatus($"{label}: {shapes.Count} shape{(shapes.Count != 1 ? "s" : "")}", isError: false);
             }
             else if (!string.IsNullOrEmpty(result.Error))
             {
-                SetStatus("Parameter update failed", isError: true);
-                Console.ConsoleOutput.Instance.WriteError("Parameters", 0, result.Error!);
+                SetStatus($"{label} update failed", isError: true);
+                Console.ConsoleOutput.Instance.WriteError(label, 0, result.Error!);
             }
         }
         finally
@@ -6348,7 +6523,7 @@ public partial class MainWindow : Window
         {
             // The source changed, so the resident IL is stale — force a real recompile.
             ModuleCompiler.InvalidateResident();
-            await RunSilentlyAsync();
+            await RunSilentlyAsync("Parameters");
             _globalParametersPanel?.RefreshValues();
         }
         else
@@ -6463,9 +6638,14 @@ public partial class MainWindow : Window
         // of it.
 
         // The status-bar hint describes gestures that no longer do what it says once user code owns
-        // the mouse — scroll in particular is handed over wholesale.
+        // the mouse. Scroll is the one that is NOT handed over wholesale — the canvas keeps zooming
+        // until a wheel handler is registered — so it has to be reported separately, or the hint is
+        // wrong in the common case of a sketch that only watches clicks. Read at the end of every run
+        // path, which is where the handler set has settled.
+        var wheelIsUserCode = DoodleSharp.Animation.Mouse.HasWheelHandler;
         CanvasHintText.Text = interactive
-            ? "Mouse: your code | Middle-click: Pan"
+            ? (wheelIsUserCode ? "Mouse: your code | Middle-click: Pan"
+                               : "Mouse: your code | Scroll: Zoom | Middle-click: Pan")
             : "Scroll: Zoom | Middle-click: Pan";
 
         // Selection is suppressed in interactive mode, so the properties panel has nothing to show and
