@@ -4036,6 +4036,7 @@ DoodleSharp includes a full-featured code editor with VSCode-like intellisense p
 - **Fuzzy matching**: Type partial names (e.g., "clr" matches "Color", "VPt" matches "VPoint") with intelligent scoring that rewards prefix matches, camelCase alignment, and consecutive character runs
 - **Context-aware**: Completions adapt to context -- object initializer properties, generic type arguments, attribute types, and more
 - **Alphabetical**: Once filtered, the list is in plain A–Z order, so a member you already know the name of is where the alphabet says it is. Snippets stay above it
+- **Expected-type preselect**: The row that opens *highlighted* is the type the context expects — `VXYZ p1 = new ` opens on `VXYZ`, scrolled into view, so `Tab` inserts it. The order stays alphabetical; only the selection is context-aware
 - **Documentation sidecar**: A documentation panel appears beside the completion list showing the signature, summary, parameters, and return type of the selected item
 - **Incremental compilation**: Uses a cached Roslyn workspace that incrementally updates only changed files, keeping completions responsive even in large projects
 - **Signature Help**: Parameter info displayed when typing method calls
@@ -4069,6 +4070,16 @@ scope, then *name length*, which is an order with no rule you can see: the membe
 out End, Flip, Move, Clone, Scale, Start, Divide, Offset, so finding a member you already knew meant
 reading every row.
 
+**The row that opens selected is the one the context expects.** Order and selection are different
+questions. The list is A–Z, but leaving the highlight on whatever the alphabet put first meant
+`VXYZ p1 = new ` opened on `AccessViolationException` with `VXYZ` hundreds of rows below the fold,
+and the one useful key press inserted the wrong type. The expected type is now the selected row, and
+the list is scrolled to it, so `Tab` completes it. That type is read from the declaration on the left
+of the `=` (an explicit type — `var` by definition expects nothing), from the variable an assignment
+targets, or from the parameter at the argument position the caret is in. Where the context expects
+nothing, or the list does not contain the expected type, the first row stays selected as it always
+did.
+
 **Snippets sort above symbols and start out selected**, so typing `for` and pressing `Tab` writes the
 whole loop — the snippet is one keystroke away rather than something you have to scroll to. Because
 of that, **a commit character never expands a snippet**: typing `for(` closes the list and leaves the
@@ -4076,6 +4087,8 @@ of that, **a commit character never expands a snippet**: typing `for(` closes th
 writing. **`Tab` is the only key that expands a snippet** — `Enter` ends the line as usual, so
 `x = null` followed by `Enter` stays exactly what you typed rather than becoming a null-check block.
 Once a snippet is in, `Tab` walks its placeholders (`Shift+Tab` goes back, `Esc` leaves the session).
+A snippet at the top of the list keeps the selection even when the context expects a type — the two
+cases do not overlap in practice, since no snippets are offered after `new`.
 
 A keyword whose spelling a snippet already occupies is not listed twice — `for` offers the snippet,
 not the snippet *and* the bare keyword.

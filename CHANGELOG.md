@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 All notable user-facing changes to DoodleSharp are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses calendar
@@ -8,6 +8,13 @@ Each GitHub release also carries auto-generated notes built from the commit log 
 tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
+
+### Fixed
+- **IntelliSense now highlights the type you are declaring.** Typing `VXYZ p = new ` opened the
+  completion list on `AccessViolationException`, with `VXYZ` hundreds of rows further down, so the
+  obvious key press inserted the wrong type. The list is still alphabetical — the row that starts
+  selected is now the type the declaration asks for, so **Tab completes it straight away**. Where
+  there is no such type to infer, nothing changes, and a matching snippet still keeps the top row.
 
 ## [2026.8.9] - 2026-08-20
 
