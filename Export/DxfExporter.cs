@@ -400,7 +400,7 @@ public class DxfExporter
     /// height. DXF has no line-box concept to copy, so this approximates what the canvas does
     /// rather than claiming to match it exactly.
     /// </summary>
-    private const double DxfLineSpacing = 1.2;
+    private const double DxfLineSpacing = VText.LineSpacing;
 
     /// <summary>
     /// Writes a <see cref="VText"/> as <b>one TEXT entity per line</b>.

@@ -303,7 +303,9 @@ public class VArc : Shape, ICurve
     /// True when the arc's sweep passes through <paramref name="angle"/>.
     /// </summary>
     /// <remarks>
-    /// Delegates to <see cref="SweepReaches"/>. It used to normalise all three angles into
+    /// Kept as a name because the projection path reads better for it, but it is no longer a
+    /// separate rule: it forwards to <see cref="SweepReaches"/>, and through that to
+    /// <see cref="GeometryHelper.SweepContains"/>. It used to normalise all three angles into
     /// [0, 360) and compare them, which cannot distinguish a 20-degree arc written as 350 to 370
     /// from the 340-degree arc that 350 to 10 describes, and got the direction of every clockwise
     /// arc backwards — an arc from 90 to 0 was reported as *not* containing 45.

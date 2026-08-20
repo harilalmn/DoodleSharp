@@ -650,7 +650,9 @@ public class PdfExporter
             if (lineWidths[i] > measuredWidth) measuredWidth = lineWidths[i];
         }
 
-        var measuredHeight = text.Height * lines.Length;
+        // Matches VText.MeasureBlock exactly -- only the GAPS are scaled -- so the plate, the
+        // anchor offset and the box GetBounds reserves all describe the same rectangle.
+        var measuredHeight = text.Height * (1 + (lines.Length - 1) * VText.LineSpacing);
         var (anchorOffsetX, anchorOffsetY) = text.GetAnchorOffset(measuredWidth, measuredHeight);
 
         // Text drawing with Y-flip correction. Angle rotates around Location (CCW in world Y-up).
@@ -665,7 +667,10 @@ public class PdfExporter
         // them. Padding is a fraction of the text height, matching the canvas.
         if (text.Mask)
         {
-            var pad = text.MaskOffset * measuredHeight;
+            // A fraction of the TEXT height, not of the block's: MaskOffset's contract is "as a
+            // fraction of the text height", and the canvas reads it that way, so measuring it
+            // against the whole block gave a three-line label three times the intended padding.
+            var pad = text.MaskOffset * text.Height;
             // Null means "the canvas background"; with no canvas here, that is whatever the host
             // last published (see VText.CanvasBackgroundColor).
             var maskColour = string.IsNullOrEmpty(text.MaskColor)
@@ -689,7 +694,7 @@ public class PdfExporter
                 VTextJustify.Right => slack,
                 _ => 0.0
             };
-            var baseline = -(lines.Length - 1 - i) * text.Height;
+            var baseline = -(lines.Length - 1 - i) * text.Height * VText.LineSpacing;
             gfx.DrawString(lines[i], font, brush, justifyOffset, baseline);
         }
 

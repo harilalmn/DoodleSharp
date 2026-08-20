@@ -69,13 +69,24 @@ public class VEllipse : Shape, ICurve
 
 
 
+    /// <summary>
+    /// The centre plus a handle at the end of each axis.
+    /// </summary>
+    /// <remarks>
+    /// The handles are placed through <see cref="PointAtAngle"/> so they sit on the curve however
+    /// the ellipse is turned. Written in world axes -- which is what this did -- a rotated
+    /// ellipse's handles floated off the shape entirely.
+    /// </remarks>
     public override List<ControlPoint> GetControlPoints()
     {
+        var xAxis = PointAtAngle(0);
+        var yAxis = PointAtAngle(90);
+
         return new List<ControlPoint>
         {
             new ControlPoint(ControlPointType.Move, Center.X, Center.Y, "Center"),
-            new ControlPoint(ControlPointType.Radius, Center.X + RadiusX, Center.Y, "RadiusX"),
-            new ControlPoint(ControlPointType.Radius, Center.X, Center.Y + RadiusY, "RadiusY")
+            new ControlPoint(ControlPointType.Radius, xAxis.X, xAxis.Y, "RadiusX"),
+            new ControlPoint(ControlPointType.Radius, yAxis.X, yAxis.Y, "RadiusY")
         };
     }
 
@@ -87,11 +98,14 @@ public class VEllipse : Shape, ICurve
                 var delta = new VXYZ(newPosition.X - Center.X, newPosition.Y - Center.Y, 0);
                 Move(delta);
                 break;
+            // Measured as the distance from the centre rather than along a world axis, so dragging
+            // a handle on a rotated ellipse resizes the axis the handle belongs to instead of
+            // reading its world-X or world-Y displacement.
             case 1:
-                RadiusX = Math.Abs(newPosition.X - Center.X);
+                RadiusX = Center.DistanceTo(newPosition);
                 break;
             case 2:
-                RadiusY = Math.Abs(newPosition.Y - Center.Y);
+                RadiusY = Center.DistanceTo(newPosition);
                 break;
         }
     }
@@ -535,21 +549,24 @@ public class VEllipse : Shape, ICurve
     /// <summary>
     /// Returns the normalized parameter (0 to 1) for the closest point on the ellipse to the given point.
     /// </summary>
+    /// <summary>
+    /// Returns the normalized parameter (0 to 1) for the closest point on the ellipse to the given
+    /// point.
+    /// </summary>
+    /// <remarks>
+    /// Measured with <see cref="GeometryHelper.SweepOffset"/>, in the ellipse's own frame. It used
+    /// to fold the offset into [0, 360) and divide by the sweep, which is the same mistake
+    /// <see cref="VArc.ParameterAtPoint"/> was corrected away from and which was simply not carried
+    /// across at the time: on an ellipse swept from 90 to 0, the point at 45 degrees reported 0
+    /// rather than 0.5. It also read the angle in world axes, so a rotated ellipse answered for a
+    /// point that was not the one asked about.
+    /// </remarks>
     public double ParameterAtPoint(VXYZ point)
     {
-        double angle = Math.Atan2((point.Y - Center.Y) / RadiusY, (point.X - Center.X) / RadiusX);
-        double angleDeg = angle * 180.0 / Math.PI;
-
-        if (angleDeg < 0) angleDeg += 360;
-
         double sweep = EndAngle - StartAngle;
         if (Math.Abs(sweep) < 1e-10) return 0;
 
-        double relativeAngle = angleDeg - StartAngle;
-        while (relativeAngle < 0) relativeAngle += 360;
-        while (relativeAngle > 360) relativeAngle -= 360;
-
-        return Math.Clamp(relativeAngle / sweep, 0, 1);
+        return Math.Clamp(GeometryHelper.SweepOffset(StartAngle, EndAngle, AngleOfPoint(point)) / sweep, 0, 1);
     }
 
     /// <summary>
@@ -590,8 +607,23 @@ public class VEllipse : Shape, ICurve
         if (RadiusX <= GeometryTolerance.Epsilon || RadiusY <= GeometryTolerance.Epsilon)
             return false;
 
-        double nx = (point.X - Center.X) / RadiusX;
-        double ny = (point.Y - Center.Y) / RadiusY;
+        // In the ellipse's OWN frame, because the implicit equation below divides by the radii and
+        // therefore only means anything along the ellipse's axes. Reading it in world axes made
+        // Contains the one member that did not follow Rotation: on a 100x20 ellipse turned a
+        // quarter turn, the point (0, 80) -- plainly inside it -- came back false, while GetBounds,
+        // DistanceTo, NormalAtPoint, the ray caster and every renderer all agreed it was inside.
+        double dx = point.X - Center.X;
+        double dy = point.Y - Center.Y;
+
+        if (Rotation != 0)
+        {
+            double r = -Rotation * Math.PI / 180.0;
+            double cos = Math.Cos(r), sin = Math.Sin(r);
+            (dx, dy) = (dx * cos - dy * sin, dx * sin + dy * cos);
+        }
+
+        double nx = dx / RadiusX;
+        double ny = dy / RadiusY;
         return nx * nx + ny * ny <= 1.0;
     }
 }
