@@ -9,6 +9,16 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+### Fixed
+- **The canvas came up blank while the status bar said the shapes had been drawn.** Every run
+  begins by resetting the viewport layout, which installs a fresh root viewport, and the canvas
+  cell went on holding the previous one until the docking host caught up — so the renderer looked
+  up "the shapes on this cell" with a viewport that had just left the tree, found none, and drew an
+  empty scene. The count in the status bar came from a different query that ignores viewports,
+  which is why it cheerfully reported `Success: 3 shapes drawn` over an empty canvas. A cell whose
+  viewport has been superseded now resolves onto the live one, the same rule shapes themselves
+  already followed.
+
 ## [2026.8.10] - 2026-08-20
 
 ### Fixed

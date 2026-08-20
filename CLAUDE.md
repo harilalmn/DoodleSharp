@@ -254,6 +254,7 @@ number, and gets **both** a body in `docs/NOTES.md` and a line here.
 120. **Auto-update is gone** — code runs on F5 / Run only.
 121. **Auto-Run** is a per-project 500 ms timer — opt-in, `.vizproj`-persisted, ticks dropped while one is in flight, and it recompiles only when the source changed (a full run blanks the canvas while Roslyn works). Not note 120 coming back.
 122. The completion list **opens on the expected type**; the order is still alphabetical (note 115 stands), a snippet at row 0 still wins, and the selected row must be scrolled into view.
+123. A cell's `OwningViewport` is routinely **detached** by the run's `Viewport.Reset()`; `GetShapes(Viewport)` must resolve it with `ResolveVisible()` or the canvas draws nothing.
 
 ## Keyboard Shortcuts (Key Bindings)
 

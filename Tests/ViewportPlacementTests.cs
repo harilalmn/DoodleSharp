@@ -37,6 +37,53 @@ public class ViewportPlacementTests : IDisposable
 
     private static VLine Line(double y) => new(new VXYZ(0, y), new VXYZ(10, y));
 
+    /// <summary>
+    /// The blank-canvas regression: a run begins with <c>Clear()</c>, which calls
+    /// <c>Viewport.Reset()</c> and swaps in a brand-new root object, but a <c>ViewportCell</c> goes
+    /// on holding the previous one in <c>OwningViewport</c> until the host's <c>Sync()</c> re-keys
+    /// it — and <c>Sync()</c> is queued at <c>DispatcherPriority.Render</c>, below the
+    /// Normal-priority await continuation that runs the render. So the render path asks for a leaf
+    /// that has just left the tree, and it must still be handed the scene: resolving it with
+    /// <c>FirstLeaf()</c> returned the dead node and every cell got an empty list, which is how the
+    /// canvas came up blank while the status bar reported "3 shapes drawn".
+    /// </summary>
+    [Fact]
+    public void ADetachedLeafStillSeesTheScene()
+    {
+        var staleLeaf = Viewport.Root;              // what a cell captured before the run
+
+        CanvasRenderer.Instance.Clear();            // the run's reset: installs a NEW root
+        Assert.NotSame(staleLeaf, Viewport.Root);
+        Assert.False(staleLeaf.IsAttached);
+
+        Line(0);
+        Line(1);
+        Line(2);
+
+        Assert.Equal(3, CanvasRenderer.Instance.GetShapes().Count);
+        Assert.Equal(3, CanvasRenderer.Instance.GetShapes(staleLeaf).Count);
+        Assert.Equal(3, CanvasRenderer.Instance.GetShapes(Viewport.Root).Count);
+    }
+
+    /// <summary>
+    /// The same thing once shapes have been placed on named cells, which takes the other branch of
+    /// <c>GetShapes(Viewport)</c> — the <c>_byViewport</c> dictionary, where a stale key misses just
+    /// as surely as the reference check does.
+    /// </summary>
+    [Fact]
+    public void ADetachedLeafStillSeesTheSceneWhenShapesArePlacedOnCells()
+    {
+        Viewport.Root.Columns = 2;
+        var line = Line(0);
+        line.Place(Viewport.Root[0][1]);
+
+        var staleLeaf = Viewport.Root[0][1];
+        Viewport.Reset();
+        Assert.False(staleLeaf.IsAttached);
+
+        Assert.Single(CanvasRenderer.Instance.GetShapes(staleLeaf));
+    }
+
     [Fact]
     public void BareConstructionLandsOnTheRoot()
     {

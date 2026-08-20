@@ -239,7 +239,19 @@ public class CanvasRenderer : ICanvasRenderer, C2VGeometry.IShapeRegistry
         if (leaf == null) throw new ArgumentNullException(nameof(leaf));
 
         var all = GetShapes();
-        var target = leaf.FirstLeaf();
+
+        // ResolveVisible, not FirstLeaf: the caller's viewport may already be DETACHED. Every run
+        // begins with Clear(), which calls Viewport.Reset() and installs a brand-new root object,
+        // while a ViewportCell still holds the previous one in OwningViewport until the host's
+        // Sync() re-keys it -- and Sync() is queued at DispatcherPriority.Render, which is BELOW
+        // the Normal-priority await continuation that runs the render. So the render path routinely
+        // asks for a leaf that has just left the tree. FirstLeaf() returns that dead node, which
+        // matches neither Viewport.Root.FirstLeaf() below nor any key in _byViewport, so every cell
+        // was handed Array.Empty and the canvas came up blank while the status bar -- which counts
+        // GetShapes() with no viewport -- happily reported the shapes as drawn. ResolveVisible maps
+        // a detached node onto the live tree, which is the same rule the shapes themselves follow
+        // a few lines below, and is identical to FirstLeaf() for any attached viewport.
+        var target = leaf.ResolveVisible();
 
         if (_viewportOf.Count == 0)
         {
