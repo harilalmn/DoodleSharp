@@ -628,7 +628,9 @@ public partial class MainWindow : Window
     /// </remarks>
     private void RefreshConsole()
     {
-        var entries = Console.ConsoleOutput.Instance.GetEntries();
+        // Not GetEntries(): that answers for the running program, which mid-run is a half-built
+        // list nobody should see on screen.
+        var entries = Console.ConsoleOutput.Instance.GetDisplayedEntries();
 
         int shared = 0;
         while (shared < _consoleEntries.Count && shared < entries.Count &&
@@ -1067,7 +1069,7 @@ public partial class MainWindow : Window
         {
             try
             {
-                File.WriteAllText(dialog.FileName, Console.ConsoleOutput.Instance.GetFormattedOutput());
+                File.WriteAllText(dialog.FileName, Console.ConsoleOutput.Instance.GetDisplayedOutput());
                 SetStatus($"Console exported: {Path.GetFileName(dialog.FileName)}", isError: false);
             }
             catch (Exception ex)

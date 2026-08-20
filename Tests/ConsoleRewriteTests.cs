@@ -110,12 +110,46 @@ public class ConsoleRewriteTests : IDisposable
         ConsoleOutput.Instance.Clear();
         ConsoleOutput.Instance.WriteLine("StartViz", 1, "halfway through");
 
-        // The console still shows the previous run in full: no blank frame, no partial run on screen.
+        // The PANEL still shows the previous run in full: no blank frame, no partial run on screen.
+        // (What the running program sees is a different question, and a different test.)
         Assert.Equal(new[] { "road1", "Warning: 1 unnamed shape(s) hidden (1 VLine)." },
-            _console.GetEntries().Select(e => e.Message).ToArray());
+            _console.GetDisplayedEntries().Select(e => e.Message).ToArray());
 
         _console.EndRewrite();
-        Assert.Equal(new[] { "halfway through" }, _console.GetEntries().Select(e => e.Message));
+        Assert.Equal(new[] { "halfway through" }, _console.GetDisplayedEntries().Select(e => e.Message));
+    }
+
+    /// <summary>
+    /// User code runs <em>inside</em> the rewrite — an Auto-Run tick on unedited source, and a Global
+    /// Parameters change, both re-invoke Main() on that path. So a program that logs and then reads
+    /// its own output back must get what it just wrote, not what the panel happens to be showing.
+    /// Answering with the visible list would have handed it the PREVIOUS run's lines: a silent wrong
+    /// answer, and a far worse defect than the flicker this all came from.
+    /// </summary>
+    [Fact]
+    public void TheRunningProgramReadsBackItsOwnOutputNotThePanels()
+    {
+        WriteTheUsualRun();
+
+        _console.BeginRewrite();
+        ConsoleOutput.Instance.Clear();
+        ConsoleOutput.Instance.WriteLine("StartViz", 3, "this run");
+
+        Assert.Equal(new[] { "this run" }, _console.GetEntries().Select(e => e.Message));
+        Assert.Contains("this run", _console.GetFormattedOutput());
+        Assert.DoesNotContain("road1", _console.GetFormattedOutput());
+
+        // The panel meanwhile still shows the finished previous run, which is what keeps half-built
+        // output off the screen.
+        Assert.Equal(new[] { "road1", "Warning: 1 unnamed shape(s) hidden (1 VLine)." },
+            _console.GetDisplayedEntries().Select(e => e.Message).ToArray());
+        Assert.Contains("road1", _console.GetDisplayedOutput());
+
+        _console.EndRewrite();
+
+        // Once the run is over the two agree again.
+        Assert.Equal(_console.GetEntries().Select(e => e.Message),
+                     _console.GetDisplayedEntries().Select(e => e.Message));
     }
 
     [Fact]

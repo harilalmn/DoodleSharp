@@ -259,26 +259,66 @@ public class ConsoleOutput : IConsoleOutput
         }
     }
 
+    /// <summary>
+    /// The console as the running program sees it, rendered as text. Reads the same list as
+    /// <see cref="GetEntries"/>, for the same reason.
+    /// </summary>
     public string GetFormattedOutput()
+    {
+        lock (_lock) return Format(_staging ?? _entries);
+    }
+
+    /// <summary>
+    /// What the panel is showing, rendered as text. This is what the console's Export button writes:
+    /// exporting has to produce the lines the user can see, not a run's half-built output.
+    /// </summary>
+    internal string GetDisplayedOutput()
+    {
+        lock (_lock) return Format(_entries);
+    }
+
+    private static string Format(List<ConsoleEntry> entries)
+    {
+        var sb = new StringBuilder();
+        foreach (var entry in entries)
+        {
+            var prefix = $"[{entry.ModuleName}:{entry.LineNumber}] ";
+            sb.Append(prefix);
+            sb.Append(entry.Message);
+            if (entry.IsNewLine)
+            {
+                sb.AppendLine();
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// A snapshot of the console as the <b>running program</b> sees it: everything written so far in
+    /// this run.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately reads the staging list when a rewrite is open, so that code which logs and then
+    /// reads its own output back gets what it just wrote. Returning the visible list here would have
+    /// handed it the PREVIOUS run's lines on any re-run that skipped compilation -- an Auto-Run tick
+    /// on unedited source, or a Global Parameters change -- which is a silent wrong answer rather
+    /// than a visible one. The panel is fed by <see cref="GetDisplayedEntries"/> instead; the two
+    /// differ only while a run is in flight.
+    /// </remarks>
+    public IReadOnlyList<ConsoleEntry> GetEntries()
     {
         lock (_lock)
         {
-            var sb = new StringBuilder();
-            foreach (var entry in _entries)
-            {
-                var prefix = $"[{entry.ModuleName}:{entry.LineNumber}] ";
-                sb.Append(prefix);
-                sb.Append(entry.Message);
-                if (entry.IsNewLine)
-                {
-                    sb.AppendLine();
-                }
-            }
-            return sb.ToString();
+            return (_staging ?? _entries).ToList();
         }
     }
 
-    public IReadOnlyList<ConsoleEntry> GetEntries()
+    /// <summary>
+    /// A snapshot of what the console panel is currently showing, which is not the same thing as
+    /// what the running program has written -- see <see cref="GetEntries"/>. For the host's redraw
+    /// only: half-built output must never reach the screen.
+    /// </summary>
+    internal IReadOnlyList<ConsoleEntry> GetDisplayedEntries()
     {
         lock (_lock)
         {

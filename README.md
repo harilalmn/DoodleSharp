@@ -85,7 +85,7 @@ long-running drawing is never started behind your back.
 
 **Auto-Run** is the opt-in exception to "runs only when you ask". Tick the **Auto-Run** checkbox
 beside the **Run** button and the project re-runs every 500 ms, exactly as if you kept pressing Run —
-each tick clears the canvas and the console and rebuilds the drawing from your code.
+each tick rebuilds the drawing from your code.
 
 - **Off unless you turn it on**, and **saved with the project**, as `AutoRun` in the `.vizproj`. A
   project you armed comes back armed the next time you open it, and every other project is
@@ -98,6 +98,11 @@ each tick clears the canvas and the console and rebuilds the drawing from your c
   would leave the canvas blank for most of each interval, because a full run clears it *before*
   Roslyn starts. **The consequence worth knowing: `static` state in your own code is reset when a
   tick recompiles — that is, after you edit — not on every tick**
+- **The console does not flicker.** A tick that re-invokes the already-compiled assembly collects its
+  output out of sight and swaps it into the panel at the end, and only if the text actually differs —
+  so a program you are not editing, printing the same lines every time, leaves the console completely
+  still, with your scroll position and selection intact. A tick that *does* recompile clears the
+  console first, like any other run
 - **Errors go to the status bar and the editor squiggles, never a dialog**, so a half-typed statement
   does not interrupt you; the canvas keeps showing the last drawing that compiled
 - **The status bar says `Auto-Run` on every tick** — `Auto-Run: 12 shapes` when the run succeeded,
