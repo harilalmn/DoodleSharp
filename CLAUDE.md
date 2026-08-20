@@ -357,7 +357,12 @@ When the user says "update all documentation", "update docs", or "/update-docs":
    - `docs/NOTES.md` - Add the body of any new implementation note here (next unused number),
      and add its one-line entry to the index in `CLAUDE.md` in the same pass
    - `README.md` - Update feature descriptions, examples, API tables, keyboard shortcuts
-   - `CHANGELOG.md` - Add a curated, user-facing section for the upcoming release (Keep a Changelog format: Added/Changed/Fixed). This is the human summary for people browsing the repo or following releases; the GitHub release body is auto-generated from the commit log separately.
+   - `CHANGELOG.md` - Add a curated, user-facing section for the upcoming release (Keep a Changelog format: Added/Changed/Fixed).
+     **Leave the entries under `## [Unreleased]` and do not stamp a version heading yourself** —
+     `scripts\release.ps1` turns that section into `## [<version>] - <date>` as step 5. Stamping it by
+     hand makes the script warn "[Unreleased] is empty - releasing with no curated notes", which is
+     harmless the first time and actively misleading the second: the obvious way to silence it is to
+     move the entries back under `[Unreleased]`, where the next release would stamp them as its own. This is the human summary for people browsing the repo or following releases; the GitHub release body is auto-generated from the commit log separately.
    - `DocGenerator.cs` - Update summaries and samples for new/changed members
 4. **Report summary** of all updates made
 
@@ -371,7 +376,7 @@ When the user says "/release", "cut a release", "ship a release", or "release":
    version. **Do not skip the agent** — it is the standing owner of the user-facing docs, and a release
    whose API documentation was not reviewed by it is not ready to cut.
 2. **No version to choose — versioning is calendar-based (`YEAR.MONTH.PATCH`).** The script stamps `YEAR`/`MONTH` from today's date and increments `PATCH` within the same month (resetting to 0 the first time you release in a new month or year). E.g. the second May 2026 release is `2026.5.1`; the first June release is `2026.6.0`.
-3. **Run `scripts\release.ps1`** (no `-Bump`) — it guards working-tree cleanliness, computes the calendar version, writes it into `Directory.Build.props` + `installer.iss` (the two version sources, kept in sync because Inno Setup doesn't read MSBuild props), commits as "Release v<new>", tags `v<new>`, and pushes main + tag to origin. Pass `-LocalBuild` to also build Release configs + installer locally for smoke-testing; CI publishes the canonical artifacts regardless.
+3. **Run `scripts\release.ps1`** (no `-Bump`) — it guards working-tree cleanliness, computes the calendar version, writes it into `Directory.Build.props` + `installer.iss` (the two version sources, kept in sync because Inno Setup doesn't read MSBuild props), **stamps `CHANGELOG.md`'s `[Unreleased]` section as the new version** (so `/update-docs` must leave it under that heading), commits as "Release v<new>", tags `v<new>`, and pushes main + tag to origin. Pass `-LocalBuild` to also build Release configs + installer locally for smoke-testing; CI publishes the canonical artifacts regardless.
 4. **Tag push triggers `.github/workflows/release.yml`** on `windows-latest`: it verifies `Directory.Build.props` matches the tag, builds `DoodleSharp.sln` in Release, runs the test suite, invokes Inno Setup (`ISCC.exe`, pre-installed on the runner) to produce `installer/output/DoodleSharp-<new>-Setup.exe`, then publishes the GitHub release with the installer attached. **Release notes are generated from `git log <prev-tag>..<tag>`** (commit subjects, excluding the `Release v*` bump commits) — *not* `--generate-notes`, which produces only a bare compare link here because the repo commits directly to `main` with no PRs. The curated human summary lives in `CHANGELOG.md` (updated during `/update-docs`). Watch progress at `https://github.com/harilalmn/DoodleSharp/actions/workflows/release.yml`.
 
 Never bump versions by hand — the script is the only thing that touches both `Directory.Build.props` and `installer.iss`. Never create a `v*` tag by hand either — the workflow's "verify props match tag" step fails fast if `Directory.Build.props` is out of sync with the tag, which is what catches hand-tagged releases.
