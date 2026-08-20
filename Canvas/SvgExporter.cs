@@ -220,7 +220,7 @@ public static class SvgExporter
             // counter-flip and so was always negated — stayed correctly under where the label
             // should have been. A masked label, the default, exported as a plate with no text on it
             // and the text somewhere else entirely.
-            var baseline = -(originY + (lines.Length - 1 - i) * t.Height);
+            var baseline = -(originY + (lines.Length - 1 - i) * t.Height * VText.LineSpacing);
             sb.Append($"<text x=\"{F(alignX)}\" y=\"{F(baseline)}\" fill=\"{t.Color}\" font-size=\"{F(t.Height)}\" text-anchor=\"{textAnchor}\" transform=\"scale(1,-1)\">{EscapeXml(lines[i])}</text>");
         }
 
@@ -248,9 +248,9 @@ public static class SvgExporter
     /// <remarks>
     /// SVG has no way to measure a string, so the width is the same estimate <c>VText.GetBounds</c>
     /// uses (0.6 em per character) rather than a real measurement — a mask exported to SVG is a
-    /// close fit, not an exact one. It is positioned against the text's <b>drawn</b> box, which
-    /// means it ignores <c>Anchor</c> exactly as the exported text element does, so the two stay
-    /// glued together whatever the anchor. The rect is written in the document's own flipped-Y
+    /// close fit, not an exact one. It is positioned against the text's <b>drawn</b> box, anchor
+    /// offset included, so the plate and the glyphs stay glued together whatever the anchor — both
+    /// now honour it, where previously neither did. The rect is written in the document's own flipped-Y
     /// space (the enclosing group applies <c>scale(1,-1)</c>), which is why its Y is negated here.
     /// The text element negates too — its own <c>scale(1,-1)</c> is what keeps the glyphs upright,
     /// not a substitute for the negation, because SVG transforms compose.

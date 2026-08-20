@@ -19,8 +19,9 @@ you were already using correctly; the one addition is `VEllipse.Rotation`.
 - **`VEllipse.Rotation`** turns an ellipse. Degrees counter-clockwise, `0` by default, and
   `StartAngle`/`EndAngle` are measured in the ellipse's own frame, so a half ellipse turns with
   the ellipse rather than being re-cut. `VEllipse.PointAtAngle(degrees)` gives the world point at
-  an angle in that frame. Rotation is honoured by the canvas, all three backends, every exporter,
-  and both the line/ellipse intersection and the ray caster.
+  an angle in that frame. Everything follows it: `Contains`, `DistanceTo`, `NormalAtPoint`,
+  `ParameterAtPoint`, `GetBounds`, the interactive radius handles, the canvas, all three backends,
+  every exporter, the line/ellipse intersection and the ray caster.
 
 ### Fixed
 
@@ -71,8 +72,12 @@ you were already using correctly; the one addition is `VEllipse.Rotation`.
 - **`VEllipse.GetLength()` disagreed with itself**, returning a different number depending on
   whether it was called through `VEllipse` or through `ICurve`.
 - Splitting an arc or an ellipse whose sweep crossed zero produced two pieces that together covered
-  far more than the original; `ParameterAtPoint` reported the middle of a clockwise arc as its end;
-  and the ray caster missed clockwise arcs entirely.
+  far more than the original; `ParameterAtPoint` reported the middle of a clockwise arc as its end
+  (and the middle of a clockwise *ellipse* sweep as its start); and the ray caster missed clockwise
+  arcs entirely.
+- **A multi-line label was a different height in every format.** The canvas, DXF, SVG and PDF each
+  stacked its lines by their own figure, so none of them matched the box the label reserves for
+  itself. They now share one line-spacing constant.
 
 ## [2026.8.11] - 2026-08-20
 

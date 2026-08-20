@@ -291,6 +291,23 @@ public class VText : Shape
     }
 
     /// <summary>
+    /// Baseline-to-baseline distance as a multiple of <see cref="Height"/>. A font's line box is
+    /// taller than its em size — the ascender, descender and leading all sit outside it — so
+    /// stacking lines at exactly <c>Height</c> apart measures a multi-line block noticeably shorter
+    /// than it renders, and the bounding box then clips its own first line. 1.2 is the usual figure
+    /// for the sans faces <see cref="VFont"/> offers; it is an estimate for the same reason the
+    /// character width is, since C2VGeometry has no font metrics of its own.
+    ///
+    /// <para>
+    /// <b>Internal, and shared with the exporters.</b> The DXF, SVG and PDF writers each stack the
+    /// lines of a label themselves, and they had drifted: DXF used 1.2 while SVG and PDF stacked at
+    /// exactly <c>Height</c>, so the same label came out a different height in each format and none
+    /// of them matched the box <see cref="GetBounds"/> reserves for it. One constant, four readers.
+    /// </para>
+    /// </summary>
+    internal const double LineSpacing = 1.2;
+
+    /// <summary>
     /// The estimated size of the whole text block: the width of its <b>widest line</b> by the
     /// height of all its lines together. Both are estimates — C2VGeometry cannot measure a font —
     /// but they are the estimates every geometry-side consumer shares, so the box is at least
@@ -306,16 +323,6 @@ public class VText : Shape
     /// lines were on screen. An explicit <see cref="Width"/> still wins, exactly as before, and
     /// single-line text measures identically to the way it always has.
     /// </remarks>
-    /// <summary>
-    /// Baseline-to-baseline distance as a multiple of <see cref="Height"/>. A font's line box is
-    /// taller than its em size — the ascender, descender and leading all sit outside it — so
-    /// stacking lines at exactly <c>Height</c> apart measures a multi-line block noticeably shorter
-    /// than it renders, and the bounding box then clips its own first line. 1.2 is the usual figure
-    /// for the sans faces <see cref="VFont"/> offers; it is an estimate for the same reason the
-    /// character width is, since C2VGeometry has no font metrics of its own.
-    /// </summary>
-    private const double LineSpacing = 1.2;
-
     internal (double width, double height) MeasureBlock()
     {
         int lineCount = 1;

@@ -119,7 +119,7 @@ each tick clears the canvas and the console and rebuilds the drawing from your c
 | **VRay** | A semi-infinite ray | `new VRay(origin, direction)` (the second argument is a **direction**) or `new VRay(ox, oy, tx, ty)` (origin **through** a point) |
 | **VCircle** | A circle | `new VCircle(center, radius)`, `new VCircle(x, y, radius)` or `new VCircle(p1, p2, p3)` (circumcircle) |
 | **VRectangle** | A rectangle (inherits from VPolygon) | `new VRectangle(corner, width, height)`, `new VRectangle(x, y, width, height)` or `new VRectangle(bottomLeft, topRight)` |
-| **VEllipse** | An ellipse or elliptical arc, optionally turned by `Rotation` | `new VEllipse(center, radiusX, radiusY)` or `new VEllipse(center, rx, ry, startAngle, endAngle)` |
+| **VEllipse** | An ellipse or elliptical arc, optionally turned by `Rotation` (a property, not a constructor argument) | `new VEllipse(center, radiusX, radiusY)`, `new VEllipse(center, rx, ry, startAngle, endAngle)`, or either with `{ Rotation = 30 }` |
 | **VArc** | A circular arc | `new VArc(center, radius, startAngle, endAngle)` or `new VArc(start, mid, end)` |
 | **VPolygon** | A closed polygon | `new VPolygon(p1, p2, p3, ...)` or `new VPolygon(listOfCurves)` |
 | **VPolyline** | Open connected segments | `new VPolyline(p1, p2, p3, ...)` |
@@ -313,7 +313,7 @@ Beyond the constructors above and the `ICurve` members every curve shares.
 |-------|---------|
 | **VLine** | `Start` / `End` (settable `VXYZ` — there is no `StartPoint`/`EndPoint` on a concrete `VLine`), `MidPoint`, `Direction` (unit vector) |
 | **VCircle** | `Center`, `Radius`, `Diameter` (get/set, `2 × Radius`; setting it resizes about the centre, `Center` does not move), `Area`, `Circumference`. Statics: `FromCenterDiameter(center, diameter)`, `FromCenterDiameter(cx, cy, diameter)`, `FromTwoPoints(p1, p2)` (the two points are the ends of a diameter) |
-| **VArc** | `Center`, `Radius`, `StartAngle`, `EndAngle`, `MidPoint`, `Evaluate(t)`. Nine statics: `FromStartCenterEnd`, `FromCenterStartEnd`, `FromStartCenterAngle`, `FromCenterStartAngle`, `FromStartCenterLength`, `FromCenterStartLength`, `FromStartEndRadius(start, end, radius, largeArc = false)`, `FromStartEndAngle`, and `Continue(previousCurve, arcLength)` — which starts tangent to the curve you pass |
+| **VArc** | `Center`, `Radius`, `StartAngle`, `EndAngle`, `MidPoint`, `Evaluate(t)`. `Rotate` shifts both ends together (the sweep survives), `Flip` mirrors about the line you pass and swaps the ends, and `GetBounds()` is the box of the arc, not of its circle. Nine statics: `FromStartCenterEnd`, `FromCenterStartEnd`, `FromStartCenterAngle`, `FromCenterStartAngle`, `FromStartCenterLength`, `FromCenterStartLength`, `FromStartEndRadius(start, end, radius, largeArc = false)`, `FromStartEndAngle`, and `Continue(previousCurve, arcLength)` — which starts tangent to the curve you pass |
 | **VEllipse** | `Center`, `RadiusX`, `RadiusY`, `StartAngle`, `EndAngle`, `Rotation`, `Area`, `Circumference`, `Evaluate(t)` (arc-length), `EvaluateByAngle(t)` (angle-linear — use it for spokes and sector edges), `PointAtAngle(deg)` |
 | **VRectangle** | `Corner` (bottom-left), `Width`, `Height`, `RotationAngle`. Setting any of them rebuilds the four points; everything on `VPolygon` is inherited |
 | **VPolygon** | `Points` (mutable), `Curves`, `Area`, `SignedArea`, `AddPoint(point)` / `AddPoint(x, y)`, `Slice(linePoint1, linePoint2)` → `List<VPolygon>` cut along the infinite line through the two points. Area-preserving (the pieces sum back to `Area`), so a concave polygon crossed more than twice returns three or more pieces; a line that misses or merely grazes returns one. See [Slicing a polygon](#slicing-a-polygon) |
@@ -323,7 +323,7 @@ Beyond the constructors above and the `ICurve` members every curve shares.
 | **VArrow** | `Start` / `End` (settable), `MidPoint`, `HeadLength` (default 15 world units — each wing's length from the tip), `HeadAngle` (default 30 — degrees off the shaft, so the head spans `2 × HeadAngle`, 60° by default), `DoubleEnded` (default false — a head at `Start` as well), `GetStartArrowhead()` / `GetEndArrowhead()` → the two wing tips as a `(VXYZ, VXYZ)` tuple, `GetArrowheadPoints(tip, from)` for an arbitrary tip, and the static `VArrow.ArrowheadWings(tip, from, headLength, headAngleDegrees)`. Not an `ICurve` |
 | **VRay** | `Origin`, `Direction`, `RenderExtent` (default 10000 — how far it is drawn, how its bounds are computed and how far `Intersect` reaches, since it is infinite), `GetPointAtDistance(d)`, `ContainsPoint(p)`, `ToFiniteLine()` → `VLine`, `ToXLine()` → `VXLine`. Statics: `AtAngle(origin, angleDegrees)`, `HorizontalRight(origin)`, `HorizontalLeft(origin)`, `VerticalUp(origin)`, `VerticalDown(origin)` — all methods taking the origin, not properties |
 | **VXLine** | `BasePoint`, `Direction`, `RenderExtent` (default 10000, applied each way from `BasePoint`; it bounds `Intersect` as well as the drawing), `GetPointAtParameter(t)` (unclamped — negative `t` goes backwards), `GetTwoPoints()` → `(VXYZ, VXYZ)` (handy for `VPolygon.Slice`), `ToFiniteLine()` → `VLine`. Statics: `Horizontal(y)`, `Vertical(x)` |
-| **VText** | `Content`, `Location`, `Height`, `Width`, `Font`, `FontWeight`, `Anchor`, `Angle`, `Mask`/`MaskColor`/`MaskOffset` (a solid background so a label reads over other geometry), `ToCharShape(i)`, `LiftChar(i)`, indexer `text[i]`, `LiftChars(start, count)`, `BlankChar(i)`, `GetAnchorOffset(w, h)` → the `(dx, dy)` the anchor applies. Static `GlyphOutlineProvider` is the font seam the host fills in |
+| **VText** | `Content`, `Location`, `Height`, `Width`, `Font`, `FontWeight`, `Anchor`, `Justify`, `Angle`, `Mask`/`MaskColor`/`MaskOffset` (a solid background so a label reads over other geometry), `ToCharShape(i)`, `LiftChar(i)`, indexer `text[i]`, `LiftChars(start, count)`, `BlankChar(i)`, `GetAnchorOffset(w, h)` → the `(dx, dy)` the anchor applies. Static `GlyphOutlineProvider` is the font seam the host fills in |
 | **VGroup** | `Shapes`, `Count`, indexer `group[i]`, `Add`, `AddRange`, `Remove(shape)`, `RemoveAt(i)`, `Clear()`, `ContainsShape`, `Flatten()`, `ForEach`, `Where`, `GetShapesOfType<T>()`, `GetCenter()`, `SetOpacity`, `ApplyStyle` / `ApplyColor` / `ApplyFillColor` / `ApplyLineWeight` |
 | **VGrid** | `Points`, `Count`, indexers `grid[i]` and `grid[col, row]`, `GetRow` / `GetColumn`, `GetCenter()`, `Location`, `XCount` / `YCount`, `XSpacing` / `YSpacing`, `Centered`, `ApplyStyle()` |
 | **VSpatialGrid** | `Cells`, `Count`, indexers `grid[i]` and `grid[col, row]`, `GetRow` / `GetColumn`, `GetCenter()`, `GetCellAt(point)`, `GetClosestCell(point)`, `FindPath(start, end)`, `Location`, `XCount` / `YCount`, `CellSize`, `ApplyStyle()` |
@@ -806,11 +806,19 @@ Justification shuffles lines **inside** the block and does nothing else: it neve
 the block, so `GetBounds()` — and with it zoom-extents, culling and selection — is identical whatever
 you set. All three canvas backends honour it, because text always goes through the vector layer.
 
-> **Multi-line text does not survive export.** The PDF and SVG exporters write `Content` as a single
-> run and DXF writes a single `TEXT` entity, so a `\n` never becomes a second line out there and
-> justification has nothing to line up. This is a pre-existing limitation of those exporters with
-> multi-line text rather than anything `Justify` introduced — if the drawing has to leave the canvas,
-> build the label from one `VText` per line.
+That box **is** multi-line aware, though: `GetBounds()` measures the **widest** line by the stacked
+height of all of them (gaps counted at `1.2 × Height`), so a three-line label picks, culls and zooms
+as the block it looks like. It is still an estimate — with `Width` left at `0` a character is taken
+as `0.6 × Height` wide, since the geometry library cannot measure a font — so set `Width` when you
+want the width exact.
+
+> **Multi-line text survives export.** SVG and PDF lay the label out line by line and honour both
+> `Anchor` and `Justify` — SVG through a per-line `text-anchor`, PDF by shifting each line inside the
+> block's measured width — so an exported label matches the canvas. DXF keeps the lines too (one
+> `TEXT` entity each, stacked `1.2 × Height` apart along the label's own down direction) but does
+> **not** apply `Justify` or `Anchor`: R12 `TEXT` has no block width to justify inside, so every line
+> starts at the same point. One small difference to know about: SVG and PDF stack lines exactly one
+> text height apart, where `GetBounds()` and DXF use `1.2 × Height`.
 
 ### VText Properties
 
@@ -819,7 +827,7 @@ you set. All three canvas backends honour it, because text always goes through t
 | `Location` | VXYZ | — | Position of the text anchor point |
 | `Content` | string | — | Text content to display |
 | `Height` | double | 12 | Font height in world units |
-| `Width` | double | 0 | Text width (0 = auto-measured) |
+| `Width` | double | 0 | Width of the whole block in world units. `0` estimates it as `0.6 × Height` per character of the **longest** line. Setting it overrides the width `GetBounds()` and `Anchor` use — it does **not** wrap the text or change the glyph size |
 | `Font` | VFont | Arial | Font family enum |
 | `FontWeight` | VFontWeight | Normal | Normal or Bold |
 | `Anchor` | VTextAnchor | BottomLeft | Which point of the text is placed at Location |
@@ -1768,10 +1776,15 @@ var circle = new VCircle(0, 0, 50);
 double area = circle.Area;               // π × r² = ~7853.98
 double circumference = circle.Circumference;  // 2π × r = ~314.16
 
-// Ellipse properties
+// Ellipse properties. BOTH describe the FULL ellipse: a partial sweep still
+// reports the whole area, and Circumference ignores StartAngle/EndAngle.
 var ellipse = new VEllipse(0, 0, 60, 40);
 double ellipseArea = ellipse.Area;             // π × rx × ry = ~7539.82
-double ellipseCircum = ellipse.Circumference;  // Ramanujan approximation = ~318.49
+double ellipseCircum = ellipse.Circumference;  // Ramanujan approximation = ~317.31
+
+// For the length of the curve actually drawn, ask the curve.
+var halfEllipse = new VEllipse(new VXYZ(0, 0), 60, 40, 0, 180);
+double drawnLength = halfEllipse.GetLength();  // ~158.65, the swept half only
 ```
 
 Polygons and regions expose **two** area properties, and the difference matters:
@@ -1825,6 +1838,16 @@ Two helpers save you the folding arithmetic, both in degrees:
 ```csharp
 double norm = GeometryHelper.NormalizeAngle(-90);        // 270  — into [0, 360)
 double turn = GeometryHelper.AngleDifference(10, 350);   // 20   — shortest signed turn, [-180, 180]
+```
+
+Two more answer the question a *sweep* raises — does this arc reach that angle, and how far along it
+is that? — without folding anything into `[0, 360)`, which is what keeps them right for a clockwise
+sweep and for one written past the wrap. See
+[Sweeps: which angles an arc actually reaches](#sweeps-which-angles-an-arc-actually-reaches).
+
+```csharp
+bool   on    = GeometryHelper.SweepContains(90, 0, 45);  // true  — a clockwise quarter
+double along = GeometryHelper.SweepOffset(90, 0, 45);    // -45   — signed, along the sweep
 ```
 
 The radian equivalents live on `GeometryTolerance`: `NormalizeAngle(radians)` folds into `[0, 2π)`
@@ -3058,7 +3081,7 @@ When a shape is selected, control point handles appear for interactive editing. 
 | **VCircle** | Move at center, radius handle |
 | **VArc** | Move at center, radius handle, vertices at start/end angles |
 | **VRectangle** | Move at center, vertices at corners |
-| **VEllipse** | Move at center, RadiusX and RadiusY handles |
+| **VEllipse** | Move at center, RadiusX and RadiusY handles — in **unrotated** axes, so on an ellipse with a `Rotation` they sit off the curve; set the radii directly there |
 | **VPolygon** | Move at centroid, vertex at each point |
 | **VPolyline** | Move at centroid, vertex at each point |
 | **VBezier** | Move at midpoint, vertices at P0/P3, curve controls at P1/P2 |
@@ -3372,12 +3395,24 @@ File > Export > DXF exports shapes to AutoCAD DXF format (R12 ASCII):
 - Preserves geometry with high precision — **unless the drawing is
   [divided into viewports](#exporting-a-divided-drawing)**, in which case the coordinates in the
   file are screen distances rather than your own
+- What the geometry says is what is written: a rotated `VRectangle` goes out through its four corner
+  points, and a `VEllipse` is polygonised over its **actual** sweep through `PointAtAngle`, so a
+  partial or turned ellipse arrives as it was drawn. R12 has no `ELLIPSE` entity, so an ellipse is a
+  polyline either way — closed only when the sweep is a whole turn
+- A multi-line `VText` becomes one `TEXT` entity per line, stacked `1.2 × Height` apart along the
+  label's own down direction. `Justify` and `Anchor` are **not** applied there, and R12 has no
+  background fill, so a masked label exports as plain text
 
 ### PDF Export
 File > Export > PDF exports shapes to vector PDF format:
 - High-quality vector graphics output
 - Preserves colors and stroke styles
 - Suitable for printing and documentation
+- Follows the geometry the same way DXF does: rotated rectangles keep their rotation, and an ellipse
+  with a `Rotation` or a partial sweep is sampled through `PointAtAngle` rather than squeezed into an
+  axis-aligned ellipse
+- Multi-line `VText` is laid out line by line — PDF has no line break inside a run — honouring both
+  `Anchor` and `Justify`
 
 ### SVG Export
 File > Export > SVG exports shapes to SVG (Scalable Vector Graphics) format:
@@ -3389,6 +3424,13 @@ File > Export > SVG exports shapes to SVG (Scalable Vector Graphics) format:
   `LineWeight = 2` would come out two *world* units thick and vanish on a large drawing — and
   `LineType` is written as a `stroke-dasharray` taken from the same
   [`LineTypePatterns`](#line-types) table the canvas uses, so a dashed line exports dashed
+- Where an SVG element cannot say what the geometry says, the geometry wins: a `VRectangle` is
+  written as a polygon through its corner points so its `RotationAngle` survives, a partial
+  `VEllipse` becomes a sampled `<path>`, and its `Rotation` becomes a `rotate` about the centre
+- A multi-line `VText` becomes one `<text>` element per line, positioned against the label's own
+  layout box, so `Anchor` and `Justify` both survive (SVG treats a newline inside a text element as
+  ordinary whitespace, so a single run would collapse the label onto one line). Its
+  [mask](#text-mask) is emitted underneath the glyphs, in the same place
 
 ### Exporting a divided drawing
 
@@ -3449,7 +3491,7 @@ an empty shape list still produces a valid document sized from `width` and `heig
 | `SvgExporter.SaveToFile` | `DoodleSharp.Canvas` | `static void SaveToFile(string filePath, IEnumerable<IDrawable> shapes, double width = 800, double height = 600)` |
 | `PdfExporter.Export` | `DoodleSharp.Export` | `void Export(IReadOnlyList<IDrawable> shapes, string filePath)` — page auto-sized to the content |
 | `PdfExporter.Export` | `DoodleSharp.Export` | `void Export(IReadOnlyList<IDrawable> shapes, string filePath, double pageWidthMm, double pageHeightMm, double scaleMmPerUnit, double marginMm)` — `0` for either page dimension auto-sizes it; `scaleMmPerUnit` is how many millimetres one drawing unit becomes on paper |
-| `DxfExporter.Export` | `DoodleSharp.Export` | `void Export(IReadOnlyList<IDrawable> shapes, string filePath)` — writes an AutoCAD R12 ASCII DXF. Circles and arcs stay native `CIRCLE`/`ARC` entities rather than being flattened to chords; ellipses are polygonised, because R12 has no `ELLIPSE` |
+| `DxfExporter.Export` | `DoodleSharp.Export` | `void Export(IReadOnlyList<IDrawable> shapes, string filePath)` — writes an AutoCAD R12 ASCII DXF. Circles and arcs stay native `CIRCLE`/`ARC` entities rather than being flattened to chords; ellipses are polygonised over their real sweep (72 segments, through `PointAtAngle`, so `Rotation` and a partial sweep survive), because R12 has no `ELLIPSE` |
 | `DxfExporter.ExportToString` | `DoodleSharp.Export` | `string ExportToString(IReadOnlyList<IDrawable> shapes)` — the same content as a string, for when you want to post-process it or write it somewhere other than a file |
 
 The tiled forms are the same exporters given one entry per cell. You will not usually call them —
@@ -3950,7 +3992,10 @@ caster.Refit();     // O(N) AABB refresh, tree topology untouched
 
 Hit geometry is exact for `VLine`, `VCircle`, `VArc`, `VEllipse`, `VPolygon` (so also `VRectangle`)
 and `VPolyline`; every other shape type falls back to a hit against its bounding box. A zero-length
-XY direction returns `null` / `false` rather than throwing.
+XY direction returns `null` / `false` rather than throwing. Partial arcs and ellipses are tested
+against their real sweep — direction included, so a clockwise arc is not read backwards — and an
+ellipse's `Rotation` is honoured, the ray being taken into the ellipse's own frame and the hit
+brought back out.
 
 > **`VRay` and `VXLine` are excluded, by an explicit type test.** It would be natural to assume the
 > finite-bounds filter takes care of them, and it does not: both report a *finite* box derived from
@@ -4471,7 +4516,7 @@ types exempt from that guard are the ones in the last row, where the box genuine
 | `VPolygon` | **Inside** — a genuine interior test (ray cast), not the bounding box | Distance to the **boundary**: zero on an edge, and positive both inside and outside |
 | `VRectangle` | Inside (honours rotation) | Distance to the boundary, inherited from `VPolygon` |
 | `VCircle` | Inside the disc | Distance to the **circumference**: zero on the circle, and positive both inside and outside |
-| `VEllipse` | Inside, for a **full** ellipse. A partial sweep encloses no area, so there it means "on the curve" | Distance to the curve, by sampling; honours the sweep, so a point past either end measures to the nearer endpoint |
+| `VEllipse` | Inside, for a **full** ellipse. A partial sweep encloses no area, so there it means "on the curve". Honours `Rotation`: the point is taken into the ellipse's own frame first | Distance to the curve, by sampling; honours the sweep **and** `Rotation`, so a point past either end measures to the nearer endpoint |
 | `VXLine` | On the line | Perpendicular distance to the infinite line — nothing to clamp against, it extends both ways. Its point property is `BasePoint` |
 | `VRay` | On the ray; **false behind the `Origin`** | Perpendicular where the point projects onto the ray, and to `Origin` for anything behind the start. Its point property is `Origin`, not `BasePoint` |
 | `Region` | Inside the outer loop and outside every hole | Distance to the nearest boundary — the outer loop **or any hole edge** — whether its segments are `VLine` edges or curves |
@@ -4488,9 +4533,19 @@ so the answer does not change with the units your drawing happens to use.
 One note on rotation: `Shape.RotationAngle` — what `RotateAnimation` writes — is a **render-time
 transform**, so `Contains`, `DistanceTo` and click-to-select all operate on the shape's *unrotated*
 geometry. A point query against a rotated shape therefore answers for where the shape sat before the
-turn. `VRectangle` is the exception: it rebuilds its corners rather than being transformed at draw
-time, so its point queries do follow its rotation. Call `Rotate(pivot, angle)`, which moves the real
-geometry, when you need hit-testing and rotation to agree.
+turn. Two types carry a real, geometric rotation instead, and it is a **separate property** from the
+inherited `RotationAngle`:
+
+- **`VRectangle.RotationAngle`** rebuilds the four corner points rather than being applied at draw
+  time, so every point query follows it. (It *overrides* `Shape.RotationAngle` rather than shadowing
+  it, so there is only one property here.)
+- **`VEllipse.Rotation`** is the ellipse's own orientation — see
+  [Turning an ellipse](#turning-an-ellipse). Everything follows it: `Contains`, `DistanceTo`,
+  `GetBounds`, `NormalAtPoint`, `ParameterAtPoint`, the control-point handles, the ray caster, and
+  every renderer and exporter.
+
+Call `Rotate(pivot, angle)`, which moves the real geometry, when you need hit-testing and rotation
+to agree.
 
 ```csharp
 var diagonal = new VLine(0, 0, 100, 100);
@@ -4608,6 +4663,8 @@ VXYZ normal = GeometryHelper.GetPolylineNormalAtPoint(poly.Points, p, isClosed: 
 | `ScalePoint(point, center, factor)` | `VXYZ` | `0.5` halves the distance from `center`, a negative factor crosses to the far side |
 | `NormalizeAngle(degrees)` | `double` | Into `[0, 360)` |
 | `AngleDifference(target, source)` | `double` | Shortest signed turn in `[-180, 180]` — `(10, 350)` is `20`, not `-340` |
+| `SweepContains(start, end, angle)` | `bool` | Does the sweep from `start` to `end` pass through `angle`? Honours direction; a full turn or more contains everything — see [Sweeps](#sweeps-which-angles-an-arc-actually-reaches) |
+| `SweepOffset(start, end, angle)` | `double` | How far along that sweep `angle` lies — **signed** (negative on a clockwise sweep) and clamped to the sweep, so `start + result` is always on it |
 | `IntersectCircleCircle(c1, r1, c2, r2)` | `List<VXYZ>` | Two points, one when exactly tangent, empty when separate, nested or concentric |
 | `GetPolylineNormalAtPoint(points, p, isClosed)` | `VXYZ` | Unit normal of the segment nearest `p`. `(0, 1, 0)` for a degenerate list |
 | `IntersectLineLine(l1, l2)` | `Shape?` | **Result is not drawn.** `VPoint` where the segments cross, `VLine` for a collinear overlap, `null` for no hit |
@@ -4634,6 +4691,42 @@ hit?.Place();
 For an intersection that answers in plain coordinates rather than a shape, use
 `curve.Intersect(other)` — it returns an [`IntersectionResult`](#curve-intersection) of `VXYZ`
 points, and is the better fit for curves other than lines and rectangles.
+
+#### Sweeps: which angles an arc actually reaches
+
+`VArc` and `VEllipse` keep their `StartAngle` and `EndAngle` exactly as you wrote them — nothing is
+normalised — so the pair carries two things a single angle does not: a **direction** (`90 → 0` is a
+clockwise quarter) and a **wrap** (`350 → 370` is a 20° sliver, not the 340° arc `350 → 10`
+describes). `SweepContains` and `SweepOffset` are the one rule that reads both correctly, by working
+on the offset from the start rather than on angles folded into `[0, 360)`. `VArc`, `VEllipse` and
+`RayCaster` all defer to them, so a test you write with them agrees with what the shape draws.
+
+```csharp
+// Direction counts: this arc is a CLOCKWISE quarter, and 45 is on it.
+GeometryHelper.SweepContains(90, 0, 45);      // true
+GeometryHelper.SweepOffset(90, 0, 45);        // -45 -- signed, measured along the sweep
+
+// So does the wrap: 350 -> 370 is twenty degrees wide.
+GeometryHelper.SweepContains(350, 370, 5);    // true  -- 5 degrees is 365 here
+GeometryHelper.SweepContains(350, 370, 180);  // false -- nowhere near the sliver
+GeometryHelper.SweepOffset(350, 370, 5);      // 15
+
+// Out of range clamps to the nearer end rather than running past it.
+GeometryHelper.SweepOffset(0, 90, 200);       // 90
+
+// Which is how a world angle becomes a curve parameter on a partial curve.
+var sliver = new VArc(new VXYZ(0, 0), 60, 350, 370) { Name = "sliver" };
+double t = GeometryHelper.SweepOffset(sliver.StartAngle, sliver.EndAngle, 5)
+         / (sliver.EndAngle - sliver.StartAngle);          // 0.75
+new VPoint(sliver.Evaluate(t)) { Color = "Gold", Name = "at 5 degrees" };
+```
+
+| Edge case | Answer |
+|---|---|
+| Sweep of a full turn or more (`\|end - start\| >= 360`) | `SweepContains` is true for every angle |
+| Zero sweep (`start == end`) | Contains only that angle; `SweepOffset` is always `0` |
+| The endpoints themselves | Contained — the comparison carries a small tolerance |
+| An angle outside the sweep | `SweepOffset` clamps to the nearer end, so `start + result` stays on the curve |
 
 ### 3D helpers: VPlane, VCoordinateSystem, VTransform
 
@@ -4724,6 +4817,13 @@ var (minPt, maxPt) = shape.GetBounds();
 
 `Contains` and `Intersects` include the boundary and ignore Z. `Expand` with a negative
 distance contracts, and can invert the box if it exceeds half the width or height.
+
+**A shape's box covers what is drawn, not what it is a piece of.** A `VArc` bounds to its own two
+endpoints widened only by whichever of the four compass extremes its sweep actually reaches — not to
+its whole circle — and a `VEllipse` does the same in its own rotated frame, so a partial or turned
+ellipse gets an exact box. A `VText` measures its **widest line** by the stacked height of all of
+them. Everything that reads these boxes follows: zoom-to-fit, rubber-band selection, the cull index,
+and the sheet size of a tiled export.
 `VRay` and `VXLine` have no far end, so their bounds are taken from `RenderExtent` (default
 `10000`) rather than from the geometry: the box is finite, but it describes the drawn stretch, not
 the line. `GetLength()` on either really does return `double.PositiveInfinity`.
@@ -4828,12 +4928,13 @@ for (int i = 0; i < 12; i++)
 ```
 
 On a circle (`RadiusX == RadiusY`) the two agree, because angle and arc length are proportional.
+They diverge as the ellipse gets more eccentric.
 
 ### Turning an ellipse
 
 `VEllipse.Rotation` is the orientation of the ellipse in degrees, counter-clockwise — the direction
-its `RadiusX` axis points. It defaults to `0`, which is the axis-aligned ellipse, and
-`Rotate(pivot, degrees)` writes it, so rotating an ellipse now turns it as well as moving it.
+its `RadiusX` axis points. It defaults to `0`, the axis-aligned ellipse. **No constructor takes it**,
+so set it in an object initializer or assign it afterwards.
 
 `StartAngle` and `EndAngle` are measured in the ellipse's **own** frame, so turning a half ellipse
 turns the half with it rather than re-cutting a different half:
@@ -4842,18 +4943,49 @@ turns the half with it rather than re-cutting a different half:
 var tilted = new VEllipse(new VXYZ(0, 0), 80, 40) { Rotation = 30 };
 
 // The upper half of a tilted ellipse -- upper relative to the ellipse, not to the page.
-var half = new VEllipse(new VXYZ(0, -120), 80, 40, 0, 180) { Rotation = 30 };
+var half = new VEllipse(new VXYZ(0, -140), 80, 40, 0, 180) { Rotation = 30 };
 
-// Rotate() turns the shape, not just its centre.
-tilted.Rotate(tilted.Center, 45);      // Rotation is now 75
+// Rotate() turns the shape, not just its centre: Center travels around the pivot
+// AND Rotation accumulates. (It used to move the centre only, so rotating an
+// ellipse about its own centre did nothing at all.)
+tilted.Rotate(tilted.Center, 45);          // Rotation is now 75
 
-// PointAtAngle is the world point at an angle in the ellipse's own frame.
-VXYZ tipOfMajorAxis = tilted.PointAtAngle(0);
+// Flip mirrors about the line you pass, at any angle: Rotation becomes
+// 2 x (that line's angle) - Rotation, and the sweep is reversed -- otherwise
+// mirroring the upper half would hand back the upper half again.
+half.Flip(new VLine(-150, -240, 150, -240) { Name = "mirror" });
+
+// PointAtAngle is the world point at an angle in the ellipse's own frame:
+// the single place the parametric form and Rotation are combined.
+VXYZ tipOfRadiusX = tilted.PointAtAngle(0);
+new VPoint(tipOfRadiusX) { Color = "Gold", Name = "tip" };
 ```
 
-`GetBounds()` is exact for both a partial sweep and a rotated ellipse, so zoom-to-fit, selection and
-export extents all frame what is actually drawn.
-They diverge as the ellipse gets more eccentric.
+Nearly everything that consumes an ellipse follows the rotation: `Evaluate`, `Divide`, `Measure`
+and `StartPoint`/`EndPoint` all go through `PointAtAngle`; `NormalAtPoint` and `DistanceTo` work in
+the ellipse's own frame; `Offset` and `SplitAtPoint` carry `Rotation` onto their results; and so do
+the ray caster, all three canvas backends, and the SVG, PDF and DXF exporters. `GetBounds()` is exact
+for a partial sweep **and** for a turned ellipse — the two endpoints plus whichever axis extremes
+the sweep actually reaches — so zoom-to-fit, rubber-band selection and export extents frame what is
+drawn rather than the whole ellipse.
+
+Everything follows it. `Contains`, `DistanceTo` and `NormalAtPoint` take the point into the
+ellipse's own frame before answering; `ParameterAtPoint` measures along the sweep with
+`GeometryHelper.SweepOffset` in that frame, so it reads a clockwise sweep correctly too; and the
+interactive radius handles are placed through `PointAtAngle`, so they sit on the curve at whatever
+angle the ellipse is turned to.
+
+```csharp
+var tilted = new VEllipse(new VXYZ(0, 0), 100, 20) { Rotation = 90 };
+
+bool inside = tilted.Contains(new VXYZ(0, 80));   // true -- tall and narrow, as drawn
+double half = tilted.ParameterAtPoint(tilted.EvaluateByAngle(0.5));   // 0.5
+```
+
+One thing to know rather than to work around: `ParameterAtPoint` is not the inverse of `Evaluate`.
+`Evaluate` is arc-length parameterised while `ParameterAtPoint` reports the fraction of the *sweep
+angle* covered, so on an eccentric ellipse `ParameterAtPoint(Evaluate(0.5))` is not `0.5`. Its true
+inverse is `EvaluateByAngle`.
 
 ### Curve Intersection
 All ICurve types support intersection detection:

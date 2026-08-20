@@ -316,6 +316,115 @@ public class SweepAndOrientationTests
         }
     }
 
+    /// <summary>
+    /// <see cref="VEllipse.Contains"/> was the one member that did not follow
+    /// <see cref="VEllipse.Rotation"/>, because the implicit equation it evaluates divides by the
+    /// radii and so only means anything along the ellipse's own axes.
+    /// </summary>
+    [Fact]
+    public void ContainsFollowsTheEllipsesRotation()
+    {
+        // 100x20 turned a quarter turn: it is now tall and narrow.
+        var ellipse = new VEllipse(new VXYZ(0, 0), 100, 20) { Rotation = 90 };
+
+        Assert.True(ellipse.Contains(new VXYZ(0, 80)), "(0, 80) is inside a quarter-turned 100x20 ellipse");
+        Assert.False(ellipse.Contains(new VXYZ(80, 0)), "(80, 0) is outside it");
+    }
+
+    [Fact]
+    public void ContainsIsUnchangedForAnUnrotatedEllipse()
+    {
+        var ellipse = new VEllipse(new VXYZ(0, 0), 100, 20);
+
+        Assert.True(ellipse.Contains(new VXYZ(80, 0)));
+        Assert.False(ellipse.Contains(new VXYZ(0, 80)));
+    }
+
+    /// <summary>
+    /// Classification has to be right all the way round, not just on the two axes. Sampled just
+    /// inside and just outside the curve rather than exactly on it: a point ON the boundary of an
+    /// interior test is genuinely ambiguous in floating point, and always has been.
+    /// </summary>
+    [Fact]
+    public void ContainsClassifiesEveryDirectionCorrectly()
+    {
+        foreach (var rotation in new[] { 0.0, 37.0, 90.0, -64.0 })
+        {
+            var ellipse = new VEllipse(new VXYZ(3, -2), 50, 15) { Rotation = rotation };
+
+            for (int degrees = 0; degrees < 360; degrees++)
+            {
+                var onCurve = ellipse.PointAtAngle(degrees);
+                var toEdge = onCurve - ellipse.Center;
+
+                Assert.True(ellipse.Contains(ellipse.Center + toEdge * 0.98),
+                    $"just inside at {degrees} deg (rotation {rotation}) reported outside");
+                Assert.False(ellipse.Contains(ellipse.Center + toEdge * 1.02),
+                    $"just outside at {degrees} deg (rotation {rotation}) reported inside");
+            }
+        }
+    }
+
+    /// <summary>
+    /// The sweep fix reached <see cref="VArc.ParameterAtPoint"/> but was not carried across to the
+    /// ellipse, which kept the "normalise into [0, 360), divide by the sweep" form and additionally
+    /// read the angle in world axes.
+    /// </summary>
+    [Theory]
+    [InlineData(0, 180, 0)]      // forward sweep
+    [InlineData(90, 0, 0)]       // clockwise
+    [InlineData(0, 180, 40)]     // forward, rotated
+    [InlineData(200, 40, 25)]    // clockwise across zero, rotated
+    public void EllipseParameterAtPointIsMeasuredAlongItsOwnSweep(double start, double end, double rotation)
+    {
+        var ellipse = new VEllipse(new VXYZ(0, 0), 60, 30, start, end) { Rotation = rotation };
+        var midpoint = ellipse.EvaluateByAngle(0.5);
+
+        Close(0.5, ellipse.ParameterAtPoint(midpoint), 1e-6);
+    }
+
+    /// <summary>
+    /// A control-point handle that is not on the shape is a handle you cannot grab.
+    /// </summary>
+    [Fact]
+    public void EllipseControlPointHandlesSitOnTheCurve()
+    {
+        var ellipse = new VEllipse(new VXYZ(5, 5), 40, 10) { Rotation = 55 };
+        var handles = ellipse.GetControlPoints();
+
+        foreach (var index in new[] { 1, 2 })
+        {
+            var handle = new VXYZ(handles[index].X, handles[index].Y);
+            Close(0, ellipse.DistanceTo(handle), 1e-6);
+        }
+    }
+
+    [Fact]
+    public void UnrotatedEllipseHandlesAreWhereTheyAlwaysWere()
+    {
+        var handles = new VEllipse(new VXYZ(0, 0), 40, 10).GetControlPoints();
+
+        Close(40, handles[1].X);
+        Close(0, handles[1].Y);
+        Close(0, handles[2].X);
+        Close(10, handles[2].Y);
+    }
+
+    /// <summary>
+    /// One line-spacing constant, four readers: <see cref="VText.GetBounds"/> and the DXF, SVG and
+    /// PDF writers. They had drifted, so a label's exported block was shorter than the box reserved
+    /// for it.
+    /// </summary>
+    [Fact]
+    public void MultiLineHeightScalesOnlyTheGapsBetweenLines()
+    {
+        var single = new VText(new VXYZ(0, 0), "AAA", 10).GetBounds();
+        Close(10, single.Max.Y - single.Min.Y);
+
+        var triple = new VText(new VXYZ(0, 0), "AAA\nBBB\nCCC", 10).GetBounds();
+        Close(10 * (1 + 2 * 1.2), triple.Max.Y - triple.Min.Y);
+    }
+
     [Fact]
     public void TheTwoEllipseGetLengthsAgree()
     {
