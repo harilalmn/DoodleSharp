@@ -9,7 +9,35 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+### Added
+- **`VText.Justify`** lines the rows of a multi-line label up with each other — `Left` (default),
+  `Center` or `Right`, via the new `VTextJustify`. It composes with `Anchor` rather than competing
+  with it: `Anchor` puts the block on the drawing, `Justify` shapes the ragged edge inside it, so a
+  four-line label can be centred on its point *and* have its short lines centred against its long
+  ones. Single-line text is unaffected. Only the canvas lays multi-line text out as lines today, so
+  justification does not reach the PDF, SVG and DXF exporters, which write the content as one run.
+
+### Changed
+- **Typing one letter no longer fills the completion list with everything containing that letter.**
+  The filter accepted any subsequence, so `x` inside an argument list matched
+  `AccessViolationException`, `BoundingBox`, `DoubleExtensions` and several hundred more — the popup
+  covered the code and the alphabetically-first of them was the row Tab would take. The first
+  character typed must now begin a word in the candidate (start, after `_` or `.`, or a camelCase
+  hump). Abbreviations are untouched: `clr` still finds `Color`, `VPt` still finds `VPoint`, `p`
+  still finds `VPoint`.
+
 ### Fixed
+- **A multi-line label produced a DXF file no reader could parse.** A DXF group value is a whole
+  line of the file, so the text was written straight into group 1 and its newlines went into the
+  file as bare lines — a reader then took the next line as a group *code* and the entity stream
+  desynchronised from there on. The label did not merely lose its line breaks; the export stopped
+  being valid. Each line is now written as its own TEXT entity, stacked down from the location and
+  following the text's rotation. Found while documenting `VText.Justify`, which exists to encourage
+  exactly the multi-line labels that triggered it.
+- **The editor could show an empty completion popup.** The shared editor host decided whether to
+  open the window from the *unfiltered* symbol count, so when the filter removed everything it put
+  an empty list on screen — covering the code and swallowing Enter and Tab. It now tests what
+  survived the filter, which is what the main window has always done.
 - **The canvas came up blank while the status bar said the shapes had been drawn.** Every run
   begins by resetting the viewport layout, which installs a fresh root viewport, and the canvas
   cell went on holding the previous one until the docking host caught up — so the renderer looked

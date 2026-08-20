@@ -67,6 +67,7 @@ DoodleSharp is a desktop application that enables users to visualize 2D geometri
 | FR-026 | Line Type Scale Render Mode | Done | Dash/gap lengths relative to zoom (world units, default) or absolute screen pixels |
 | FR-027 | Draw Order | Done | `ZIndex` on every shape — global, higher on top, ties keep creation order, negatives behind |
 | FR-028 | Text Mask | Done | Solid plate behind text so a label reads over geometry; on by default, coloured from the canvas background |
+| FR-029 | Text Justification | Done | `Justify` aligns the lines of a multi-line label with each other (Left/Center/Right); composes with `Anchor`, which places the block |
 
 ### 2.3 Canvas Features
 
@@ -268,6 +269,11 @@ DoodleSharp is a desktop application that enables users to visualize 2D geometri
 - **Exported images and video contain only the drawing** — anything on the canvas overlay (the F10 readout, selection handles, the rubber band, snap markers, the measuring overlay) was being captured into exported PNGs, GIFs and MP4s.
 - **The render backend is selectable from Settings** — it had no interface at all and could only be changed by hand-editing the settings file. All four choices are now listed, including a GPU option the code had always honoured but nothing documented.
 - **Region union respects the curve precision it is given** — every other region boolean honoured the `segmentsPerCurve` argument when folding a collection; union ignored it, so a union of curve-bounded regions could come back coarser than an intersection of the same inputs.
+
+### Version 2026.8.11 (Implemented) — The Canvas Draws Again, and a Completion List Worth Reading
+- **Shapes appear on the canvas again** — a run reported `Success: N shapes drawn` over an empty canvas, on a stock layout, every time. Resetting the viewport layout at the start of each run replaced the object the canvas cell was still holding, so the renderer asked for "the shapes on this cell" with a stale handle and was told there were none; the status bar counted the scene a different way and never noticed. Zoom-to-fit was affected by the same cause, which is why it did nothing instead of framing the drawing.
+- **Typing one letter no longer buries the completion list** — the filter accepted a letter appearing *anywhere* in a name, so `x` inside an argument list offered `AccessViolationException`, `BoundingBox` and several hundred others, and the first of them was what `Tab` would insert. The first character typed must now begin a word in the name. Abbreviations are untouched: `clr` still finds `Color`, `VPt` still finds `VPoint`. An empty result now closes the popup instead of showing an empty box over the code.
+- **`VText.Justify`** — the lines of a multi-line label can be aligned Left, Center or Right against each other. This is a separate question from `Anchor`, which decides where the label block sits, and the two combine: a label can be centred on its point *and* have its short lines centred against its long ones. Single-line text is unaffected. Only the canvas lays multi-line text out as lines today, so justification does not reach the PDF, SVG and DXF exports.
 
 ### Version 2026.8.10 (Implemented) — The Completion List Opens on the Type You Asked For
 - **IntelliSense highlights the type you are declaring** — typing `VXYZ p = new ` opened the completion list on `AccessViolationException`, with `VXYZ` hundreds of rows further down, so the obvious key press inserted the wrong type. The list is still in plain A–Z order; the row that starts selected is now the type the declaration asks for, so `Tab` completes it straight away. Where there is no type to infer nothing changes, and a matching snippet still keeps the top row.
