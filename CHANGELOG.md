@@ -9,7 +9,7 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
-## [2026.8.13] - 2026-08-20
+## [2026.8.14] - 2026-08-20
 
 ### Fixed
 
