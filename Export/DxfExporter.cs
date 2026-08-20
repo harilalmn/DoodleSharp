@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -374,17 +374,56 @@ public class DxfExporter
         WriteCoord(11, 21, 31, to.X, to.Y, 0);
     }
 
+    /// <summary>
+    /// Vertical distance between the baselines of consecutive lines, as a multiple of the text
+    /// height. DXF has no line-box concept to copy, so this approximates what the canvas does
+    /// rather than claiming to match it exactly.
+    /// </summary>
+    private const double DxfLineSpacing = 1.2;
+
+    /// <summary>
+    /// Writes a <see cref="VText"/> as <b>one TEXT entity per line</b>.
+    ///
+    /// <para>
+    /// A DXF group value is a whole line of the file, so writing <c>Content</c> straight into group
+    /// 1 put any embedded newline into the file as a bare line — and the reader then took that line
+    /// as the next group CODE and the entity stream desynchronised from there on. A multi-line
+    /// label did not merely lose its line breaks, it produced a file no DXF reader could parse.
+    /// TEXT has no multi-line form (MTEXT encodes breaks as <c>\P</c>), so the fix is one entity
+    /// per line, stacked downwards from the location.
+    /// </para>
+    ///
+    /// <para>
+    /// The stacking direction follows <see cref="VText.Angle"/> — for rotated text "down" is
+    /// perpendicular to the baseline, not world-down, so lines stay with their own label instead of
+    /// marching across the drawing. <see cref="VText.Justify"/> is deliberately NOT honoured: every
+    /// line is written at the same start point, because the only width available here is
+    /// <c>GetBounds</c>'s character-count estimate, and offsetting lines by a wrong width would look
+    /// like a bug rather than an approximation.
+    /// </para>
+    /// </summary>
     private void WriteText(VText text)
     {
-        WriteLine(0, "TEXT");
-        WriteHandle();
-        WriteLayer();
-        WriteCoord(10, 20, 30, text.Location.X, text.Location.Y, 0);
-        WriteDouble(40, text.Height);
-        WriteLine(1, text.Content ?? "");
-        if (text.Angle != 0)
-            WriteDouble(50, text.Angle); // DXF text rotation is CCW degrees, same convention as world.
-        WriteLine(7, "STANDARD");
+        var content = text.Content ?? "";
+        var lines = content.Replace("\r\n", "\n").Split('\n');
+
+        // Rotated text stacks perpendicular to its own baseline: world-down for Angle 0.
+        var rad = text.Angle * Math.PI / 180.0;
+        var stepX = Math.Sin(rad) * text.Height * DxfLineSpacing;
+        var stepY = -Math.Cos(rad) * text.Height * DxfLineSpacing;
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            WriteLine(0, "TEXT");
+            WriteHandle();
+            WriteLayer();
+            WriteCoord(10, 20, 30, text.Location.X + stepX * i, text.Location.Y + stepY * i, 0);
+            WriteDouble(40, text.Height);
+            WriteLine(1, lines[i]);
+            if (text.Angle != 0)
+                WriteDouble(50, text.Angle); // DXF text rotation is CCW degrees, same convention as world.
+            WriteLine(7, "STANDARD");
+        }
     }
 
     private void WriteLwPolyline(List<(double x, double y)> points, bool closed)

@@ -2961,6 +2961,10 @@ public class RenderCanvas : FrameworkElement
             brush,
             dpi);
 
+        // Justification has to be applied before anything measures the block, because it is what
+        // gives the block a width to align inside.
+        var blockWidth = ApplyJustification(formattedText, text.Justify, null);
+
         // Anchor offset uses full text size so the layout stays put while characters reveal.
         var (anchorOffsetX, anchorOffsetY) = text.GetAnchorOffset(
             formattedText.Width / _viewport.Scale,
@@ -3010,6 +3014,10 @@ public class RenderCanvas : FrameworkElement
                     fontSize,
                     brush,
                     dpi);
+                // Aligned inside the FULL block's width, not the partial text's own: the layout is
+                // already pinned to the full size above, and centring each frame's substring in its
+                // own box would slide the finished characters sideways as the reveal ran.
+                ApplyJustification(partial, text.Justify, blockWidth);
                 dc.DrawText(partial, new Point(drawX, drawY));
             }
         }
@@ -3020,6 +3028,40 @@ public class RenderCanvas : FrameworkElement
 
         if (applyRotation) dc.Pop();
         if (applyOpacity) dc.Pop();
+    }
+
+    /// <summary>
+    /// Applies <see cref="VText.Justify"/> to a laid-out <see cref="FormattedText"/> and returns the
+    /// width of the block the lines are aligned inside.
+    ///
+    /// <para>
+    /// <c>TextAlignment</c> alone does nothing: WPF aligns lines within <c>MaxTextWidth</c>, and
+    /// until that is set the box is unbounded, so every line's leading edge is the same place and
+    /// left, centre and right all render identically. Setting it to the natural width — the widest
+    /// line — makes the box hug the text, which is what "centre the lines on each other" means.
+    /// </para>
+    ///
+    /// <para>
+    /// <paramref name="fixedWidth"/> is for the reveal path, which must align inside the finished
+    /// block rather than the part drawn so far. Left justification returns early purely because it
+    /// is already WPF's behaviour with no box set — there is nothing to do, not a hazard being
+    /// dodged. The width handed to <c>MaxTextWidth</c> is the one this same <c>FormattedText</c>
+    /// just measured itself at, so it cannot be narrower than the text it is about to lay out.
+    /// </para>
+    /// </summary>
+    private static double ApplyJustification(FormattedText formatted, VTextJustify justify, double? fixedWidth)
+    {
+        var width = fixedWidth ?? formatted.Width;
+
+        if (justify == VTextJustify.Left)
+            return width;
+
+        formatted.MaxTextWidth = width;
+        formatted.TextAlignment = justify == VTextJustify.Center
+            ? TextAlignment.Center
+            : TextAlignment.Right;
+
+        return width;
     }
 
     private static string GetFontFamilyName(VFont font) => font switch
