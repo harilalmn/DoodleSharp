@@ -27,6 +27,36 @@ public class DurableFileTests
         return dir;
     }
 
+    /// <summary>
+    /// Removes a scratch directory without letting the removal fail a test.
+    /// </summary>
+    /// <remarks>
+    /// Closing a handle on Windows does not always make the file deletable on the very next
+    /// instruction — the directory entry can linger, and a scanner on a CI runner opens new files of
+    /// its own. The tests that deliberately hold a file open therefore lost to their own cleanup:
+    /// every assertion passed and the <c>finally</c> threw. What is under test is the write, not the
+    /// tidying up.
+    /// </remarks>
+    private static void Cleanup(string dir)
+    {
+        for (int attempt = 0; attempt < 5; attempt++)
+        {
+            try
+            {
+                Directory.Delete(dir, true);
+                return;
+            }
+            catch (IOException)
+            {
+                System.Threading.Thread.Sleep(50);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                System.Threading.Thread.Sleep(50);
+            }
+        }
+    }
+
     [Fact]
     public void WritesANewFile()
     {
@@ -150,12 +180,13 @@ public class DurableFileTests
     /// </para>
     ///
     /// <para>
-    /// A file held open for 120 ms is that situation exactly, and the retry has about half a second
-    /// to spend on it.
+    /// A file held open while the write is in flight is that situation exactly. The write runs on a
+    /// worker so the test can let the file go from the calling thread — releasing on a timer instead
+    /// would race the retry schedule, and lose it on a loaded CI runner.
     /// </para>
     /// </remarks>
     [Fact]
-    public async Task RetriesTheRenameWhileTheDestinationIsBrieflyHeldOpen()
+    public async Task RetriesTheRenameUntilTheDestinationIsLetGo()
     {
         var dir = TempDir();
         try
@@ -163,22 +194,53 @@ public class DurableFileTests
             var path = Path.Combine(dir, "held.vizproj");
             File.WriteAllText(path, "the previous settings");
 
-            var holder = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-            var release = Task.Run(async () => { await Task.Delay(120); holder.Dispose(); });
+            using (var holder = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                var write = Task.Run(() => DurableFile.WriteAllText(path, "the new settings"));
 
-            var clock = System.Diagnostics.Stopwatch.StartNew();
-            DurableFile.WriteAllText(path, "the new settings");
-            clock.Stop();
-            await release;
+                // Long enough for the first attempt to have failed, short enough to leave most of the
+                // ~620 ms budget in hand however slowly this machine is running.
+                await Task.Delay(30);
+                Assert.False(write.IsCompleted, "the write should still be retrying against the held file");
+
+                holder.Dispose();
+                await write;
+            }
 
             Assert.Equal("the new settings", File.ReadAllText(path));
             Assert.Single(Directory.GetFiles(dir));   // and no temporary file left over
-
-            // Proof that the retry is what carried it, rather than the lock never biting: a first
-            // attempt that succeeded would have returned long before the file was let go.
-            Assert.True(clock.ElapsedMilliseconds >= 100, $"finished in {clock.ElapsedMilliseconds} ms");
         }
-        finally { Directory.Delete(dir, true); }
+        finally { Cleanup(dir); }
+    }
+
+    /// <summary>
+    /// And the retry is bounded: a destination that is never let go fails, having genuinely spent the
+    /// budget rather than returning on the first refusal. This is the timing-free half of the pair —
+    /// it asserts a lower bound on elapsed time, which no amount of machine load can break.
+    /// </summary>
+    [Fact]
+    public void GivesUpOnADestinationThatIsNeverLetGo()
+    {
+        var dir = TempDir();
+        try
+        {
+            var path = Path.Combine(dir, "wedged.vizproj");
+            File.WriteAllText(path, "the previous settings");
+
+            using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                Assert.ThrowsAny<IOException>(() => DurableFile.WriteAllText(path, "the new settings"));
+                clock.Stop();
+
+                // 20+40+80+160+320 ms of backoff. A single attempt would have thrown at once.
+                Assert.True(clock.ElapsedMilliseconds >= 400, $"gave up after {clock.ElapsedMilliseconds} ms");
+            }
+
+            Assert.Equal("the previous settings", File.ReadAllText(path));
+            Assert.Single(Directory.GetFiles(dir));   // the temporary file was cleaned up
+        }
+        finally { Cleanup(dir); }
     }
 
     /// <summary>
