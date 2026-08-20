@@ -1778,22 +1778,24 @@ public partial class MainWindow : Window
              List<ICompletionData> completions;
              bool isAfterNew;
              string prefix;
+             string? expectedType;
 
              if (_completionWorkspace != null && _activeFile != null)
              {
                  // Use cached workspace for incremental compilation (Phase 1)
                  var fileId = _activeFile.FileName;
                  var service = new Editor.RoslynCompletionService(_completionWorkspace);
-                 // The fourth value is the expected type at the caret. The list is alphabetical, so
-                 // nothing ranks by it any more and it is deliberately discarded.
-                 (completions, isAfterNew, prefix, _) = await service.GetCompletionsAsync(code, offset, _completionWorkspace, fileId);
+                 // The fourth value is the expected type at the caret. The list stays alphabetical —
+                 // nothing ranks by it (note 115) — but it decides which row opens highlighted, so
+                 // `VXYZ p = new ` puts Tab on VXYZ instead of on whatever the alphabet put first.
+                 (completions, isAfterNew, prefix, expectedType) = await service.GetCompletionsAsync(code, offset, _completionWorkspace, fileId);
              }
              else
              {
                  // Fallback: create fresh compilation
                  var service = new Editor.RoslynCompletionService(_compiler.GetReferences());
                  var otherFiles = GetOtherProjectFiles();
-                 (completions, isAfterNew, prefix, _) = await service.GetCompletionsAsync(code, offset, otherFiles);
+                 (completions, isAfterNew, prefix, expectedType) = await service.GetCompletionsAsync(code, offset, otherFiles);
              }
 
              // The Roslyn query is awaited, and the user keeps typing during it. If the caret has
@@ -1885,7 +1887,7 @@ public partial class MainWindow : Window
                  };
 
                  _completionWindow = window;
-                 ShowCompletionWindowWithSelection();
+                 ShowCompletionWindowWithSelection(expectedType);
              }
         }
         catch (Exception ex)
@@ -3115,9 +3117,15 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Shows the completion window with the first item selected, and attaches the documentation sidecar.
+    /// Shows the completion window with a row selected, and attaches the documentation sidecar.
+    ///
+    /// <para>
+    /// The row is the first one unless <paramref name="expectedType"/> names an item in the list —
+    /// see <see cref="Editor.CompletionPreselect"/> for why the selection is context-aware while the
+    /// order stays alphabetical.
+    /// </para>
     /// </summary>
-    private void ShowCompletionWindowWithSelection()
+    private void ShowCompletionWindowWithSelection(string? expectedType = null)
     {
         if (_completionWindow == null)
             return;
@@ -3132,8 +3140,12 @@ public partial class MainWindow : Window
 
         StyleCompletionWindow(_completionWindow);
 
-        // Select the first item
-        _completionWindow.CompletionList.SelectedItem = _completionWindow.CompletionList.CompletionData[0];
+        // Select the row the caret is actually about: the expected type where there is one, the
+        // first row otherwise (note 122).
+        var preselect = Editor.CompletionPreselect.IndexOf(_completionWindow.CompletionList.CompletionData, expectedType);
+        var preselectedItem = preselect >= 0 ? _completionWindow.CompletionList.CompletionData[preselect] : null;
+        if (preselectedItem != null)
+            _completionWindow.CompletionList.SelectedItem = preselectedItem;
 
         // If signature help is visible, offset the completion window below it
         if (_insightWindow != null)
@@ -3174,10 +3186,15 @@ public partial class MainWindow : Window
             }
         };
 
-        // Show initial selection's docs after the window renders
+        // Show initial selection's docs after the window renders, and bring the selected row into
+        // view. Setting SelectedItem highlights a row but never scrolls to it, so a preselected type
+        // several hundred rows down was selected off-screen and the list still looked like it had
+        // opened on AccessViolationException.
         _completionWindow.Loaded += (s, e) =>
         {
             _docSidecar?.UpdatePosition();
+            if (preselectedItem != null)
+                _completionWindow?.CompletionList.ListBox?.ScrollIntoView(preselectedItem);
             var initialItem = _completionWindow?.CompletionList.SelectedItem as Editor.CompletionData;
             if (initialItem?.Symbol != null)
                 _docSidecar?.ShowForItem(initialItem);
