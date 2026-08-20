@@ -142,6 +142,96 @@ public class DocumentationAccuracyTests
         }
     }
 
+    /// <summary>
+    /// Every public constructor of every documentable type must resolve to a description.
+    ///
+    /// <para>
+    /// Constructors cannot be keyed like everything else: they reflect as <c>.ctor</c>, so the old
+    /// name-based lookup produced <c>"VRay..ctor"</c> and matched nothing. The consequence was
+    /// invisible in both directions at once — <b>101 of 108</b> public constructors rendered a blank
+    /// description cell, while <b>7</b> signature-keyed entries that someone had carefully written
+    /// were dead, including the two that document the <c>VRay</c>/<c>VXLine</c> trap that the second
+    /// <c>VXYZ</c> argument is a DIRECTION and not a second point. Nothing failed either way.
+    /// </para>
+    ///
+    /// <para>
+    /// This calls the real <c>GetConstructorDescription</c> rather than rebuilding its key format,
+    /// which is the point: a guard that reimplements the thing it guards drifts away from it and then
+    /// passes for the wrong reason.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void EveryPublicConstructorHasADescription()
+    {
+        var generator = new DocGenerator();
+        var describe = typeof(DocGenerator).GetMethod("GetConstructorDescription",
+            BindingFlags.NonPublic | BindingFlags.Instance);
+
+        Assert.NotNull(describe); // a rename would silently make this test vacuous
+
+        var offenders = new List<string>();
+
+        foreach (var type in generator.GetDocumentableTypes())
+        {
+            var typeName = DocGenerator.GetCleanTypeName(type);
+
+            foreach (var ctor in type.GetConstructors())
+            {
+                var description = describe!.Invoke(generator, new object[] { typeName, ctor }) as string;
+
+                if (string.IsNullOrEmpty(description))
+                {
+                    var args = string.Join(", ", ctor.GetParameters().Select(p => p.ParameterType.Name));
+                    offenders.Add($"{typeName}({args})");
+                }
+            }
+        }
+
+        Assert.True(offenders.Count == 0,
+            $"{offenders.Count} public constructor(s) render a blank description cell in F1 Help:{Environment.NewLine}" +
+            string.Join(Environment.NewLine, offenders));
+    }
+
+    /// <summary>
+    /// The other direction: a constructor key that matches no real constructor. A mistyped signature
+    /// is not caught by the test above on its own — the real constructor reports blank, which that
+    /// test flags, but the orphaned key would linger looking authoritative. Counting per type pins
+    /// both ends, and it is what would have caught the original seven.
+    /// </summary>
+    [Fact]
+    public void NoConstructorKeyIsOrphaned()
+    {
+        var generator = new DocGenerator();
+        var types = generator.GetDocumentableTypes()
+            .GroupBy(DocGenerator.GetCleanTypeName)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        // Constructor keys are "Type(args)"; member keys are "Type.Member" and never contain a paren.
+        var byType = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        foreach (var key in MemberDescriptionKeys())
+        {
+            var paren = key.IndexOf('(');
+            if (paren <= 0) continue;
+
+            var typeName = key.Substring(0, paren);
+
+            // Out-of-namespace keys are not this test's business, exactly as above.
+            if (!types.ContainsKey(typeName)) continue;
+
+            byType[typeName] = byType.GetValueOrDefault(typeName) + 1;
+        }
+
+        var offenders = byType
+            .Where(kv => kv.Value != types[kv.Key].GetConstructors().Length)
+            .Select(kv => $"{kv.Key}: {kv.Value} key(s) for {types[kv.Key].GetConstructors().Length} public constructor(s)")
+            .ToList();
+
+        Assert.True(offenders.Count == 0,
+            $"constructor keys do not match the real constructors:{Environment.NewLine}" +
+            string.Join(Environment.NewLine, offenders));
+    }
+
     private static IEnumerable<string> SummaryKeys()
     {
         var field = typeof(DocGenerator).GetField("_summaries",

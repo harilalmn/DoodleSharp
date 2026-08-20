@@ -51,9 +51,19 @@ public readonly struct PenSpec
 public sealed class TessellationHints
 {
     /// <summary>
-    /// World units per device pixel. Curve segment counts are chosen from a shape's size in
-    /// <i>pixels</i>, not world units — a circle of radius 1 needs a different number of segments
-    /// depending entirely on how far you have zoomed in.
+    /// <b>Screen pixels per world unit</b> — the view's zoom, the same quantity as
+    /// <c>MouseInfo.Scale</c>. A world size <i>multiplied</i> by this gives a size on screen, which is
+    /// exactly how <c>ShapeTessellator</c> uses it (<c>radiusPx = radius * Scale</c>).
+    /// <para>
+    /// This comment used to say "world units per device pixel", which is the reciprocal, and the
+    /// error had already propagated into the F1 Help text before anyone noticed the tessellator
+    /// multiplying rather than dividing. State the direction, not just the two units.
+    /// </para>
+    /// <para>
+    /// Curve segment counts are chosen from a shape's size in <i>pixels</i>, not world units — a
+    /// circle of radius 1 needs a different number of segments depending entirely on how far you
+    /// have zoomed in.
+    /// </para>
     /// </summary>
     public double Scale { get; set; } = 1.0;
 
