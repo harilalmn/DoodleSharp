@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -180,7 +180,7 @@ public class CompletionServiceTests
 
         Assert.True(isAfterNew);
         Assert.Equal("VXYZ", expectedType);
-        // The host ranks the expected type first; it can only do that if it is in the list.
+        // The host opens the list on the expected type; it can only do that if it is in the list.
         Assert.Contains(items, i => i.Text == "VXYZ");
     }
 

@@ -1306,6 +1306,7 @@ namespace DoodleSharp.Editor
                 List<ICompletionData> completions = new List<ICompletionData>();
                 bool isAfterNew = false;
                 string prefix = "";
+                string? expectedType = null;
 
                 // Semantic completion driven by the cached workspace: it carries the right
                 // references, and `activeFile` is the workspace's file-id key, so the correct
@@ -1314,9 +1315,10 @@ namespace DoodleSharp.Editor
                 if (workspace != null)
                 {
                     var service = new RoslynCompletionService(workspace);
-                    // The fourth value is the expected type at the caret; the list is alphabetical,
-                    // so nothing ranks by it and it is deliberately discarded.
-                    (completions, isAfterNew, prefix, _) = await service.GetCompletionsAsync(code, offset, workspace, activeFile);
+                    // The fourth value is the expected type at the caret. The list stays
+                    // alphabetical — nothing ranks by it (note 115) — but it decides which row opens
+                    // highlighted, so `VXYZ p = new ` puts Tab on VXYZ (note 122).
+                    (completions, isAfterNew, prefix, expectedType) = await service.GetCompletionsAsync(code, offset, workspace, activeFile);
                 }
 
                 if (completions.Count > 0)
@@ -1352,6 +1354,14 @@ namespace DoodleSharp.Editor
                         data.Add(item);
                     }
 
+                    // Select the row the caret is actually about rather than whatever the alphabet
+                    // put first. Same rule as the main window (note 43 — this is the parallel
+                    // implementation of the same editor).
+                    var preselect = CompletionPreselect.IndexOf(data, expectedType);
+                    var preselectedItem = preselect >= 0 ? data[preselect] : null;
+                    if (preselectedItem != null)
+                        _completionWindow.CompletionList.SelectedItem = preselectedItem;
+
                     StyleCompletionWindow(_completionWindow);
                     _docSidecar?.TrackCompletionWindow(_completionWindow);
 
@@ -1366,6 +1376,10 @@ namespace DoodleSharp.Editor
                     _completionWindow.Loaded += (s, e) =>
                     {
                         _docSidecar?.UpdatePosition();
+                        // Selecting a row does not scroll to it; a preselected type hundreds of rows
+                        // down would otherwise be highlighted off-screen.
+                        if (preselectedItem != null)
+                            _completionWindow?.CompletionList.ListBox?.ScrollIntoView(preselectedItem);
                         if (_completionWindow?.CompletionList.SelectedItem is CompletionData init && init.Symbol != null)
                             _docSidecar?.ShowForItem(init);
                     };
