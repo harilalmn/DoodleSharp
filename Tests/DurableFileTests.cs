@@ -180,37 +180,49 @@ public class DurableFileTests
     /// </para>
     ///
     /// <para>
-    /// A file held open while the write is in flight is that situation exactly. The write runs on a
-    /// worker so the test can let the file go from the calling thread — releasing on a timer instead
-    /// would race the retry schedule, and lose it on a loaded CI runner.
+    /// A file held open while the write is in flight is that situation exactly. The file is released
+    /// from inside the retry callback rather than after a delay: the first attempt has then provably
+    /// failed before the second can succeed, and the test asserts nothing about elapsed time. The
+    /// delay-based version of this test passed locally for weeks and failed the 2026.8.15 release
+    /// build, because a <c>Task.Delay(30)</c> on a loaded runner outlasts the whole retry budget.
     /// </para>
     /// </remarks>
     [Fact]
-    public async Task RetriesTheRenameUntilTheDestinationIsLetGo()
+    public void RetriesTheRenameUntilTheDestinationIsLetGo()
     {
         var dir = TempDir();
+        var path = Path.Combine(dir, "held.vizproj");
+        var holder = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+        var retries = 0;
+
         try
         {
-            var path = Path.Combine(dir, "held.vizproj");
-            File.WriteAllText(path, "the previous settings");
+            holder.Write(Encoding.UTF8.GetBytes("the previous settings"));
+            holder.Flush();
 
-            using (var holder = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            // Release the file from INSIDE the retry callback. That is what makes this test
+            // independent of how fast the machine is: the first attempt has provably failed by the
+            // time the callback runs, and the next one then finds the file free however long the
+            // scheduler took to get there. Reading a clock instead cost a release — see the seam's
+            // own remarks in DurableFile.
+            DurableFile.RenameRetrying = attempt =>
             {
-                var write = Task.Run(() => DurableFile.WriteAllText(path, "the new settings"));
+                retries++;
+                if (attempt == 1) holder.Dispose();
+            };
 
-                // Long enough for the first attempt to have failed, short enough to leave most of the
-                // ~620 ms budget in hand however slowly this machine is running.
-                await Task.Delay(30);
-                Assert.False(write.IsCompleted, "the write should still be retrying against the held file");
+            DurableFile.WriteAllText(path, "the new settings");
 
-                holder.Dispose();
-                await write;
-            }
-
+            Assert.True(retries >= 1, "the rename succeeded first time, so nothing was retried");
             Assert.Equal("the new settings", File.ReadAllText(path));
             Assert.Single(Directory.GetFiles(dir));   // and no temporary file left over
         }
-        finally { Cleanup(dir); }
+        finally
+        {
+            DurableFile.RenameRetrying = null;
+            holder.Dispose();
+            Cleanup(dir);
+        }
     }
 
     /// <summary>
