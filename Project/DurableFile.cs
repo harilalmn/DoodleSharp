@@ -106,6 +106,21 @@ public static class DurableFile
     /// immediately, which is what the caller wants: no amount of waiting fixes it.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Raised with the attempt number each time a rename fails and is about to be retried. Null in
+    /// production.
+    /// </summary>
+    /// <remarks>
+    /// A test cannot prove "the retry is what carried the write" by waiting a fixed time and looking:
+    /// the retry budget is finite (~620 ms), a <c>Task.Delay</c> on a loaded machine overshoots it,
+    /// and the test then sees a write that has already given up and reports the opposite of what
+    /// happened. That is not hypothetical — it failed the 2026.8.15 release build having passed
+    /// every local run. With this seam the test releases the file it is holding from inside the
+    /// callback, so the first attempt has provably failed before the second one can succeed, and no
+    /// wall-clock reading enters the assertion at all.
+    /// </remarks>
+    internal static Action<int>? RenameRetrying;
+
     private static void Retrying(Action rename)
     {
         const int attempts = 6;
@@ -118,6 +133,7 @@ public static class DurableFile
             }
             catch (IOException) when (attempt < attempts)
             {
+                RenameRetrying?.Invoke(attempt);
                 // 20, 40, 80, 160, 320 ms — about half a second in total, well inside the window a
                 // sync client holds a file for, and short enough not to stall the UI thread visibly.
                 System.Threading.Thread.Sleep(10 * (1 << attempt));

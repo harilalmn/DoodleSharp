@@ -9,8 +9,6 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
-## [2026.8.15] - 2026-08-22
-
 ### Fixed
 
 - **Tab now works with multiple cursors.** It was never claimed by the multi-cursor handler, so the
