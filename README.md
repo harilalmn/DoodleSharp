@@ -2602,7 +2602,10 @@ Output appears in the console panel below the canvas with file and line number t
 > **There is only one `VizConsole`.** `DoodleSharp.Console.VizConsole.Log` is the whole console API
 > available to project code — there is no `Warn` or `Error`, and no second console class in another
 > namespace. Lines the app itself writes (compiler errors, the unnamed-shape warning, sketch-mode
-> status) appear in the same panel but are tagged with their own source rather than your file name.
+> status) appear in the same panel but are tagged with their own source rather than your file name;
+> `ConsoleOutput`, the singleton that collects them, is public in the same namespace and so turns up
+> in completion, but it is the panel's plumbing rather than something to call — write through
+> `VizConsole.Log` and your file and line are filled in for you.
 
 ---
 
@@ -3505,7 +3508,7 @@ makes a divided drawing reproducible from your own code:
 
 | Member | Namespace | Signature |
 |--------|-----------|-----------|
-| `SvgExporter.SvgTile` | `DoodleSharp.Canvas` | `readonly record struct SvgTile(Rect PageRect, double Scale, double PanX, double PanY, IEnumerable<IDrawable> Shapes)` — one cell: where it sits on the page, its zoom, its pan, and what is in it |
+| `SvgExporter.SvgTile` | `DoodleSharp.Canvas` | `readonly record struct SvgTile(Rect PageRect, double Scale, double PanX, double PanY, IReadOnlyList<IDrawable> Shapes)` — one cell: where it sits on the page, its zoom, its pan, and what is in it |
 | `SvgExporter.ExportTiled` | `DoodleSharp.Canvas` | `static string ExportTiled(IReadOnlyList<SvgTile> tiles, double width, double height)` — each tile becomes a clipped, transformed `<g>` |
 | `SvgExporter.SaveTiledToFile` | `DoodleSharp.Canvas` | `static void SaveTiledToFile(string filePath, IReadOnlyList<SvgTile> tiles, double width, double height)` |
 | `PdfExporter.PdfTile` | `DoodleSharp.Export` | `readonly record struct PdfTile(Rect PageRect, double Scale, double PanX, double PanY, IReadOnlyList<IDrawable> Shapes)` |
@@ -4055,8 +4058,11 @@ var caption = $"radius {r} " +
 ```
 
 The caret lands inside the reopened quote, ready to keep typing, and the `$` is carried over only if
-the original literal had one. Verbatim (`@"…"`) and raw (`"""…"""`) strings already accept line
-breaks, so `Enter` behaves normally in those.
+the original literal had one. The continuation is indented one level past the line you started on —
+unless that line already begins with a string, in which case it keeps the indent it has, so a literal
+split three times stays in one column. Verbatim (`@"…"`) and raw (`"""…"""`) strings already accept
+line breaks, so `Enter` behaves normally in those, as it does inside an interpolation hole
+(`$"{ … }"`), directly after the backslash of an escape sequence, and while text is selected.
 
 ### Find and Replace
 | Shortcut | Action |
@@ -4074,6 +4080,10 @@ breaks, so `Enter` behaves normally in those.
 | `Shift+Alt+Up` | Copy line up |
 | `Shift+Alt+Down` | Copy line down |
 | `Ctrl+Shift+D` | Delete line |
+
+Both copy-line keys leave the caret **on the copy** — `Shift+Alt+Down` on the lower one,
+`Shift+Alt+Up` on the upper one — so holding the key duplicates what you just made rather than
+walking away from it. With a selection they duplicate every line the selection touches.
 
 ### Selection Operations
 | Shortcut | Action |
@@ -4095,8 +4105,9 @@ DoodleSharp supports VS Code-style multi-cursor editing:
 5. **Ctrl+V**: Pastes at all cursor positions. When the clipboard holds exactly one line per
    cursor — the shape a multi-cursor copy produces — each cursor gets its own line; otherwise the
    whole text goes to every cursor
-6. **Tab / Shift+Tab**: Indents every cursor to its next tab stop / strips one indent level from
-   every line a cursor is on
+6. **Tab / Shift+Tab**: Indents every cursor to its next tab stop, so the columns stay aligned /
+   strips one indent level (a tab, or up to four spaces) from every line a cursor is on — outdent is
+   a *line* operation, so two cursors on the same line strip it once between them
 7. **Backspace/Delete**: Works at all cursor positions
 8. **Arrow Keys**: Move all cursors (Left/Right/Up/Down)
 9. **Home/End**: Move all cursors to line start/end
@@ -4146,7 +4157,7 @@ All cursors are visually indicated with white caret lines, and selections are hi
 DoodleSharp includes a full-featured code editor with VSCode-like intellisense powered by Roslyn.
 
 ### Autocomplete
-- **Automatic**: Triggered on typing `.`, `(`, `<`, `{`, `[`, or `Ctrl+Space`
+- **Automatic**: The list opens on `.`, from the second letter of an identifier, and after `new` / `is` / `as`; `Ctrl+Space` opens it on demand. `(` raises signature help rather than a list, and `<`, `{` and `[` open one only where they mean something — a generic argument, an object initialiser, an attribute
 - **Fuzzy matching**: Type partial names (e.g., "clr" matches "Color", "VPt" matches "VPoint") with intelligent scoring that rewards prefix matches, camelCase alignment, and consecutive character runs
 - **Context-aware**: Completions adapt to context -- object initializer properties, generic type arguments, attribute types, and more
 - **Alphabetical**: Once filtered, the list is in plain A–Z order, so a member you already know the name of is where the alphabet says it is. Snippets stay above it
@@ -4217,20 +4228,26 @@ the line — a trailing `circle.` with a statement below it still lists the circ
 of your own classes in **other files of the project** are included, and a file you create mid-session
 is available immediately rather than after a reload.
 
-**Inside a function call the list holds values, not everything in scope.** `Draw(` used to open on
-every type, method, namespace and keyword the file could see, with the two or three variables you
-meant to pass buried among them. Between the parentheses the list is now the values you already
-have — locals, parameters, fields and properties — filtered as you type, plus the type the parameter
-expects and the keywords that can start an argument (`new`, `null`, `true`, `this`, `out`, …). Type
-`new` and the full list of types comes back, which is the one place inside a call where naming a type
-is the point. A lambda body or a statement written inside the call is code like any other and gets
-the ordinary list.
+**Inside a function call the list holds values, not everything in scope.** Typing an argument into
+`Draw(…)` used to bring up every type, method, namespace and keyword the file could see, with the
+two or three variables you actually meant to pass buried among them. Between the parentheses the
+list is now the values you already have — locals, parameters, fields and properties — filtered as
+you type, plus the type the parameter expects and the keywords that can start an argument (`new`,
+`null`, `true`, `this`, `out`, …). Type `new` and the full list of types comes back, which is the
+one place inside a call where naming a type is the point. A lambda body, an object initialiser or a
+statement written inside the call is code like any other and gets the ordinary list, and an
+indexer's brackets — `points[` — follow the same rule as parentheses.
+
+The deliberate cost is a call written *as* an argument: in `Draw(Math.Cos(t))`, `Math` is no longer
+in the list, because a type or a method is not a value you already have. Typing it out works exactly
+as before, and the member list comes back on the dot.
 
 **A property's accessor list offers accessors.** Typing `{ get` used to suggest `GetHashCode` and
 `GetType` — neither of which compiles there — and never `get;` itself. Between the braces of a
 property you get `get;`, `get { }`, `set;`, `set { }`, `init;` and the accessor modifiers, and
 nothing else; inside an accessor's body the ordinary list returns. A property's initialiser knows its
-declared type too, so `public List<string> Names { get; set; } = new ` opens on `List<string>`.
+declared type too, so `public List<string> Names { get; set; } = new ` opens on `List<string>`; a
+parameter's default value is read the same way.
 
 Signature help (the parameter tooltip) shows **every overload**, with the one matching what you have
 typed so far listed first, and closes as soon as the caret leaves the argument list — on the closing
