@@ -9,6 +9,42 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Tab now works with multiple cursors.** It was never claimed by the multi-cursor handler, so the
+  editor indented the first line and outdented the rest in the same keystroke and the cursors
+  drifted apart. Tab now carries every cursor to its own next tab stop, and Shift+Tab strips one
+  indent level from every line a cursor is on.
+
+- **Copy and paste across multiple cursors keeps the fragments apart.** Copying four words under
+  four cursors and pasting put all four words at all four places. When the clipboard holds exactly
+  one line per cursor, each cursor now gets its own line; anything else still pastes whole at every
+  cursor.
+
+- **Enter inside a string no longer breaks the code.** Pressing Enter between the quotes of `"…"` or
+  `$"…"` inserted a raw line break, which C# does not allow, so the file stopped compiling. It now
+  closes the literal and continues it on the next line — `$"hello " +` above, `$"world"` below, with
+  the caret ready inside the reopened quote. Verbatim (`@"…"`) and raw (`"""…"""`) strings, where a
+  line break is already legal, are untouched.
+
+- **Duplicating a line (Alt+Shift+Down) leaves the caret on the copy.** With the caret at the end of
+  the line, it landed a line too far down.
+
+### Changed
+
+- **The completion list inside a function call now offers variables, not everything in scope.**
+  Typing `Draw(` listed every type, method and keyword in scope and buried the two or three names
+  you were reaching for. It now shows locals, parameters, fields and properties — filtered as you
+  type — plus the expected parameter type. Typing `new` inside the call brings the full list of
+  types back.
+
+- **`get` and `set` are offered inside a property.** Typing `{ get` used to suggest `GetHashCode`
+  and `GetType` and never the accessor itself; the accessor list now offers `get;`, `get { }`,
+  `set;`, `set { }`, `init;` and the accessor modifiers, and nothing else.
+
+- **A property initialiser knows its own type.** `public List<string> Names { get; set; } = new `
+  suggested nothing after `new`; it now opens on `List<string>`. Parameter defaults gained the same.
+
 ## [2026.8.14] - 2026-08-20
 
 ### Fixed

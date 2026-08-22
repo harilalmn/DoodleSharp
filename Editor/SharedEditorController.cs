@@ -1257,6 +1257,15 @@ namespace DoodleSharp.Editor
 
             if (e.Key == Key.Return && (Keyboard.Modifiers & ~ModifierKeys.Shift) == 0)
             {
+                // Enter inside a single-line string literal splits the *literal*, not just the
+                // line: a raw newline between the quotes does not compile (note 139). Checked
+                // ahead of auto-indent, which is a formatting preference rather than correctness.
+                if (_completionWindow == null && HandleStringLiteralEnter())
+                {
+                    e.Handled = true;
+                    return;
+                }
+
                 if (AutoIndentEnabled && HandleAutoIndentEnter())
                     e.Handled = true;
                 return;
@@ -2312,6 +2321,25 @@ namespace DoodleSharp.Editor
             return lineText.Substring(0, i);
         }
 
+        /// <summary>
+        /// Closes the string literal the caret is in and reopens it on the next line, so Enter
+        /// inside <c>$"…"</c> leaves compiling code. False when the caret is not in such a literal.
+        /// </summary>
+        private bool HandleStringLiteralEnter()
+        {
+            // With text selected, Enter replaces it; splitting the literal around a selection would
+            // leave the selected text stranded in the middle of the continuation.
+            if (!_editor.TextArea.Selection.IsEmpty) return false;
+
+            var document = _editor.Document;
+            var split = StringLiteralSplitter.Compute(document.Text, _editor.CaretOffset, Environment.NewLine);
+            if (split == null) return false;
+
+            document.Insert(split.Value.Offset, split.Value.InsertedText);
+            _editor.CaretOffset = split.Value.CaretOffset;
+            return true;
+        }
+
         private bool HandleAutoIndentEnter()
         {
             var document = _editor.Document;
@@ -2423,22 +2451,35 @@ namespace DoodleSharp.Editor
             var lastLine = document.GetLineByNumber(endLine);
             var textToDuplicate = document.GetText(firstLine.Offset, lastLine.EndOffset - firstLine.Offset);
 
+            // An insert *at* the caret's own offset carries the caret along with it, so a caret at
+            // the end of the line was already on the copy before the line adjustment ran, and the
+            // adjustment pushed it a line too far (note 138).
+            var caretLine = textArea.Caret.Line;
+            var caretColumn = textArea.Caret.Column;
+
             document.Insert(lastLine.EndOffset, Environment.NewLine + textToDuplicate);
             var lineCount = endLine - startLine + 1;
-            textArea.Caret.Line = textArea.Caret.Line + lineCount;
+            textArea.Caret.Position = new TextViewPosition(caretLine + lineCount, caretColumn);
         }
 
         private void CopyLineUp()
         {
             if (!_editor.IsKeyboardFocusWithin) return;
             var document = _editor.Document;
+            var textArea = _editor.TextArea;
             var (startLine, endLine) = GetSelectedLineRange();
 
             var firstLine = document.GetLineByNumber(startLine);
             var lastLine = document.GetLineByNumber(endLine);
             var textToDuplicate = document.GetText(firstLine.Offset, lastLine.EndOffset - firstLine.Offset);
 
+            // Mirror of CopyLineDown: the insert is before the caret, so the caret drifts down onto
+            // the *original* text unless it is put back on the upper copy explicitly.
+            var caretLine = textArea.Caret.Line;
+            var caretColumn = textArea.Caret.Column;
+
             document.Insert(firstLine.Offset, textToDuplicate + Environment.NewLine);
+            textArea.Caret.Position = new TextViewPosition(caretLine, caretColumn);
         }
 
         private void ToggleComment()
@@ -2604,6 +2645,11 @@ namespace DoodleSharp.Editor
                             : renderer.MoveAllCursorsRight,
                 Key.Home   => mods == ModifierKeys.Shift ? renderer.ExtendAllSelectionsHome : renderer.MoveAllCursorsHome,
                 Key.End    => mods == ModifierKeys.Shift ? renderer.ExtendAllSelectionsEnd : renderer.MoveAllCursorsEnd,
+                // Tab has to be claimed here. Left to AvalonEdit it sees only the main selection,
+                // so the first cursor was indented while the others were outdented by the same key.
+                Key.Tab    => mods == ModifierKeys.Shift
+                            ? () => renderer.OutdentAtAllCursors()
+                            : () => renderer.IndentAtAllCursors(),
                 _ => null
             };
 

@@ -29,6 +29,12 @@ public class MultiSelectionRenderer : IBackgroundRenderer
     private readonly List<int> _anchors = new();
     private readonly List<int> _carets = new();
 
+    /// <summary>
+    /// Indent width used by Tab/Shift+Tab at every cursor. Matches the editor's
+    /// <c>Options.IndentationSize</c> default and <see cref="EnterAtAllCursors"/>'s brace indent.
+    /// </summary>
+    public const int DefaultIndentSize = 4;
+
     // Selection highlight styling - matches the editor's selection color
     private static readonly Brush SelectionBrush;
     private static readonly Brush CaretBrush;
@@ -173,66 +179,66 @@ public class MultiSelectionRenderer : IBackgroundRenderer
     }
 
     /// <summary>
-    /// Inserts text at all cursor positions (main + additional selections).
+    /// Inserts the same text at every cursor position (main + additional selections),
+    /// replacing whatever each one has selected.
     /// </summary>
-    public void InsertTextAtAllCursors(string text)
+    public void InsertTextAtAllCursors(string text) => InsertTextsAtAllCursors(new[] { text });
+
+    /// <summary>
+    /// Replaces every cursor's selection with its own text. <paramref name="texts"/> is matched to
+    /// the cursors in <em>document order</em>; a single-element list means "the same text at every
+    /// cursor". This is the one place the document is edited for a multi-cursor insert, so the
+    /// offset bookkeeping below is the only copy of it.
+    /// </summary>
+    public void InsertTextsAtAllCursors(IReadOnlyList<string> texts)
     {
-        if (_selections.Count == 0) return;
+        if (_selections.Count == 0 || texts.Count == 0) return;
 
         var document = _textView.Document;
-        var mainSelection = _textArea.Selection;
-        var mainSegment = mainSelection.SurroundingSegment;
+        var mainSegment = _textArea.Selection.SurroundingSegment;
 
-        // Collect all selections including main with their indices, sorted by offset descending
-        // (process from end to start to avoid offset shifts affecting earlier positions)
-        var allSelections = new List<(int Offset, int Length, int Index, bool IsMain)>();
-
+        // Collect every cursor: the additional ones, plus the main selection (SurroundingSegment is
+        // null when there is no selection, in which case the bare caret is the cursor).
+        var cursors = new List<(int Offset, int Length, bool IsMain)>();
         for (int i = 0; i < _selections.Count; i++)
-        {
-            allSelections.Add((_selections[i].StartOffset, _selections[i].Length, i, false));
-        }
+            cursors.Add((_selections[i].StartOffset, _selections[i].Length, false));
 
-        // Add main selection/caret position (SurroundingSegment can be null if no selection)
         if (mainSegment != null)
-        {
-            allSelections.Add((mainSegment.Offset, mainSegment.Length, -1, true));
-        }
+            cursors.Add((mainSegment.Offset, mainSegment.Length, true));
         else
+            cursors.Add((_textArea.Caret.Offset, 0, true));
+
+        // Document order is what "one clipboard line per cursor" means, and it is what the
+        // ascending offset-adjustment pass at the bottom assumes.
+        cursors.Sort((a, b) => a.Offset.CompareTo(b.Offset));
+
+        var edits = new List<(int Offset, int Length, string Text, bool IsMain)>(cursors.Count);
+        for (int i = 0; i < cursors.Count; i++)
         {
-            // No selection, use caret position
-            allSelections.Add((_textArea.Caret.Offset, 0, -1, true));
+            var text = texts.Count == 1 ? texts[0] : texts[Math.Min(i, texts.Count - 1)];
+            edits.Add((cursors[i].Offset, cursors[i].Length, text, cursors[i].IsMain));
         }
 
-        // Sort by offset descending for deletion
-        var sortedDesc = allSelections.OrderByDescending(s => s.Offset).ToList();
-
-        // Begin update for undo grouping
+        // Apply from the end backwards so an earlier edit never shifts a later one's offset.
         document.BeginUpdate();
         try
         {
-            foreach (var (offset, length, _, _) in sortedDesc)
-            {
-                // Replace selection with new text
-                document.Replace(offset, length, text);
-            }
+            for (int i = edits.Count - 1; i >= 0; i--)
+                document.Replace(edits[i].Offset, edits[i].Length, edits[i].Text);
         }
         finally
         {
             document.EndUpdate();
         }
 
-        // Calculate new positions (process in ascending order)
-        var sortedAsc = allSelections.OrderBy(s => s.Offset).ToList();
-        int adjustment = 0;
-
-        // Clear and rebuild selections with updated positions
         _selections.Clear();
         _anchors.Clear();
         _carets.Clear();
 
+        int adjustment = 0;
         int mainNewOffset = 0;
 
-        foreach (var (offset, length, index, isMain) in sortedAsc)
+        foreach (var (offset, length, text, isMain) in edits)
         {
             var newOffset = offset + adjustment + text.Length;
             adjustment += text.Length - length;
@@ -249,7 +255,6 @@ public class MultiSelectionRenderer : IBackgroundRenderer
             }
         }
 
-        // Update main caret position
         _textArea.Caret.Offset = mainNewOffset;
         _textArea.Selection = Selection.Create(_textArea, mainNewOffset, mainNewOffset);
 
@@ -1034,6 +1039,11 @@ public class MultiSelectionRenderer : IBackgroundRenderer
     }
 
     /// <summary>
+    /// Number of live cursors: the additional ones plus the main caret.
+    /// </summary>
+    public int CursorCount => _selections.Count + 1;
+
+    /// <summary>
     /// Pastes clipboard text at all cursor positions.
     /// </summary>
     public void PasteAtAllCursors()
@@ -1054,8 +1064,163 @@ public class MultiSelectionRenderer : IBackgroundRenderer
             return;
         }
 
-        // Use InsertTextAtAllCursors which handles all the offset adjustments
-        InsertTextAtAllCursors(clipboardText);
+        // A multi-cursor copy joins one fragment per cursor with newlines, so pasting the joined
+        // text back at every cursor pasted all four words into all four places. When the clipboard
+        // holds exactly one line per cursor, hand each cursor its own line instead.
+        var perCursor = SplitForCursors(clipboardText, CursorCount);
+        if (perCursor != null)
+            InsertTextsAtAllCursors(perCursor);
+        else
+            InsertTextAtAllCursors(clipboardText);
+    }
+
+    /// <summary>
+    /// Splits clipboard text into one fragment per cursor, or returns null when it does not divide
+    /// evenly (in which case the whole text belongs at every cursor). This is VS Code's
+    /// <c>multiCursorPaste: spread</c> rule: the line count has to match the cursor count exactly.
+    /// </summary>
+    public static IReadOnlyList<string>? SplitForCursors(string clipboardText, int cursorCount)
+    {
+        if (cursorCount < 2 || string.IsNullOrEmpty(clipboardText)) return null;
+
+        var lines = clipboardText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+
+        // Copying whole lines leaves a trailing newline, and the empty tail it produces is not a
+        // cursor's worth of text.
+        if (lines.Length == cursorCount + 1 && lines[lines.Length - 1].Length == 0)
+            lines = lines[..^1];
+
+        return lines.Length == cursorCount ? lines : null;
+    }
+
+    /// <summary>
+    /// Tab at every cursor: each one gets the spaces that carry it to the next tab stop, so the
+    /// columns stay aligned. Without this the key fell through to AvalonEdit, which knows only
+    /// about the main caret and indented (or, with a selection, outdented) the wrong lines.
+    /// </summary>
+    public void IndentAtAllCursors(int indentSize = DefaultIndentSize)
+    {
+        if (_selections.Count == 0) return;
+
+        var document = _textView.Document;
+        var texts = new List<string>();
+
+        foreach (var offset in GetOrderedCursorStarts())
+        {
+            var line = document.GetLineByOffset(offset);
+            var column = offset - line.Offset;
+            texts.Add(new string(' ', indentSize - (column % indentSize)));
+        }
+
+        InsertTextsAtAllCursors(texts);
+    }
+
+    /// <summary>
+    /// Shift+Tab at every cursor. Outdent is a *line* operation — it strips one indent level from
+    /// the start of each line a cursor sits on — so two cursors on the same line strip it once.
+    /// </summary>
+    public void OutdentAtAllCursors(int indentSize = DefaultIndentSize)
+    {
+        if (_selections.Count == 0) return;
+
+        var document = _textView.Document;
+
+        // Everything the remap needs is read before the document changes, because the offsets it
+        // reads from would move underneath it otherwise.
+        var cursors = new List<(int Offset, int LineNumber, int LineStart, bool IsMain)>();
+        foreach (var sel in _selections)
+        {
+            var l = document.GetLineByOffset(sel.EndOffset);
+            cursors.Add((sel.EndOffset, l.LineNumber, l.Offset, false));
+        }
+        var mainLine = document.GetLineByOffset(_textArea.Caret.Offset);
+        cursors.Add((_textArea.Caret.Offset, mainLine.LineNumber, mainLine.Offset, true));
+
+        // One removal per line, keyed by line number so two cursors on a line strip it once.
+        var removals = new Dictionary<int, (int Offset, int Length)>();
+        foreach (var (_, lineNumber, lineStart, _) in cursors)
+        {
+            if (removals.ContainsKey(lineNumber)) continue;
+
+            var line = document.GetLineByNumber(lineNumber);
+            var lineText = document.GetText(line.Offset, line.Length);
+            int remove = 0;
+            if (lineText.Length > 0 && lineText[0] == '\t')
+            {
+                remove = 1;
+            }
+            else
+            {
+                while (remove < indentSize && remove < lineText.Length && lineText[remove] == ' ')
+                    remove++;
+            }
+
+            if (remove > 0)
+                removals[lineNumber] = (lineStart, remove);
+        }
+
+        if (removals.Count == 0) return;
+
+        var ordered = removals.Values.OrderBy(r => r.Offset).ToList();
+
+        document.BeginUpdate();
+        try
+        {
+            for (int i = ordered.Count - 1; i >= 0; i--)
+                document.Remove(ordered[i].Offset, ordered[i].Length);
+        }
+        finally
+        {
+            document.EndUpdate();
+        }
+
+        _selections.Clear();
+        _anchors.Clear();
+        _carets.Clear();
+
+        int mainNewOffset = _textArea.Caret.Offset;
+
+        foreach (var (offset, lineNumber, lineStart, isMain) in cursors)
+        {
+            // What was removed above this cursor's line shifts it wholesale; what was removed on
+            // its own line shifts it only as far as the new line start.
+            int before = ordered.Where(r => r.Offset < lineStart).Sum(r => r.Length);
+            int own = removals.TryGetValue(lineNumber, out var r0) ? r0.Length : 0;
+            int newOffset = Math.Max(offset - own, lineStart) - before;
+
+            if (isMain)
+            {
+                mainNewOffset = newOffset;
+            }
+            else
+            {
+                _selections.Add(new TextSegment { StartOffset = newOffset, Length = 0 });
+                _anchors.Add(newOffset);
+                _carets.Add(newOffset);
+            }
+        }
+
+        _textArea.Caret.Offset = mainNewOffset;
+        _textArea.Selection = Selection.Create(_textArea, mainNewOffset, mainNewOffset);
+
+        _textView.InvalidateLayer(Layer);
+    }
+
+    /// <summary>
+    /// The offset each cursor's replacement starts at (its selection start, or the bare caret),
+    /// in document order — the same order <see cref="InsertTextsAtAllCursors"/> matches texts to.
+    /// </summary>
+    private List<int> GetOrderedCursorStarts()
+    {
+        var starts = new List<int>();
+        foreach (var sel in _selections)
+            starts.Add(sel.StartOffset);
+
+        var mainSegment = _textArea.Selection.SurroundingSegment;
+        starts.Add(mainSegment?.Offset ?? _textArea.Caret.Offset);
+
+        starts.Sort();
+        return starts;
     }
 
     /// <summary>
