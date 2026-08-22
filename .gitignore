@@ -74,3 +74,7 @@ installer/output/
 
 # Benchmark PNG snapshots are for eyeballing a change, not for keeping.
 Bench/snapshots/
+
+# Working notes for a round of reported bugs — kept beside the docs while the round is open,
+# but it is a scratch checklist, not documentation, and a stale one blocks the release script.
+docs/bugs_and_new_feature_requirements.md
