@@ -1720,6 +1720,27 @@ public partial class MainWindow : Window
                 }
                 return;
             }
+            else if (e.Key == Key.Tab)
+            {
+                // Tab has to be claimed here. Left to AvalonEdit it sees only the main selection,
+                // so the first cursor was indented while the others were outdented by the same key.
+                _isMultiCursorEditing = true;
+                _isAddingNextOccurrence = true;
+                try
+                {
+                    if (Keyboard.Modifiers == ModifierKeys.Shift)
+                        _multiSelectionRenderer.OutdentAtAllCursors();
+                    else
+                        _multiSelectionRenderer.IndentAtAllCursors();
+                    e.Handled = true;
+                }
+                finally
+                {
+                    _isAddingNextOccurrence = false;
+                    _isMultiCursorEditing = false;
+                }
+                return;
+            }
         }
 
         // Handle Tab for snippet placeholder navigation
@@ -1781,6 +1802,16 @@ public partial class MainWindow : Window
             }
         }
 
+        // Enter inside a single-line string literal splits the *literal*, not just the line: a raw
+        // newline between the quotes does not compile (note 139). Checked before the auto-indent
+        // guard because auto-indent is a formatting preference, and this is about valid code.
+        if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.None && _completionWindow == null
+            && HandleStringLiteralEnter())
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Enter && !AutoIndentMenuItem.IsChecked)
             return;
 
@@ -1788,6 +1819,25 @@ public partial class MainWindow : Window
         {
             e.Handled = HandleAutoIndentEnter();
         }
+    }
+
+    /// <summary>
+    /// Closes the string literal the caret is in and reopens it on the next line, so Enter inside
+    /// <c>$"…"</c> leaves compiling code. Returns false when the caret is not in such a literal.
+    /// </summary>
+    private bool HandleStringLiteralEnter()
+    {
+        // With text selected, Enter replaces it; splitting the literal around a selection would
+        // leave the selected text stranded in the middle of the continuation.
+        if (!CodeEditor.TextArea.Selection.IsEmpty) return false;
+
+        var document = CodeEditor.Document;
+        var split = Editor.StringLiteralSplitter.Compute(document.Text, CodeEditor.CaretOffset, Environment.NewLine);
+        if (split == null) return false;
+
+        document.Insert(split.Value.Offset, split.Value.InsertedText);
+        CodeEditor.CaretOffset = split.Value.CaretOffset;
+        return true;
     }
 
     /// <summary>
@@ -8176,13 +8226,20 @@ public partial class MainWindow : Window
         var lastLine = document.GetLineByNumber(endLine);
         var textToDuplicate = document.GetText(firstLine.Offset, lastLine.EndOffset - firstLine.Offset);
 
+        // Where the caret was before the insert. An insert *at* the caret's own offset carries the
+        // caret along with it, so a caret at the end of the line was already sitting at the end of
+        // the copy before the line adjustment ran — and the adjustment then pushed it a line too far
+        // (note 138). Restoring the remembered line/column covers both cases.
+        var caretLine = textArea.Caret.Line;
+        var caretColumn = textArea.Caret.Column;
+
         // Insert the duplicated text after the last line
         var insertOffset = lastLine.EndOffset;
         document.Insert(insertOffset, Environment.NewLine + textToDuplicate);
 
-        // Move caret down by the number of lines duplicated
+        // Move caret down by the number of lines duplicated, so it stays on the copy.
         var lineCount = endLine - startLine + 1;
-        textArea.Caret.Line = textArea.Caret.Line + lineCount;
+        textArea.Caret.Position = new TextViewPosition(caretLine + lineCount, caretColumn);
     }
 
     private void CopyLineUp()
@@ -8218,11 +8275,17 @@ public partial class MainWindow : Window
         var lastLine = document.GetLineByNumber(endLine);
         var textToDuplicate = document.GetText(firstLine.Offset, lastLine.EndOffset - firstLine.Offset);
 
+        // Same caret-carrying problem as CopyLineDown, mirrored: the insert is before the caret, so
+        // the caret drifts down onto the *original* text unless it is put back explicitly.
+        var caretLine = textArea.Caret.Line;
+        var caretColumn = textArea.Caret.Column;
+
         // Insert the duplicated text before the first line
         var insertOffset = firstLine.Offset;
         document.Insert(insertOffset, textToDuplicate + Environment.NewLine);
 
-        // Caret stays at same position (which is now in the duplicated text)
+        // Caret stays where it was, which is now the upper copy.
+        textArea.Caret.Position = new TextViewPosition(caretLine, caretColumn);
     }
 
     private void DeleteLine()

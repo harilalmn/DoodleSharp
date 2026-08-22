@@ -4043,7 +4043,20 @@ project. See [Auto-Run](#auto-run).
 | `Ctrl+Shift+F` | Find in files |
 | `Ctrl+/` | Toggle comment |
 | `Ctrl+Shift+K` | Insert a colour (picker writes the string literal) |
-| `Tab` / `Shift+Tab` | Indent / Unindent |
+| `Tab` / `Shift+Tab` | Indent / Unindent (every cursor, when several are active) |
+| `Enter` | New line — inside a `"…"` or `$"…"` string it splits the string instead (see below) |
+
+**Enter inside a string splits the string.** C# does not allow a raw line break between the quotes,
+so a long literal is closed and continued on the next line:
+
+```csharp
+var caption = $"radius {r} " +
+    $"and area {area}";
+```
+
+The caret lands inside the reopened quote, ready to keep typing, and the `$` is carried over only if
+the original literal had one. Verbatim (`@"…"`) and raw (`"""…"""`) strings already accept line
+breaks, so `Enter` behaves normally in those.
 
 ### Find and Replace
 | Shortcut | Action |
@@ -4078,13 +4091,18 @@ DoodleSharp supports VS Code-style multi-cursor editing:
 1. **Ctrl+D**: Selects word at cursor, then adds next occurrences
 2. **Ctrl+Alt+Up/Down**: Adds cursors vertically above/below
 3. **Type**: Text is inserted at ALL cursor positions simultaneously
-4. **Ctrl+V**: Paste at all cursor positions
-5. **Backspace/Delete**: Works at all cursor positions
-6. **Arrow Keys**: Move all cursors (Left/Right/Up/Down)
-7. **Home/End**: Move all cursors to line start/end
-8. **Shift+Arrow/Home/End**: Extend selections at all cursors
-9. **Escape**: Exits multi-cursor mode
-10. **Click elsewhere**: Clears all multi-cursors
+4. **Ctrl+C / Ctrl+X**: Copies every selection, newline-joined in document order
+5. **Ctrl+V**: Pastes at all cursor positions. When the clipboard holds exactly one line per
+   cursor — the shape a multi-cursor copy produces — each cursor gets its own line; otherwise the
+   whole text goes to every cursor
+6. **Tab / Shift+Tab**: Indents every cursor to its next tab stop / strips one indent level from
+   every line a cursor is on
+7. **Backspace/Delete**: Works at all cursor positions
+8. **Arrow Keys**: Move all cursors (Left/Right/Up/Down)
+9. **Home/End**: Move all cursors to line start/end
+10. **Shift+Arrow/Home/End**: Extend selections at all cursors
+11. **Escape**: Exits multi-cursor mode
+12. **Click elsewhere**: Clears all multi-cursors
 
 All cursors are visually indicated with white caret lines, and selections are highlighted.
 
@@ -4198,6 +4216,21 @@ for a value, static members for a type name. This holds whether or not the dot i
 the line — a trailing `circle.` with a statement below it still lists the circle's members. Members
 of your own classes in **other files of the project** are included, and a file you create mid-session
 is available immediately rather than after a reload.
+
+**Inside a function call the list holds values, not everything in scope.** `Draw(` used to open on
+every type, method, namespace and keyword the file could see, with the two or three variables you
+meant to pass buried among them. Between the parentheses the list is now the values you already
+have — locals, parameters, fields and properties — filtered as you type, plus the type the parameter
+expects and the keywords that can start an argument (`new`, `null`, `true`, `this`, `out`, …). Type
+`new` and the full list of types comes back, which is the one place inside a call where naming a type
+is the point. A lambda body or a statement written inside the call is code like any other and gets
+the ordinary list.
+
+**A property's accessor list offers accessors.** Typing `{ get` used to suggest `GetHashCode` and
+`GetType` — neither of which compiles there — and never `get;` itself. Between the braces of a
+property you get `get;`, `get { }`, `set;`, `set { }`, `init;` and the accessor modifiers, and
+nothing else; inside an accessor's body the ordinary list returns. A property's initialiser knows its
+declared type too, so `public List<string> Names { get; set; } = new ` opens on `List<string>`.
 
 Signature help (the parameter tooltip) shows **every overload**, with the one matching what you have
 typed so far listed first, and closes as soon as the caret leaves the argument list — on the closing

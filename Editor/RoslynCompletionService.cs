@@ -112,6 +112,15 @@ public class RoslynCompletionService
             if (IsDeclaringAName(token, position))
                 return (completions, false, prefix, expectedType);
 
+            // Inside a property's accessor list the only things that can legally appear are the
+            // accessors and their modifiers. LookupSymbols answers with every member in scope, so
+            // `{get` used to offer GetHashCode and GetType and never `get;` itself.
+            if (IsInPropertyAccessorList(root, position))
+            {
+                AddAccessorCompletions(completions);
+                return (completions, false, prefix, null);
+            }
+
             // Check if we're after 'new' keyword
             isAfterNew = IsAfterNewKeyword(root, position, code);
 
@@ -301,10 +310,19 @@ public class RoslynCompletionService
                 }
             }
 
+            // An argument is a *value*, and the value the user reaches for is nearly always one
+            // they already have in hand. Offering every type, method and keyword in scope buried
+            // those few names in hundreds of rows. After `new` the restriction lifts: there the
+            // whole point is to name a type (see the isAfterNew branch below).
+            bool argumentsOnly = memberAccessContainer == null && !isAfterNew
+                                 && IsInArgumentPosition(root, position);
+
             // 4. Convert to Completion Data
             foreach (var symbol in symbols)
             {
                 if (ShouldHide(symbol)) continue;
+
+                if (argumentsOnly && !IsVariableLike(symbol)) continue;
 
                 // Skip variables that are being declared in the current statement
                 if (symbol.Kind == SymbolKind.Local && declaringVariables.Contains(symbol.Name))
@@ -402,7 +420,7 @@ public class RoslynCompletionService
             }
 
             // 6. Add DoodleSharp.Geometry types even when not imported (for convenience)
-            if (memberAccessContainer == null && !isAfterNew)
+            if (memberAccessContainer == null && !isAfterNew && !argumentsOnly)
             {
                 AddDoodleSharpTypes(completions, compilation, prefix);
             }
@@ -414,7 +432,10 @@ public class RoslynCompletionService
             // never what is wanted.
             if (memberAccessContainer == null && !isAfterNew)
             {
-                AddKeywords(completions);
+                if (argumentsOnly)
+                    AddArgumentKeywords(completions);
+                else
+                    AddKeywords(completions);
             }
         }
         catch (Exception ex)
@@ -493,6 +514,25 @@ public class RoslynCompletionService
             {
                 if (node is EqualsValueClauseSyntax equalsNode)
                 {
+                    // `public List<string> Names { get; set; } = new |`. A property initialiser
+                    // hangs off the property declaration itself, not off a variable declarator, so
+                    // the declarator branch below never saw it and the expected type came back null
+                    // — which is why nothing was suggested after `new` there.
+                    if (equalsNode.Parent is PropertyDeclarationSyntax propertyDecl)
+                    {
+                        var propertyType = semanticModel.GetTypeInfo(propertyDecl.Type).Type;
+                        if (propertyType != null)
+                            return propertyType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+                    }
+
+                    // Same shape for a parameter's default value: `void M(List<int> xs = new |)`.
+                    if (equalsNode.Parent is ParameterSyntax parameterDecl && parameterDecl.Type != null)
+                    {
+                        var parameterType = semanticModel.GetTypeInfo(parameterDecl.Type).Type;
+                        if (parameterType != null)
+                            return parameterType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+                    }
+
                     // var x = ...; found the '='
                     if (equalsNode.Parent is VariableDeclaratorSyntax varDecl)
                     {
@@ -987,6 +1027,135 @@ public class RoslynCompletionService
         foreach (var keyword in StatementKeywords)
             completions.Add(new CompletionData(keyword, $"{keyword} keyword", CompletionKind.Keyword));
     }
+
+    /// <summary>
+    /// The keywords that can start an argument. Control flow and declarations cannot appear here,
+    /// and listing them alongside the handful of variables in scope is exactly the noise that made
+    /// the argument list unusable.
+    /// </summary>
+    private static readonly string[] ArgumentKeywords =
+    {
+        "new", "true", "false", "null", "this", "base", "out", "ref", "in", "typeof", "nameof"
+    };
+
+    private static void AddArgumentKeywords(List<ICompletionData> completions)
+    {
+        foreach (var keyword in ArgumentKeywords)
+            completions.Add(new CompletionData(keyword, $"{keyword} keyword", CompletionKind.Keyword));
+    }
+
+    /// <summary>
+    /// What a property's accessor list accepts: the accessors themselves, in both the auto-property
+    /// and the bodied spelling, plus the modifiers that may precede one.
+    /// </summary>
+    private static readonly (string Text, string Description)[] AccessorCompletions =
+    {
+        ("get;",      "auto-property getter"),
+        ("get { }",   "getter with a body"),
+        ("set;",      "auto-property setter"),
+        ("set { }",   "setter with a body"),
+        ("init;",     "init-only setter"),
+        ("private",   "private accessor modifier"),
+        ("protected", "protected accessor modifier"),
+        ("internal",  "internal accessor modifier"),
+    };
+
+    private static void AddAccessorCompletions(List<ICompletionData> completions)
+    {
+        foreach (var (text, description) in AccessorCompletions)
+            completions.Add(new CompletionData(text, description, CompletionKind.Keyword));
+    }
+
+    /// <summary>
+    /// True when the caret sits directly in a property's accessor list — <c>{ get; se| }</c> — and
+    /// not inside an accessor's body, where ordinary statement completion is what is wanted.
+    /// </summary>
+    private static bool IsInPropertyAccessorList(SyntaxNode root, int position)
+    {
+        foreach (var token in TokensAround(root, position))
+        {
+            for (var node = token.Parent; node != null; node = node.Parent)
+            {
+                // A body (or expression body) means we are writing code, not declaring accessors.
+                if (node is BlockSyntax || node is ArrowExpressionClauseSyntax || node is StatementSyntax)
+                    return false;
+
+                if (node is AccessorListSyntax accessorList)
+                {
+                    // An event declaration has an accessor list too, and its accessors are add and
+                    // remove — offering get/set there would be the same wrong answer in a new place.
+                    if (accessorList.Parent is EventDeclarationSyntax) return false;
+                    return position > accessorList.OpenBraceToken.SpanStart;
+                }
+
+                if (node is AccessorDeclarationSyntax accessor)
+                    return accessor.Parent?.Parent is not EventDeclarationSyntax;
+
+                // Reaching the member itself means the caret is on the name or the type.
+                if (node is MemberDeclarationSyntax) break;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// True when the caret is directly inside an argument list — <c>Draw(|)</c>, <c>new VCircle(r|)</c>
+    /// — as opposed to inside a lambda or statement nested within one.
+    /// </summary>
+    private static bool IsInArgumentPosition(SyntaxNode root, int position)
+    {
+        foreach (var token in TokensAround(root, position))
+        {
+            for (var node = token.Parent; node != null; node = node.Parent)
+            {
+                // Anything with its own body re-opens full completion inside it.
+                if (node is BlockSyntax || node is AnonymousFunctionExpressionSyntax
+                    || node is InitializerExpressionSyntax || node is StatementSyntax)
+                    return false;
+
+                if (node is ArgumentListSyntax args)
+                    return position >= args.OpenParenToken.Span.End;
+
+                if (node is BracketedArgumentListSyntax indexer)
+                    return position >= indexer.OpenBracketToken.Span.End;
+
+                if (node is MemberDeclarationSyntax) break;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The tokens a caret offset can reasonably belong to: the one it is inside, and — when it sits
+    /// at a boundary, which is the usual case while typing — the one that ends there.
+    /// </summary>
+    private static IEnumerable<SyntaxToken> TokensAround(SyntaxNode root, int position)
+    {
+        var token = root.FindToken(position);
+        yield return token;
+
+        if (position > 0)
+        {
+            var previous = root.FindToken(position - 1);
+            if (previous != token) yield return previous;
+        }
+    }
+
+    /// <summary>
+    /// Symbols that name a value the user already has: locals, parameters, fields, properties and
+    /// query range variables. Types, methods and namespaces are not values.
+    /// </summary>
+    private static bool IsVariableLike(ISymbol symbol) => symbol.Kind switch
+    {
+        SymbolKind.Local => true,
+        SymbolKind.Parameter => true,
+        SymbolKind.Field => true,
+        SymbolKind.Property => true,
+        SymbolKind.RangeVariable => true,
+        _ => false
+    };
 
     /// <summary>
     /// True when the caret is on the identifier of something being declared — a variable, a
