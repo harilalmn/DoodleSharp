@@ -134,6 +134,8 @@ public partial class MainWindow : Window
     private DispatcherTimer? _autoRunTimer;
     private bool _autoRunInFlight;           // a tick's run is still going - don't stack another
     private string? _lastAutoRunSignature;   // source as of the last full compile; unchanged -> resident re-run
+    private bool _autoRunSourceFailed;       // that source failed - a timer must not retry it forever
+    private bool _interactivePauseAnnounced; // said "paused, your code has the mouse" once this episode
     private const int AutoRunIntervalMs = 500;
 
     // Console panel: bound once in InitializeConsole and updated in place by RefreshConsole.
@@ -3556,6 +3558,8 @@ public partial class MainWindow : Window
         // projects from the same template, and silent when it happens. The cost of clearing it is one
         // full compile on the first tick, which is what a newly opened project needs anyway.
         _lastAutoRunSignature = null;
+        _autoRunSourceFailed = false;
+        _interactivePauseAnnounced = false;
 
         _autoRunTimer.Stop();
         if (enabled) _autoRunTimer.Start();
@@ -3651,7 +3655,9 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// One Auto-Run tick: exactly what pressing Run does, minus the dialogs.
+    /// One Auto-Run tick: exactly what pressing Run does, minus the dialogs — unless the source is
+    /// unchanged and <see cref="ShouldStandDown"/> says this tick would destroy more than it
+    /// refreshes, in which case it does nothing at all.
     ///
     /// <para>
     /// A run can easily outlast the interval — a Roslyn compile is tens to hundreds of milliseconds —
@@ -3678,6 +3684,14 @@ public partial class MainWindow : Window
                 SaveCurrentEditorContent();
 
                 var signature = CurrentSourceSignature();
+                if (signature == _lastAutoRunSignature && ShouldStandDown())
+                {
+                    AnnounceInteractivePause();
+                    return;
+                }
+
+                _interactivePauseAnnounced = false;
+
                 if (signature != _lastAutoRunSignature || !ModuleCompiler.HasResidentAssembly)
                 {
                     _lastAutoRunSignature = signature;
@@ -3703,6 +3717,76 @@ public partial class MainWindow : Window
             DoodleSharp.Diagnostics.Journal.Error("MW.AUTORUN.TICK_UNHANDLED", "AutoRunTimer_Tick threw", ex);
             SetStatus($"AutoRunTimer_Tick failed: {ex.Message}", isError: true);
         }
+    }
+
+    /// <summary>
+    /// Whether an Auto-Run tick whose source has <em>not</em> changed should do nothing at all.
+    ///
+    /// <para>
+    /// Re-running unchanged source is deliberate — it is what makes a program that reads the clock a
+    /// live view (note 121, and the probe that verified it) — but the re-run is a <b>reset</b>:
+    /// <c>ReExecuteResidentAsync</c> clears the canvas, drops every registered <c>Mouse</c> and
+    /// <c>Frame</c> callback, and runs <c>Main()</c> from the top. Two states turn that reset into
+    /// destruction, and both were reported together because they compound.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The program is interactive</b> (<see cref="IsCanvasInteractive"/> — note 95's own test).
+    /// Shapes a mouse handler created belong to the user's input, not to <c>Main()</c>, so the
+    /// re-run does not re-create them: they are simply gone, twice a second, and an interactive
+    /// sketch is unusable with the checkbox ticked. Editing the code still re-runs it, because an
+    /// edit changes the signature and never reaches this test — which is the behaviour you want
+    /// while authoring one.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The last attempt at this exact source failed.</b> No timer makes a
+    /// <c>NullReferenceException</c> come out differently on the seventh try, and the retry is
+    /// neither cheap nor quiet: a run whose <c>Main()</c> threw never becomes resident
+    /// (<c>ModuleCompiler</c> captures the assembly only on success), so <c>HasResidentAssembly</c>
+    /// stays false and <em>every</em> tick took the full-compile path — which clears the canvas
+    /// before it compiles and clears and rewrites the console, at 2 Hz. That loop, not the
+    /// exception, is what a user sees as a flickering console and a canvas that keeps emptying.
+    /// The latch is <em>bypassed</em> by an edit rather than dropped by one — the stand-down test is
+    /// only reached when the signature matches — and it is cleared outright by any run that succeeds,
+    /// including a manual one, and by <c>ApplyAutoRunSetting</c> on project open. Note that unticking
+    /// and re-ticking the checkbox does <b>not</b> clear it: <c>AutoRunCheck_Changed</c> only stops
+    /// and starts the timer, and <c>ApplyAutoRunSetting</c> hangs off the settings-load paths.
+    /// </para>
+    /// </summary>
+    private bool ShouldStandDown() => IsCanvasInteractive || _autoRunSourceFailed;
+
+    /// <summary>
+    /// Says, once per episode, that Auto-Run has stood down because the program is handling the
+    /// mouse. A loop that silently stops is indistinguishable from one that is broken — which is
+    /// precisely how this whole area was reported — so the pause has to be as visible as the ticks
+    /// were.
+    ///
+    /// <para>
+    /// Only the interactive reason is announced here. The other one already spoke:
+    /// <see cref="LatchSilentRunFailure"/> writes its line at the moment the run fails, where it sits
+    /// directly beneath the error that caused it, which reads far better than a second line arriving
+    /// half a second later.
+    /// </para>
+    ///
+    /// <para>
+    /// The flag is cleared by <see cref="ApplyAutoRunSetting"/> and by any tick that actually runs,
+    /// so the message returns if the user leaves interactive mode and comes back — a different
+    /// episode, worth saying again. It is not cleared per tick, or the console would fill at 2 Hz
+    /// with the same sentence, which is the flicker this work removed wearing a different hat.
+    /// </para>
+    /// </summary>
+    private void AnnounceInteractivePause()
+    {
+        if (_interactivePauseAnnounced || !IsCanvasInteractive) return;
+        _interactivePauseAnnounced = true;
+
+        Console.ConsoleOutput.Instance.WriteLine("Auto-Run", 0,
+            "Auto-Run paused: your code is handling the mouse, and re-running it would clear the " +
+            "shapes your handlers drew. Edit the code, or press Run, to run it again.");
+        Console.ConsoleOutput.Instance.Flush();
+
+        SetStatus("Auto-Run paused - your code is handling the mouse", isError: false);
     }
 
     private void AutoSaveTimer_Tick(object? sender, EventArgs e)
@@ -5049,6 +5133,13 @@ public partial class MainWindow : Window
 
                 if (result.Success)
                 {
+                    // This source works, whatever the last Auto-Run tick made of it — so lift the
+                    // pause the failed tick latched (note 143). Without this a failure that was
+                    // environmental rather than textual (a file the user has since created) left
+                    // Auto-Run stood down until the next edit, even though the very next thing that
+                    // happened was the same source running to the end.
+                    _autoRunSourceFailed = false;
+
                     // Reset animation time
                     _animationStopwatch.Restart();
                     _lastAnimationFrameTime = -1;
@@ -5205,6 +5296,7 @@ public partial class MainWindow : Window
 
             if (result.Success)
             {
+                _autoRunSourceFailed = false;
                 _animationStopwatch.Restart();
                 _lastAnimationFrameTime = -1;
 
@@ -5227,12 +5319,7 @@ public partial class MainWindow : Window
             }
             else
             {
-                // Show error count in status bar only (no dialogs)
-                var errorCount = result.Diagnostics?.Count(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error) ?? 0;
-                if (errorCount > 0)
-                {
-                    SetStatus($"{label}: {errorCount} error{(errorCount != 1 ? "s" : "")}", isError: true);
-                }
+                ReportSilentRunFailure(label, result);
 
                 // Add error markers to editor silently
                 if (result.Diagnostics != null)
@@ -5266,6 +5353,55 @@ public partial class MainWindow : Window
         {
             Console.ConsoleOutput.Instance.Flush();
             SyncInteractiveModeChrome();
+        }
+    }
+
+    /// <summary>
+    /// Reports a silent run that did not succeed, and latches the failure so Auto-Run stops retrying
+    /// it (<see cref="ShouldStandDown"/>).
+    ///
+    /// <para>
+    /// The count of error diagnostics used to be the whole report, which describes a run that failed
+    /// to <em>compile</em> and says nothing whatever about one that compiled and then threw: those
+    /// carry no diagnostics, so the count was zero, no branch fired, and the status bar went on
+    /// reading "Ready" while <c>Main()</c> died on every tick. The Run button has always written
+    /// <c>result.Error</c> to the console; the silent paths owe the user the same line, or a project
+    /// with Auto-Run ticked fails completely invisibly.
+    /// </para>
+    /// </summary>
+    private void ReportSilentRunFailure(string label, Execution.CompilationResult result)
+    {
+        var errorCount = result.Diagnostics?.Count(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error) ?? 0;
+        if (errorCount > 0)
+        {
+            SetStatus($"{label}: {errorCount} error{(errorCount != 1 ? "s" : "")}", isError: true);
+        }
+        else if (!string.IsNullOrEmpty(result.Error))
+        {
+            Console.ConsoleOutput.Instance.WriteError(label, 0, result.Error!);
+            SetStatus($"{label}: {result.Error}", isError: true);
+        }
+
+        LatchSilentRunFailure(label);
+    }
+
+    /// <summary>
+    /// Latches "this source failed" and, when Auto-Run is what is armed, says so once — the tick that
+    /// stands down after this is silent by design, and a re-run loop that simply stops without a word
+    /// is its own kind of bug report. Any edit clears the latch by changing the signature.
+    /// </summary>
+    private void LatchSilentRunFailure(string label)
+    {
+        if (_autoRunSourceFailed) return;
+        _autoRunSourceFailed = true;
+
+        if (_currentProject?.ProjectFile.Settings.AutoRun == true)
+        {
+            // Labelled "Auto-Run" and not <paramref name="label"/>: a Global Parameters re-run can
+            // latch this too, and tagging a sentence about Auto-Run with the name of a different
+            // mechanism reads as though that mechanism had paused.
+            Console.ConsoleOutput.Instance.WriteLine("Auto-Run", 0,
+                "Auto-Run paused until the code changes — re-running this on a timer would only repeat the failure.");
         }
     }
 
@@ -6669,6 +6805,7 @@ public partial class MainWindow : Window
 
             if (result.Success)
             {
+                _autoRunSourceFailed = false;
                 var shapes = CanvasRenderer.Instance.GetShapes();
                 CanvasRenderer.Instance.RenderTo(ViewportHost);
                 PopulateOutliner(shapes);
@@ -6678,6 +6815,7 @@ public partial class MainWindow : Window
             {
                 SetStatus($"{label} update failed", isError: true);
                 Console.ConsoleOutput.Instance.WriteError(label, 0, result.Error!);
+                LatchSilentRunFailure(label);
             }
         }
         finally

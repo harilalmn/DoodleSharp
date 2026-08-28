@@ -9,6 +9,26 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Auto-Run no longer wipes what your mouse handlers drew.** A program with a `Mouse` handler
+  registered builds its picture out of your input, and re-running it twice a second cleared the
+  canvas and drew only what `Main()` draws — so lines drawn on mouse move vanished about a second
+  after they appeared. Auto-Run now leaves an interactive program alone until you edit the code,
+  which is still what re-runs it, and says so in the console instead of just going quiet. Your
+  Auto-Run setting is not changed — only the re-running is suspended.
+
+- **A crash in your code no longer turns Auto-Run into a flickering loop.** A run whose `Main()`
+  threw was never kept loaded, so every tick fell back to a full recompile — which blanks the canvas
+  while Roslyn works and clears and rewrites the console, twice a second. Auto-Run now pauses after a
+  failed run and says so in the console. Editing resumes it, and so does any run that succeeds —
+  including pressing Run, which is the way out when the failure was never in the code.
+
+- **Runtime errors during an Auto-Run or Global Parameters run are reported.** They were counted as
+  compile diagnostics, of which a program that compiled and then threw has none — so a
+  `NullReferenceException` in your code produced no console line, no marker, and a status bar still
+  reading "Ready". The error now reaches the console exactly as it does when you press Run.
+
 ## [2026.8.16] - 2026-08-22
 
 ### Fixed

@@ -407,6 +407,17 @@ same way in three contexts where the same answer is wrong.
 - [x] **A property initialiser did not know its own type** — `public List<string> Names { get; set; } = new ` suggested nothing, because the expected-type walk looked only for a `VariableDeclaratorSyntax` parent and a property initialiser's `EqualsValueClause` hangs off the `PropertyDeclarationSyntax`. Parameter defaults had the same shape and the same gap. Both handled, which also feeds note 122's preselect. Note 142.
 - [x] **Tests** — `StringLiteralSplitterTests` (15), `CompletionContextTests` (14), `MultiCursorEditingTests` (9, including source scans that fail if either host regresses to the old duplicate-line spelling or loses the Tab dispatch — notes 14, 43). Suite 1151 → 1189.
 
+### Phase: Auto-Run Stands Down for an Interactive Sketch (2026-08-28)
+Two reported symptoms, one mechanism, and the mechanism is not what either symptom names: a
+`NullReferenceException` in user code turned every Auto-Run tick into a full recompile, and a full
+recompile clears the canvas and the console before it starts.
+- [x] **`ShouldStandDown()`** — an unchanged-source tick does nothing when the program is interactive or when that source has already failed
+- [x] **`AnnounceInteractivePause()`** — says so once per episode; a loop that silently stops reads as a broken one
+- [x] **`ReportSilentRunFailure` / `LatchSilentRunFailure`** — a silent run that compiled and then threw writes its error to the console instead of being counted as zero diagnostics
+- [x] **Neither the timer nor the checkbox is touched** — the tick is the change detector, and the checkbox is the user's saved preference
+- [x] **Tests** — `AutoRunSettingTests` (6 new: the guard's shape, the two stand-down reasons, latch clearing, the announcement's once-per-episode latch, and that standing down has no side effects)
+- [x] **Verified live** — twelve seconds with `AutoRun: true`: one `Main()` invocation, zero resident re-runs
+
 ---
 
 ## Implementation Statistics
