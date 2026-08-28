@@ -12,7 +12,7 @@ DoodleSharp is a visual programming environment that lets you write C# code to c
 
 ## Features
 
-- **Run on Demand**: Press `F5` (or Run) to compile and draw — your code runs when you ask it to, never while you are still typing it. **Auto-Run** is the opt-in exception: one checkbox beside Run re-executes the project every 500 ms, saved with the project so it stays armed across sessions. See [Auto-Run](#auto-run)
+- **Run on Demand**: Press `F5` (or Run) to compile and draw — your code runs when you ask it to, never while you are still typing it. **Auto-Run** is the opt-in exception: one checkbox beside Run re-executes the project every 500 ms, saved with the project so it stays armed across sessions — and standing down on unchanged code once your program is handling the mouse, or once it has failed. See [Auto-Run](#auto-run)
 - **No Placement Call Required**: Shapes appear automatically when created
 - **Viewports**: Split the drawing surface into a grid of independent canvases with `Viewports.Rows`/`Viewports.Columns`, place shapes into a cell with `Place(Viewports[0][1])`, and subdivide any cell again for uneven layouts. Each cell pans and zooms on its own. See [Viewports](#viewports--dividing-the-drawing-surface)
 - **C# Code Editor**: Roslyn-powered IntelliSense, semantic highlighting, refactoring, and squiggle diagnostics
@@ -102,12 +102,38 @@ each tick rebuilds the drawing from your code.
   output out of sight and swaps it into the panel at the end, and only if the text actually differs —
   so a program you are not editing, printing the same lines every time, leaves the console completely
   still, with your scroll position and selection intact. A tick that *does* recompile clears the
-  console first, like any other run
-- **Errors go to the status bar and the editor squiggles, never a dialog**, so a half-typed statement
-  does not interrupt you; the canvas keeps showing the last drawing that compiled
-- **The status bar says `Auto-Run` on every tick** — `Auto-Run: 12 shapes` when the run succeeded,
-  `Auto-Run: 2 errors` when it did not — so you can always tell a tick's output from a manual Run's.
-  The label is the same whether the tick recompiled or re-invoked the already-compiled assembly
+  console first, like any other run — which is half the reason a tick that failed is not repeated on
+  unchanged code, since a failed run always takes that path
+- **It leaves an interactive program alone.** Once your code has registered a `Mouse` handler, the
+  shapes on the canvas are partly *yours* — a handler that draws a line per mouse move builds a
+  picture out of your input, and nothing but the input can rebuild it. Re-running would clear the
+  canvas and draw only what `Main()` draws, so while [interactive mode](#interactive-mode) lasts a
+  tick whose source has *not* changed does nothing at all. Edit the code and the next tick runs it
+  as usual — an edit never reaches this test — and the **Run** button always runs. The console says
+  so once per pause — `Auto-Run paused: your code is handling the mouse, and re-running it would
+  clear the shapes your handlers drew.` — and the status bar reads `Auto-Run paused - your code is
+  handling the mouse`, rather than the loop just going quiet. The checkbox stays ticked and your
+  project setting is untouched: only the re-running is suspended, because the timer is also what
+  notices your edits
+- **Errors go to the status bar, the console and the editor squiggles, never a dialog**, so a
+  half-typed statement does not interrupt you. A run that compiled and then *threw* — a
+  `NullReferenceException`, say — prints the error to the console just as pressing Run does, instead
+  of failing invisibly. Do expect the canvas to empty on a tick that fails: a full run clears it
+  *before* Roslyn starts, so a drawing is only ever as current as the last tick that compiled and
+  ran to the end
+- **A failed tick pauses Auto-Run rather than repeating itself**, whether the code failed to compile
+  or compiled and threw. Re-running it at 2 Hz only repeats the failure, and does it the expensive
+  way: a failed run is not kept loaded, so every following tick would be a full recompile, blanking
+  the canvas and rewriting the console each time. Auto-Run writes
+  `Auto-Run paused until the code changes` to the console and then waits. An edit lifts it, and so
+  does **any run that succeeds, including pressing Run** — which is the way out when the failure was
+  never in the text, such as a file your code reads that you have since created. Reopening the
+  project lifts it too. Unticking and re-ticking the checkbox does not: that only stops and starts
+  the timer.
+- **The status bar says `Auto-Run` on every tick that runs** — `Auto-Run: 12 shapes` when the run
+  succeeded, `Auto-Run: 2 errors` when it did not compile, and the exception's own message when it
+  compiled and threw — so you can always tell a tick's output from a manual Run's. The label is the
+  same whether the tick recompiled or re-invoked the already-compiled assembly
 - **It does not save anything to disk.** Auto-Run flushes the editor into the in-memory file so the
   right text is compiled; writing to disk is [Auto Save](#auto-save)'s job and is a separate setting
 
@@ -1990,7 +2016,10 @@ see every gesture. While at least one handler is registered:
 - **the properties panel is hidden and `F4` is inert**, because it edits the *selected* shape and there
   is no longer a selection. It comes back by itself the next time you run something that registers
   nothing;
-- **middle-button drag still pans.** It is the only way to pan, so it stays the canvas's own gesture.
+- **middle-button drag still pans.** It is the only way to pan, so it stays the canvas's own gesture;
+- **[Auto-Run](#auto-run) stands down** if you have it ticked. Its ticks would clear the canvas and
+  re-run `Main()`, throwing away everything your handlers drew, so an unchanged source is not re-run
+  while any handler is registered. Editing the code still re-runs it, and so does the **Run** button.
 
 A project that registers no handlers behaves exactly as it always has — nothing was taken away.
 

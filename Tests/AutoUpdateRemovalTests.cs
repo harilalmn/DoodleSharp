@@ -107,7 +107,9 @@ public class AutoUpdateRemovalTests
         // so code ran behind the user's back in every project. Auto-Run is off unless a project asks
         // for it, is armed by an explicit checkbox, and fires on a fixed timer rather than on typing.
         Assert.Equal(3, Regex.Matches(code, @"await RunSilentlyAsync\(").Count);
-        Assert.Matches(@"private async void AutoRunTimer_Tick[\s\S]{0,900}await RunSilentlyAsync\(", code);
+        // A proximity guard, not a size budget: the window only has to keep the run inside the tick
+        // that owns it. It was widened once when the tick grew its stand-down block (note 143).
+        Assert.Matches(@"private async void AutoRunTimer_Tick[\s\S]{0,1400}await RunSilentlyAsync\(", code);
     }
 
     /// <summary>
