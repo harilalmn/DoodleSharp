@@ -9,6 +9,8 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+## [2026.8.17] - 2026-08-28
+
 ### Fixed
 
 - **Auto-Run no longer wipes what your mouse handlers drew.** A program with a `Mouse` handler
