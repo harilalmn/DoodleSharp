@@ -27,6 +27,14 @@ tags; this file is the curated, human-friendly summary.
   still needs `new` (`var p = new VPoint(...)`): with a method call, write the type, set `Name`, or
   call `Place()`. The console warning now says this.
 
+- **Points are drawn again.** Since 2026.8.x no `VPoint` was drawn at all, and one only showed up
+  while selected, because the renderer's "too small to see" check measured a point by its size (zero)
+  rather than its marker. Points now draw on every renderer. The fast software renderer draws the
+  same dot as the standard one instead of a single pixel, and honours **Draw point as patch**.
+- **The canvas no longer switches renderers back and forth on small drawings.** After one slow frame,
+  Auto rendering could alternate between its two renderers on every repaint, and whichever frame came
+  last stayed on screen.
+
 ## [2026.8.17] - 2026-08-28
 
 ### Fixed
