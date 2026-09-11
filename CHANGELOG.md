@@ -9,6 +9,15 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+### Added
+
+- **Polar points: `new VXYZ(angleInDegrees, distance, fromPoint)`.** Builds the point `distance`
+  away from `fromPoint` at `angleInDegrees`, counter-clockwise from +X, e.g.
+  `new VXYZ(30, 50, corner)`. `fromPoint` is optional and means `VXYZ.Zero` when omitted, but two
+  plain numbers still make a Cartesian point, so `new VXYZ(45, 100)` is (45, 100). To measure from
+  the origin, write `new VXYZ(45, 100, VXYZ.Zero)` or
+  `new VXYZ(angleInDegrees: 45, distance: 100)`.
+
 ## [2026.8.17] - 2026-08-28
 
 ### Fixed

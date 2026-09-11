@@ -143,7 +143,7 @@ each tick rebuilds the drawing from your code.
 
 | Shape | Description | Constructor Examples |
 |-------|-------------|---------------------|
-| **VXYZ** | Coordinate/vector type (like Revit's XYZ) — not a shape, never drawn | `new VXYZ(x, y)` or `new VXYZ(x, y, z)` |
+| **VXYZ** | Coordinate/vector type (like Revit's XYZ) — not a shape, never drawn | `new VXYZ(x, y)`, `new VXYZ(x, y, z)` or `new VXYZ(angleDegrees, distance, fromPoint)` (polar — see below) |
 | **VPoint** | A visible point marker on the canvas | `new VPoint(x, y)` or `new VPoint(vxyz)` |
 | **VLine** | A line segment | `new VLine(p1, p2)`, `new VLine(x1, y1, x2, y2)` or `new VLine(start, angleDegrees, length)` |
 | **VXLine** | An infinite construction line | `new VXLine(basePoint, direction)` (the second argument is a **direction**) or `new VXLine(x1, y1, x2, y2)` (through **two points**) |
@@ -168,6 +168,16 @@ each tick rebuilds the drawing from your code.
 | **VHatch** | Pattern fill within boundary | `new VHatch(polygon, BuiltInHatch.ANSI31, scale)` — the boundary can also be a `List<VXYZ>`, and the pattern a name string or a `HatchType` |
 
 > **VXYZ vs VPoint**: `VXYZ` is the coordinate/vector type used for all position parameters, properties, and return types (e.g., `new VXYZ(10, 20)`). It is immutable and never appears on the canvas, so it is safe for intermediate maths. `VPoint` is a *shape* that draws a dot — constructing one adds a marker to the canvas. Use `new VXYZ(x, y)` wherever you just need a coordinate.
+
+> **Polar points**: `new VXYZ(angleDegrees, distance, fromPoint)` is the point `distance` away from `fromPoint`, at an angle in **degrees** counter-clockwise from +X (90 is straight up). Z comes from `fromPoint`; a negative distance lands on the opposite side; `fromPoint` can be a `VPoint`.
+>
+> **Two plain numbers are always Cartesian** — `new VXYZ(45, 100)` is the point `(45, 100)`, not polar, because C# prefers the overload that fills in no default. For polar from the origin, pass the third argument or name the arguments:
+> ```csharp
+> var hub   = new VXYZ(20, 10);
+> var spoke = new VXYZ(90, 50, hub);                          // (20, 60): 50 above hub
+> var a     = new VXYZ(45, 100, VXYZ.Zero);                   // (70.71, 70.71)
+> var b     = new VXYZ(angleInDegrees: 45, distance: 100);    // same point as a
+> ```
 
 > **Coordinates**: the origin `(0, 0)` is the centre of the canvas and **Y points up** (mathematical convention, not screen convention). Angles are in **degrees**, measured counter-clockwise from the positive X axis, unless a member says otherwise.
 

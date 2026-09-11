@@ -24,6 +24,34 @@ public class VXYZ
 
     public VXYZ() : this(0, 0, 0) { }
 
+    /// <summary>
+    /// A polar point: <paramref name="distance"/> away from <paramref name="fromPoint"/> in the
+    /// direction <paramref name="angleInDegrees"/>, measured counter-clockwise from +X in the XY
+    /// plane. Z is taken from <paramref name="fromPoint"/>. A null <paramref name="fromPoint"/>
+    /// means <see cref="Zero"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>new VXYZ(45, 100)</c> is NOT polar.</b> Two numbers always bind to the Cartesian
+    /// <c>VXYZ(x, y)</c>, because C# prefers the overload that needs no default filled in. Pass the
+    /// third argument — <c>new VXYZ(45, 100, VXYZ.Zero)</c> — or name the arguments —
+    /// <c>new VXYZ(angleInDegrees: 45, distance: 100)</c>, which the Cartesian constructor's
+    /// <c>x</c>/<c>y</c> names cannot match.
+    /// </para>
+    /// <para>
+    /// The angle is in degrees, like every other rotation in the library (note 61). A negative
+    /// distance lands on the opposite side of <paramref name="fromPoint"/>.
+    /// </para>
+    /// </remarks>
+    public VXYZ(double angleInDegrees, double distance, VXYZ? fromPoint = null)
+    {
+        var from = fromPoint ?? Zero;
+        double rad = angleInDegrees * Math.PI / 180.0;
+        X = from.X + distance * Math.Cos(rad);
+        Y = from.Y + distance * Math.Sin(rad);
+        Z = from.Z;
+    }
+
     // Static properties
     public static VXYZ Zero { get; } = new VXYZ(0, 0, 0);
     public static VXYZ BasisX { get; } = new VXYZ(1, 0, 0);
