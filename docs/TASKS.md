@@ -418,6 +418,17 @@ recompile clears the canvas and the console before it starts.
 - [x] **Tests** — `AutoRunSettingTests` (6 new: the guard's shape, the two stand-down reasons, latch clearing, the announcement's once-per-episode latch, and that standing down has no side effects)
 - [x] **Verified live** — twelve seconds with `AutoRun: true`: one `Main()` invocation, zero resident re-runs
 
+### Phase: Polar Points, Typed Method Results, and Points That Draw (2026-09-11)
+Three live-testing reports in one sitting, each hiding the next: a new constructor, then "all shapes are
+named, why the warning?", then "the two points are seen only when selected".
+- [x] **`VXYZ(double angleInDegrees, double distance, VXYZ? fromPoint = null)`** — polar point; `null` means `VXYZ.Zero`. Two plain numbers stay Cartesian (C# prefers the overload that fills no default), so the docs show the third argument or named arguments
+- [x] **Shape-typed declarations are named whatever their initializer** — `ShapeNamingHelper`, an execute-path-only tree the name rewriter calls for `VPoint p = q.AsVPoint();`; `var` deliberately out of reach (note 144)
+- [x] **`LodPolicy.Classify(shape, …)`** — a `VPoint` is never size-culled; it had been skipped on every backend since 2026-08-17 (note 145)
+- [x] **One marker size** (`Rendering/PointMarker`) — `HairlineRasterizer.DrawDisc` replaces the one-pixel `DrawPoint`; the GPU sink declines `VPoint` to the vector layer
+- [x] **Auto's frame bookkeeping** — a frame's time is recorded by the backend that actually drew it, and a switch-up the switch-down rule would reverse next frame is refused
+- [x] **Tests** — `VXYZPolarConstructorTests` (7), `ShapeNamingRewriteTests` (3, compile + emit + run), `PointVisibilityTests` (14, including an offscreen `RenderCanvas` capture that read 0 lit pixels before the fix). Suite 1206 → 1223
+- [x] **Measured** — Auto `zoom-decades` bench, two runs each before and after: within noise on every scene
+
 ---
 
 ## Implementation Statistics

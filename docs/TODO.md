@@ -258,6 +258,13 @@ Core timeline playback is implemented; items below are advanced timeline UX poli
 ### Curve Operations
 - [x] `ICurve.SetBounds(start, end)` — in-place parameter-range trim for VLine/VArc/VEllipse/VPolyline/VBezier/VSpline (VBezier uses De Casteljau, VSpline dense-resamples); throws on VCircle/VPolygon/VRay/VXLine. Mirrored in C2VGeometry. 17 xUnit tests.
 
+### Recently Completed (2026-09-11) — Polar Points, Typed Method Results, and Points That Draw
+- [x] **Polar `VXYZ` constructor** — `new VXYZ(angleInDegrees, distance, fromPoint)`, `fromPoint` optional (origin). `new VXYZ(45, 100)` is still Cartesian; the docs say so in all three places a reader lands.
+- [x] **`VPoint vp1 = p1.AsVPoint();` is kept after the run** — a declaration that spells out a shape type now names the shape after its variable whatever the right-hand side. Note 144.
+- [x] **Points draw** — level of detail had been skipping every `VPoint` (zero-size bounds read as sub-pixel), on every backend; only the selection overlay ever showed one. The rasterizers also drew a point as a single pixel, and Auto flipped backends on alternate repaints of a small scene. Note 145.
+- [ ] **Open, found along the way** — `StackGuardRewriter` drops the newline after every expression-bodied member (`.WithSemicolonToken(default)`), so runtime line numbers below one are one short; `VHatch.Clone()`/`Region.Clone()` return `Shape` rather than their own type.
+- [ ] **Open, from the 2026.9.0 documentation gate** — `VXYZ.GetHashCode` breaks the Equals/GetHashCode contract (fuzzy `==` across a rounding boundary, different hashes, so a `HashSet<VXYZ>` keeps both); `VPoint == VPoint` is reference identity while `VPoint == VXYZ` is fuzzy; F1 Help's namespace nodes carry no `Tag`, so the seven namespace `_summaries` are unreachable (and `DocumentationAccuracyTests` claims otherwise); operators are not rendered in F1 Help at all (`!m.IsSpecialName`); `VHatch(VPolygon, HatchType, double, double, bool _)` is public with a discard parameter.
+
 ### Recently Completed (2026-08-28) — Auto-Run Stands Down for an Interactive Sketch
 Reported as two symptoms — "the console keeps flickering every second" and "the lines drawn on mouse
 move all vanish after a second" — which turned out to be one mechanism and not the one either

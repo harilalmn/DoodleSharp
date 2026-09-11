@@ -376,7 +376,7 @@ Beyond the constructors above and the `ICurve` members every curve shares.
 | **VHatch** | `Boundary` (`List<VXYZ>`, settable), `Pattern`, `PatternScale`, `PatternAngle`, `GenerateLines()` → a fresh `List<(VXYZ Start, VXYZ End)>` of clipped segments, `GetCachedLines()` → the same segments as an `IReadOnlyList` **shared with the renderer, so do not modify it** (it is memoised against `Revision` and only regenerated when the hatch changes), static `FromDefinition(...)` |
 | **VDimension** | `Point1` / `Point2` (settable), `Distance`, `DisplayText`, `GetDimensionGeometry()` → a 7-tuple of `VXYZ` (the extension- and dimension-line endpoints as drawn), the const `DimensionArrowAngleDegrees`, plus the style properties in [Dimensions](#dimensions-vdimension). `ExtensionLength` is `[Obsolete]` and inert |
 | **VRadialDimension** | `Center`, `Radius`, `LeaderAngle`, `ShowDiameter`, `Value`, `DisplayText`, `GetDimensionGeometry()` → a 3-tuple of `VXYZ` (the leader geometry) |
-| **VPoint** | `X`, `Y`, `AsVXYZ()`, implicit conversion to `VXYZ`, and the full `+ - * /` operator set — every one of which returns a plain `VXYZ`, so intermediates never draw |
+| **VPoint** | `X`, `Y`, `AsVXYZ()`, implicit conversion to `VXYZ`, and `+ - * /` against a `VPoint` or `VXYZ` (and `*` `/` by a number) — every one of which returns a plain `VXYZ`, so intermediates never draw. Point-by-point `*` and `/` are component-wise. `==` between two `VPoint`s is **identity**, not position: compare `a.AsVXYZ() == b.AsVXYZ()` |
 
 > **The conversions return an undrawn shape.** `VRay.ToFiniteLine()`, `VRay.ToXLine()` and
 > `VXLine.ToFiniteLine()` hand back a real `VLine`/`VXLine` you can measure, intersect and pass
@@ -2282,8 +2282,8 @@ every `Draw()`, so anything a handler created is wiped on the next frame. Record
 field and draw from `Draw()`:
 
 ```csharp
-using System.Collections.Generic;
-using DoodleSharp.Animation;      // neither of these is in the sketch template — add them
+// The sketch template already imports System.Collections.Generic, C2VGeometry,
+// DoodleSharp.Animation (for Mouse) and DoodleSharp.Sketching — nothing to add.
 
 public class MySketch : Sketch
 {
@@ -2701,7 +2701,9 @@ VizConsole.Log($"{GlobalParameters.Get("String Name")} is{status}broken...");
 >
 > `int` and `float` are **explicit** conversions on purpose: an implicit one would make
 > `Get("n") * 2` ambiguous between `int * int` and `double * double`. The explicit `int` cast rounds
-> (`Math.Round`) rather than truncating.
+> (`Math.Round`, so a half goes to the even neighbour: 2.5 → 2, 3.5 → 4) rather than truncating;
+> `float` is a plain narrowing. Every conversion throws `InvalidOperationException` when the
+> parameter is undeclared or holds a different kind — a `bool` parameter read as a `double`, say.
 
 ### API
 
@@ -3577,7 +3579,9 @@ than a plotted scale. There is no tiled DXF entry point — DXF flattens instead
 using DoodleSharp.Export;   // PdfExporter
 
 // GetShapes() already returns IReadOnlyList<IDrawable>, which is what PdfExporter wants.
-new PdfExporter().Export(CanvasRenderer.Instance.GetShapes(), @"C:\temp\plan.pdf",
+// CanvasRenderer is qualified rather than imported: `using DoodleSharp.Canvas;` would make a
+// bare `Canvas` in the same file mean that namespace instead of C2VGeometry.Canvas.
+new PdfExporter().Export(DoodleSharp.Canvas.CanvasRenderer.Instance.GetShapes(), @"C:\temp\plan.pdf",
                          pageWidthMm: 297, pageHeightMm: 210,   // A4 landscape
                          scaleMmPerUnit: 0.5, marginMm: 10);
 ```
@@ -3595,7 +3599,7 @@ per frame, then `Dispose()` to close the file.
 ```csharp
 using DoodleSharp.Export;   // DxfExporter
 
-new DxfExporter().Export(CanvasRenderer.Instance.GetShapes(), @"C:\temp\drawing.dxf");
+new DxfExporter().Export(DoodleSharp.Canvas.CanvasRenderer.Instance.GetShapes(), @"C:\temp\drawing.dxf");
 ```
 
 ---
@@ -4575,14 +4579,18 @@ var y = VXYZ.BasisY;  // (0, 1, 0)
 var z = VXYZ.BasisZ;  // (0, 0, 1)
 var o = VXYZ.Zero;    // (0, 0, 0)
 
-// Operators: +, -, * and / work between VXYZ and scalars, and freely
-// between VXYZ and VPoint (a VPoint participates as its (X, Y) coordinate).
-// Every mixed operation returns a plain VXYZ — never a drawable VPoint — so
-// intermediate results don't pollute the canvas.
+// Operators: + and - between two VXYZ, * and / by a number (2 * v, v * 2, v / 2),
+// and unary -v. There is no VXYZ * VXYZ — use DotProduct or CrossProduct.
+var neg = -v;                                    // (-10, -20, 0), same as v.Negate()
+// Mixed VXYZ/VPoint arithmetic (+, -, and component-wise * and /) works too — a
+// VPoint participates as its (X, Y) coordinate. Every mixed operation returns a
+// plain VXYZ — never a drawable VPoint — so intermediate results don't pollute the canvas.
 var sum  = new VXYZ(1, 2) + new VPoint(3, 4);   // (4, 6, 0)
 var diff = new VPoint(5, 7) - new VPoint(1, 2);  // (4, 5, 0)
 var scaled = new VPoint(2, 3) * 2.0;             // (4, 6, 0)
 var hadamard = new VXYZ(2, 3) * new VPoint(4, 5);// component-wise (8, 15, 0)
+// But == between two VPoints is IDENTITY (they are shapes), not position:
+bool samePlace = new VPoint(1, 1).AsVXYZ() == new VXYZ(1, 1);   // true: VXYZ == is fuzzy
 ```
 
 ### Common Shape Methods
