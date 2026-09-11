@@ -78,7 +78,7 @@ long-running drawing is never started behind your back.
 - **Every run starts clean**: shape IDs rewind to 1, the [viewport layout](#viewports--dividing-the-drawing-surface)
   goes back to a single undivided canvas, and the drawing is rebuilt from your code. Delete a line
   and the next run reflects it — nothing lingers until restart
-- **No explicit placement needed**: Shapes appear when created. `Place()` is there for the ones that don't come from a plain `new` — method results, query results, anything built while `Shape.AutoRegister` was off. (`Draw()` is the historical name for the same call and still works.)
+- **No explicit placement needed**: Shapes appear when created. `Place()` is there for the ones that don't come from a plain `new` — method results held in `var` or in a list, query results, anything built while `Shape.AutoRegister` was off. (`Draw()` is the historical name for the same call and still works.)
 - **`Place(viewport)`** is the same call aimed at one cell of a divided drawing — see [Viewports](#viewports--dividing-the-drawing-surface)
 
 #### Auto-Run
@@ -263,10 +263,15 @@ the shape with the canvas and sets `IsExplicitlyDrawn`, which exempts it from th
 unnamed shapes after `Main()` returns. It is idempotent, so calling it twice — or on a shape that is
 already placed — is harmless, and `Remove()` undoes it.
 
-You need it whenever a shape did not come from a plain `var x = new VShape(...)` in your own code:
+You need it whenever a shape is on the canvas without a variable name of its own, or was never put
+there at all (the naming rules are under
+[Shape Visibility & Naming Rules](#shape-visibility--naming-rules)):
 
-- results of boolean operations, `ArrayOps`, `Chart` and other methods, which are registered but
-  unnamed and would otherwise be swept away (setting `Name` works equally well)
+- method results that are registered but unnamed and would otherwise be swept away — a single
+  result held in `var` (`var u = a.Union(b)`, `var chart = Chart.Bar(...)`), and every shape that
+  comes back in a list: boolean pieces, `ArrayOps` clones, `Slice`. Setting `Name` works equally
+  well, and a single result declared with its shape type — `VPolygon? u = a.Union(b)` — is named
+  after its variable and needs neither
 - shapes returned by the query methods that deliberately do not draw their answer —
   `GeometryHelper.IntersectLineLine` and friends, `VRay.ToFiniteLine()`, `VRay.ToXLine()`,
   `VXLine.ToFiniteLine()`
@@ -294,9 +299,9 @@ var a = new VPolygon(new VXYZ(0, 0), new VXYZ(100, 0), new VXYZ(100, 100), new V
 };
 var b = new VPolygon(new VXYZ(50, 50), new VXYZ(150, 50), new VXYZ(150, 150), new VXYZ(50, 150));
 
-VPolygon? merged = a.Union(b);   // a method result: unnamed, and with default styling
+VPolygon? merged = a.Union(b);   // named "merged" (the type is spelled out), but default styling
 a.CopyStyleTo(merged);           // now it looks like its input
-merged?.Place();
+merged?.Place();                 // harmless here; required had it been `var merged = ...`
 ```
 
 Copies the five styling members — `Color`, `FillColor`, `LineWeight`, `LineType`, `LineTypeScale` —
@@ -437,8 +442,10 @@ the angle is not configurable per dimension.
 The data you pass is in **data units**. The chart maps it into the plot rectangle described by
 `Origin`, `Width` and `Height`, which *are* world coordinates (Y up, origin at the canvas centre).
 
-> **Name your chart.** The `VGroup` comes back from a method call, not a `new VGroup(...)`, so the
-> auto-naming pass does not reach it and the post-run "hide unnamed shapes" sweep removes it. Set
+> **Name your chart, or declare it `VGroup`.** The chart comes back from a method call, and the
+> auto-naming pass names a method result only when the declaration spells out the shape type:
+> `VGroup revenue = Chart.Bar(...)` is named `revenue` and kept, but `var revenue = Chart.Bar(...)`
+> is not, and the post-run "hide unnamed shapes" sweep removes it. With `var`, set
 > `chart.Name = "..."` (as the examples below do) — or call `chart.Place()` — to keep it on screen.
 
 ### ChartOptions
@@ -479,7 +486,7 @@ var revenue = Chart.Bar(labels, values, new ChartOptions
     YMin = 0,                       // pin the Y axis to zero instead of auto-fitting
     TickDecimalPlaces = 0
 });
-revenue.Name = "revenue";           // charts are method results — name them or they get hidden
+revenue.Name = "revenue";           // held in var, a chart is unnamed — name it or it gets hidden
 ```
 
 **Line — computed time series, auto-fit ranges.**
@@ -1384,8 +1391,10 @@ var fromPwh = Region.FromPolygonWithHoles(polygonWithHoles);
 ### Region Boolean Operations
 
 Region supports boolean operations via `RegionBooleanOps` or extension methods. As with polygon
-booleans, every result is a **method result and therefore unnamed** — set `Name` (or call `Place()`)
-on the regions you want to keep, or the post-run sweep hides them:
+booleans, every result is a **method result**, so it is unnamed unless its declaration spells out
+the shape type: `Region? union = RegionBooleanOps.Union(regionA, regionB);` is named `union` and
+kept, but the `var` declarations below are not, and no piece of a `List<Region>` ever is. Set `Name`
+(or call `Place()`) on the regions you want to keep, or the post-run sweep hides them:
 
 ```csharp
 // Static methods
@@ -1474,16 +1483,20 @@ VHatch fills a closed polygon boundary with a repeating line pattern. It support
 // Use enum for built-in patterns
 var rect = new VRectangle(0, 0, 100, 80);
 var hatch = new VHatch(rect, BuiltInHatch.ANSI31, scale: 10);
-hatch.Name = "hatch";           // see the naming note below
+hatch.Name = "hatch";           // optional — see the naming note below
 hatch.Color = "Cyan";
 
 // Use string name (case-insensitive; hyphenated names work too: "AR-BRSTD")
 var hatch2 = new VHatch(rect, "BRICK", scale: 5) { Name = "brick" };
 ```
 
-> **Name your hatches.** The auto-naming pass only fills `Name` for a fixed list of shape types, and
-> `VHatch` is not on it — so a `var h = new VHatch(...)` still ends up unnamed and gets hidden by the
-> post-run sweep. Set `Name` in the initializer (or call `Place()`).
+> **Hatches are named like every other shape.** `VHatch` is on the auto-naming pass's list of shape
+> types, so `var h = new VHatch(...)` is named `h` and stays visible — the explicit `Name`s above are
+> optional. As with any shape, a hatch without a declared variable of its own (added straight to a
+> list, or a method result held in `var`) ends up unnamed and is hidden by the post-run sweep; set
+> `Name` (or call `Place()`) for those. One trap: `VHatch.Clone()` returns `Shape`, not `VHatch`, so
+> `var copy = hatch.Clone();` is a `Shape` and is not named — cast it,
+> `VHatch copy = (VHatch)hatch.Clone();`, or name it.
 
 An unknown pattern name throws `ArgumentException` listing what to do about it; the enum overload
 cannot fail this way, so prefer `BuiltInHatch` when the pattern is known at compile time.
@@ -3625,9 +3638,12 @@ foreach (var p in difference) { p.Name = "diff"; p.Color = "Tomato"; }
 > IntersectionResult x = poly1.Intersect(poly2);              // where the OUTLINES cross
 > ```
 
-> **Results are unnamed shapes.** Anything a boolean op hands back came from a method, not from
-> `var x = new VPolygon(...)`, so the auto-naming pass misses it and the post-run sweep hides it.
-> Set `Name` (or call `Place()`) on every result you want to see.
+> **Name the results you want to see.** Anything a boolean op hands back comes from a method, and
+> the auto-naming pass names a method result only when its declaration spells out the shape type.
+> So `VPolygon? merged = BooleanOps.Union(a, b);` is named `merged` and kept, while
+> `var merged = BooleanOps.Union(a, b);` is unnamed and hidden by the post-run sweep — and so is
+> every piece of a `List<VPolygon>` (`Intersect`, `Difference`, `Xor`, `UnionAll`, the offsets,
+> `MakeSimple`), however the list itself is declared. Set `Name` (or call `Place()`) on those.
 
 ### Static API
 
@@ -3785,8 +3801,8 @@ foreach (var part in parts) part.Place();
 | Fewer than three points | One piece |
 
 The list is **never empty and never null**. Every piece inherits the source polygon's `Color`,
-`FillColor`, `LineWeight`, `LineType` and `LineTypeScale` — but like every method result the pieces
-carry no `Name`, so `Place()` the ones you want to keep.
+`FillColor`, `LineWeight`, `LineType` and `LineTypeScale` — but they come back in a list, which the
+auto-naming pass never reaches, so the pieces carry no `Name`; `Place()` the ones you want to keep.
 
 There is **only one overload**. To cut with a construction line or a ray, hand over two points from
 it:
@@ -3832,8 +3848,9 @@ Create arrays and patterns of shapes with built-in array operations. Every metho
 shape and returns a `List<Shape>`; each exists both as a static method on `ArrayOps` taking the shape
 as its first argument, and as an extension method on the shape itself.
 
-**Always finish the chain with `.DrawAll()`.** The clones carry no `Name` — they were not written as
-`var x = new VCircle(...)` — so the post-run sweep that hides unnamed shapes would remove every copy.
+**Always finish the chain with `.DrawAll()`.** The clones carry no `Name` — they come back in a
+`List<Shape>`, which the auto-naming pass never reaches — so the post-run sweep that hides unnamed
+shapes would remove every copy.
 `DrawAll()` marks them explicitly drawn, which is exactly what keeps them on the canvas.
 
 | Method | Total shapes returned | Includes the original? |
@@ -4539,8 +4556,9 @@ var rotated = v.Rotate(90);  // Returns new VXYZ rotated 90 degrees CCW
 
 var copy = v.Clone();        // a fresh instance with the same components
 var marker = v.AsVPoint();   // a DRAWN VPoint at this coordinate — the one member here
-                             // that puts something on the canvas. VPoint.AsVXYZ() is the
-                             // reverse, and does not draw.
+                             // that puts something on the canvas. Held in var it is unnamed
+                             // and hidden after Main(); declare it `VPoint marker = ...` to
+                             // keep it. VPoint.AsVXYZ() is the reverse, and does not draw.
 
 // Component access
 double x0 = v[0];  // X — [1] is Y, [2] is Z; anything else throws IndexOutOfRangeException
@@ -5325,7 +5343,7 @@ namespace MyProject
                 double y2 = 100 + 50 * Math.Sin(angle);
                 var ray = new VLine(x1, y1, x2, y2);
                 ray.Color = "Yellow";
-                ray.Place();   // declared inside a loop: name-less, so place it
+                ray.Place();   // optional: a loop local is auto-named too (all eight are "ray")
             }
 
             VizConsole.Log("House drawing complete!");
@@ -5338,26 +5356,42 @@ namespace MyProject
 
 ## Shape Visibility & Naming Rules
 
-After your script's `Main()` returns, DoodleSharp hides any shape with an empty `Name` that wasn't explicitly drawn. This suppresses intermediate construction shapes. The auto-naming pass only fills `Name` for two C# patterns:
+After your script's `Main()` returns, DoodleSharp hides any shape with an empty `Name` that wasn't explicitly drawn. This suppresses intermediate construction shapes. Before your code runs, an auto-naming pass sets `Name` to the variable's name on two kinds of declaration — locals (including locals inside loops) and fields alike:
 
-- **Local declarations** — `var circle = new VCircle(0, 0, 50);`
-- **Field declarations** — `private VLine _axis = new VLine(...);`
+- **A `new` of a shape type, however it is declared** — `var circle = new VCircle(0, 0, 50);`, `VLine axis = new(0, 0, 100, 0);`, `private VLine _axis = new VLine(...);`
+- **Any initializer at all, when the declaration spells out the shape type** — `VPoint vp1 = p1.AsVPoint();`, `VPolygon? merged = a.Union(b);`, `VGroup chart = Chart.Bar(labels, values);`. The nullable form counts. The name is only filled in when the shape's `Name` is still empty, so a method that hands back an already-named shape — or `VPoint alias = vp1;` — keeps the name it has.
 
-The following patterns slip past the rewriter, so the shapes stay nameless and get hidden. Set `Name` explicitly in those cases:
+The shape types it recognises are `VPoint`, `VLine`, `VCircle`, `VArc`, `VRectangle`, `VEllipse`, `VPolygon`, `VPolyline`, `VBezier`, `VSpline`, `VArrow`, `VText`, `VGrid`, `VGroup`, `VDimension`, `Region`, `VXLine`, `VRay`, `VHatch`, `VRadialDimension` and `VSpatialGrid`, written unqualified.
+
+The following patterns slip past the rewriter, so the shapes stay nameless and get hidden. Set `Name` explicitly (or call `Place()`) in those cases:
 
 ```csharp
+// var with a method result — the rewriter reads syntax only, so it cannot tell the call
+// returns a shape. Write VPolygon? merged = a.Union(b); instead, or name it:
+var merged = a.Union(b);
+if (merged != null) merged.Name = "merged";
+
+// Results that come back in a list — no element has a variable of its own
+List<VPolygon> pieces = square.Slice(new VXYZ(-50, 25), new VXYZ(150, 25));
+foreach (var piece in pieces) piece.Place();
+
 // List.Add — rewriter does not see the construction
 trails.Add(new VLine(a, b) { Color = "Cyan", Name = "trail" });
 
-// Array slot assignment — not a var declaration
+// Array slot assignment — not a declaration
 hulls[i] = new VPolygon(pts) { Color = "Lime", Name = $"hull{i}" };
 
-// Helper-function return — the returned shape has no caller-side variable name
+// Helper-function return — a caller's `var e = MakeEdge(a, b)` leaves it unnamed
+// (`VLine e = MakeEdge(a, b)` would name it "e"); naming it here covers every caller
 VLine MakeEdge(VXYZ a, VXYZ b) =>
     new VLine(a, b) { Color = "Gold", Name = "edge" };
 ```
 
-When this happens, the console will log a warning naming the count and per-type breakdown — e.g. `Warning: 178 unnamed shape(s) hidden (178 VLine). To keep them visible, assign to a var ... or set Name explicitly in the initializer.` Calling `shape.Place()` also keeps it visible (it sets `IsExplicitlyDrawn = true`); `shape.Draw()` is the historical name for the same call, and `shape.Place(Viewports[0][1])` does the same while also choosing the [cell](#viewports--dividing-the-drawing-surface) it draws in.
+Also out of reach: a qualified type name (`C2VGeometry.VPoint p = ...`, `new C2VGeometry.VPoint(...)`), a method result declared as the base type (`Shape s = SomeMethod();`), a `foreach` variable even when it is typed (`foreach (VPolygon p in pieces)`), and properties (`VLine Axis { get; } = ...`) — the pass only visits local and field declarations.
+
+**Naming never registers anything.** The query results that deliberately do not draw their answer — `GeometryHelper.IntersectLineLine` and friends, `VRay.ToFiniteLine()`, `VRay.ToXLine()`, `VXLine.ToFiniteLine()` — stay off the canvas however they are declared, and still need `Place()`.
+
+When shapes are hidden, the console logs a warning naming the count and per-type breakdown — e.g. `Warning: 178 unnamed shape(s) hidden (178 VLine). To keep them visible, assign to a variable (var x = new VLine(...), or VLine x = SomeMethod() - a method result needs the shape type, not var), set Name, or call Place().` Calling `shape.Place()` also keeps it visible (it sets `IsExplicitlyDrawn = true`); `shape.Draw()` is the historical name for the same call, and `shape.Place(Viewports[0][1])` does the same while also choosing the [cell](#viewports--dividing-the-drawing-surface) it draws in.
 
 ---
 

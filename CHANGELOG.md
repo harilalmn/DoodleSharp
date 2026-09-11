@@ -18,6 +18,15 @@ tags; this file is the curated, human-friendly summary.
   the origin, write `new VXYZ(45, 100, VXYZ.Zero)` or
   `new VXYZ(angleInDegrees: 45, distance: 100)`.
 
+### Fixed
+
+- **A shape returned by a method now stays visible when you give it a named, typed variable.**
+  `VPoint vp1 = p1.AsVPoint();` used to be hidden after `Main()` returned, with a warning about
+  unnamed shapes, because only `new` got its variable name. A variable declared with its shape type
+  (`VPoint`, `VPolygon?`, `VGroup`, ...) now names the shape whatever the right-hand side is. `var`
+  still needs `new` (`var p = new VPoint(...)`): with a method call, write the type, set `Name`, or
+  call `Place()`. The console warning now says this.
+
 ## [2026.8.17] - 2026-08-28
 
 ### Fixed

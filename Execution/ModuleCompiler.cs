@@ -631,8 +631,9 @@ public class ModuleCompiler
                 .Select(kv => $"{kv.Value} {kv.Key}"));
             ConsoleOutput.Instance.WriteLine("DoodleSharp", 0,
                 $"Warning: {hiddenCount} unnamed shape(s) hidden ({breakdown}). " +
-                "To keep them visible, assign to a var (e.g. var x = new VLine(...)) " +
-                "or set Name explicitly in the initializer.");
+                "To keep them visible, assign to a variable (var x = new VLine(...), or " +
+                "VLine x = SomeMethod() - a method result needs the shape type, not var), " +
+                "set Name, or call Place().");
         }
     }
 
@@ -789,6 +790,11 @@ public class ModuleCompiler
         // shifts no offsets in the user's trees — which is why it is safe on the offset-faithful
         // path as well as the execute one.
         syntaxTrees.Insert(0, SyntheticUsings.Tree);
+
+        // The helper the name rewriter calls for `VPoint p = q.AsVPoint();` — only where the rewriter
+        // ran, so the editor's compilation (and its completion lists) never see it.
+        if (rewriter != null)
+            syntaxTrees.Insert(1, ShapeNamingHelper.Tree);
 
         Journal.Debug("EXEC.PARSE.DONE", "Syntax trees built",
             $"files={syntaxTrees.Count} forExecution={forExecution} chars={allSourceFiles.Sum(f => f.Content.Length)}");
@@ -979,7 +985,24 @@ internal class AnimationNameRewriter : CSharpSyntaxRewriter
             return TryAddNameInitializerImplicit(variable, implicitCreation, implicitCreation.Initializer);
         }
 
+        // Anything else on a declaration that spells out a shape type — `VPoint vp1 = p1.AsVPoint();`,
+        // `VPolygon? merged = a.Union(b);`. The user named the variable, so the shape is named after
+        // it; without this a method result was hidden by HideUnnamedShapes however it was declared.
+        // `var` cannot be covered here: the rewriter sees syntax only, and cannot tell which calls
+        // return shapes (see ShapeNamingHelper).
+        if (variable.Initializer != null && IsShapeType(type))
+        {
+            var wrapped = ShapeNamingHelper.Wrap(type, variable.Initializer.Value, variable.Identifier.Text);
+            return variable.WithInitializer(variable.Initializer.WithValue(wrapped));
+        }
+
         return variable;
+    }
+
+    private static bool IsShapeType(TypeSyntax type)
+    {
+        var element = type is NullableTypeSyntax nullable ? nullable.ElementType : type;
+        return element is IdentifierNameSyntax identifier && ShapeTypes.Contains(identifier.Identifier.Text);
     }
 
     private VariableDeclaratorSyntax TryAddNameInitializer(

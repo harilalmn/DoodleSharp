@@ -275,6 +275,7 @@ number, and gets **both** a body in `docs/NOTES.md` and a line here.
 141. In an **argument list** the completion list is variables only; the restriction lifts after `new` and inside a nested body.
 142. A property's **accessor list** answers with `get;`/`set;` alone; a property or parameter initialiser's expected type hangs off the member, not a declarator.
 143. An Auto-Run tick **stands down** on unchanged source that is interactive or that just failed; a silent run's runtime error is reported, not counted.
+144. A **shape-typed** declaration is named whatever its initializer (`VPoint p = q.AsVPoint();`) via the execute-path-only `ShapeNamingHelper` tree; `var` with a method call cannot be — the rewriter is syntax-only.
 
 ## Keyboard Shortcuts (Key Bindings)
 
