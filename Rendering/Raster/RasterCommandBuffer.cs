@@ -87,13 +87,15 @@ public sealed class RasterCommandBuffer
         _segCount++;
     }
 
-    public void AddPoint(double x, double y, int color)
+    /// <summary>A filled disc of <paramref name="radius"/> device pixels — a point marker. The radius rides in the segment payload's <c>x1</c> slot.</summary>
+    public void AddPoint(double x, double y, double radius, int color)
     {
         Grow(ref _x0, _segCount); Grow(ref _y0, _segCount);
         Grow(ref _x1, _segCount); Grow(ref _y1, _segCount);
         Grow(ref _segColor, _segCount);
 
         _x0[_segCount] = x; _y0[_segCount] = y;
+        _x1[_segCount] = radius;
         _segColor[_segCount] = color;
 
         Push(CmdPoint, _segCount);
@@ -167,8 +169,8 @@ public sealed class RasterCommandBuffer
                 }
 
                 case CmdPoint:
-                    HairlineRasterizer.DrawPoint(pixels, stride, height,
-                        _x0[payload], _y0[payload], _segColor[payload], clipTop, clipBottom);
+                    HairlineRasterizer.DrawDisc(pixels, stride, height,
+                        _x0[payload], _y0[payload], _x1[payload], _segColor[payload], clipTop, clipBottom);
                     break;
 
                 case CmdFill:

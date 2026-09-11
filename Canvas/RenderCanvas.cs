@@ -89,7 +89,7 @@ internal static class SnapMarkerBrushes
 /// </summary>
 public class RenderCanvas : FrameworkElement
 {
-    private const double PointRadius = 5;
+    private const double PointRadius = Rendering.PointMarker.PatchRadius;
 
     // Viewport transformation (encapsulates scale/pan/coordinate conversion)
     private readonly ViewportTransform _viewport = new();
@@ -1158,7 +1158,7 @@ public class RenderCanvas : FrameworkElement
     {
         _frameMetrics.BeginFrame();
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        var wasRaster = _rasterActive;
+        _frameUsedRaster = false;
         try
         {
             RedrawAllCore();
@@ -1168,10 +1168,19 @@ public class RenderCanvas : FrameworkElement
             watch.Stop();
             // Only a vector frame tells us what the vector path costs. Timing a raster frame and
             // feeding it back would measure the wrong renderer and latch the choice permanently.
-            if (!wasRaster) _lastVectorFrameMs = watch.Elapsed.TotalMilliseconds;
+            //
+            // Which backend drew *this* frame is decided inside RedrawAllCore, so it is read after
+            // it. Sampling _rasterActive beforehand recorded the first raster frame of every switch
+            // as a vector one — slow, from bitmap setup and first-use JIT — which switched the
+            // next-but-one frame up again, so a two-shape scene alternated backends on every
+            // repaint (note 145).
+            if (!_frameUsedRaster) _lastVectorFrameMs = watch.Elapsed.TotalMilliseconds;
             _frameMetrics.EndFrame();
         }
     }
+
+    /// <summary>Whether the frame being drawn went through a raster backend; set by <see cref="RedrawAllCore"/>.</summary>
+    private bool _frameUsedRaster;
 
     private void RedrawAllCore()
     {
@@ -1186,6 +1195,7 @@ public class RenderCanvas : FrameworkElement
         // happened the first time: the rasterised geometry vanished and only the grid and the
         // WPF-drawn text remained visible.
         var useRaster = ShouldUseRasterBackend();
+        _frameUsedRaster = useRaster;
 
         // Background and grid both go into the bottom layer, underneath the raster bitmap.
         //
@@ -1291,7 +1301,7 @@ public class RenderCanvas : FrameworkElement
             // drawing the answer is "most of them", and drawing a quarter-pixel building outline
             // costs a full tessellation to produce one indistinguishable mark. This is what stops
             // frame cost from tracking document size once culling has stopped helping.
-            var lod = Rendering.LodPolicy.Classify(_sceneIndex.MaxExtentAt(slot), lodScale);
+            var lod = Rendering.LodPolicy.Classify(shape, _sceneIndex.MaxExtentAt(slot), lodScale);
             if (lod == Rendering.LodLevel.Skip)
                 continue;
 
@@ -2419,7 +2429,7 @@ public class RenderCanvas : FrameworkElement
         }
         else
         {
-            dc.DrawEllipse(pen.Brush, pen, screenPos, 1.5, 1.5);
+            dc.DrawEllipse(pen.Brush, pen, screenPos, Rendering.PointMarker.DotRadius, Rendering.PointMarker.DotRadius);
         }
 
         if (applyOpacity) dc.Pop();
@@ -3770,7 +3780,13 @@ public class RenderCanvas : FrameworkElement
         {
             // The previous frame's cost, which is the only honest evidence of what this one will
             // cost — shape count alone does not distinguish a hundred lines from a hundred hatches.
-            if (_lastVectorFrameMs > RasterSwitchUpMs) _rasterActive = true;
+            //
+            // But only for a scene the switch-down rule above would keep. Below
+            // RasterSwitchDownShapes the next frame switches straight back, so a slow frame bought
+            // exactly one raster frame: a flap, visible for the layer-order reason in the summary,
+            // and on a static scene that one frame is what stays on screen (note 145).
+            if (_lastVectorFrameMs > RasterSwitchUpMs && _sceneIndex.VisibleCount >= RasterSwitchDownShapes)
+                _rasterActive = true;
         }
 
         return _rasterActive;
@@ -3789,7 +3805,7 @@ public class RenderCanvas : FrameworkElement
         foreach (var slot in _sceneIndex.Visible)
         {
             if (_sceneIndex.ShapeAt(slot) is not Shape shape || !shape.IsVisible) continue;
-            if (Rendering.LodPolicy.Classify(_sceneIndex.MaxExtentAt(slot), scale)
+            if (Rendering.LodPolicy.Classify(shape, _sceneIndex.MaxExtentAt(slot), scale)
                 == Rendering.LodLevel.Skip) continue;
 
             _rasterVisibleBuffer.Add(shape);

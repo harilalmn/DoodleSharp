@@ -80,19 +80,41 @@ public static class HairlineRasterizer
         }
     }
 
-    /// <summary>Sets a single pixel, bounds-checked. Used for level-of-detail marks.</summary>
-    public static void DrawPoint(int[] pixels, int stride, int height,
-                                 double x, double y, int color, int clipTop, int clipBottom)
+    /// <summary>
+    /// A filled disc of <paramref name="radius"/> device pixels, clipped — a
+    /// <see cref="C2VGeometry.VPoint"/>'s marker (<see cref="PointMarker"/>). A radius under one pixel
+    /// lights the single pixel the centre falls in. This used to be that single pixel for every point,
+    /// which on a full-HD canvas nobody can find (note 145).
+    /// </summary>
+    public static void DrawDisc(int[] pixels, int stride, int height,
+                                double x, double y, double radius, int color, int clipTop, int clipBottom)
     {
-        if (!double.IsFinite(x) || !double.IsFinite(y)) return;
+        if (!double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(radius)) return;
+        if (radius < 0) radius = 0;
 
-        var ix = (int)Math.Round(x);
-        var iy = (int)Math.Round(y);
+        // Rejected in doubles, before the casts: a point far off-screen at high zoom has a
+        // coordinate no int can hold.
+        if (x < -radius - 1 || x > stride + radius || y < -radius - 1 || y > height + radius) return;
 
-        if (ix < 0 || ix >= stride) return;
-        if (iy < clipTop || iy > clipBottom || iy < 0 || iy >= height) return;
+        var cx = (int)Math.Round(x);
+        var cy = (int)Math.Round(y);
+        var r = (int)Math.Floor(radius);
+        var r2 = radius * radius;
 
-        pixels[iy * stride + ix] = color;
+        var top = Math.Max(Math.Max(cy - r, clipTop), 0);
+        var bottom = Math.Min(Math.Min(cy + r, clipBottom), height - 1);
+        var left = Math.Max(cx - r, 0);
+        var right = Math.Min(cx + r, stride - 1);
+
+        for (int py = top; py <= bottom; py++)
+        {
+            var dy = py - cy;
+            for (int px = left; px <= right; px++)
+            {
+                var dx = px - cx;
+                if (dx * dx + dy * dy <= r2) pixels[py * stride + px] = color;
+            }
+        }
     }
 
     /// <summary>

@@ -404,7 +404,11 @@ float4 PS(VSOut i) : SV_TARGET { return i.col; }
 
         public bool BeginShape(Shape shape, in PenSpec pen)
         {
-            if (shape is VText) return false;
+            // A point's marker is a fixed number of screen pixels (PointMarker), which geometry
+            // uploaded once in world units cannot express — a degenerate segment came out as a single
+            // pixel. Declined, it is drawn by the vector layer like text, at the size every other
+            // backend draws it (note 145).
+            if (shape is VText || shape is VPoint) return false;
 
             var packed = ColorTable.Resolve(pen.Color);
             var a = ((packed >> 24) & 0xFF) / 255f;

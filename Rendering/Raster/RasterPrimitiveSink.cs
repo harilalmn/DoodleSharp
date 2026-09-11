@@ -81,10 +81,26 @@ public sealed class RasterPrimitiveSink : IPrimitiveSink
 
     public void EndShape() { }
 
+    /// <summary>
+    /// A point's marker, at the size the vector path draws it (<see cref="PointMarker"/>). That path
+    /// strokes an ellipse with a one-pixel pen centred on its radius, so the outer edge sits half a
+    /// pixel beyond it and a patch's fill half a pixel inside. This was one pixel, which nobody can
+    /// find on a full-HD canvas (note 145).
+    /// </summary>
     public void EmitPoint(VXYZ point)
     {
         var (x, y) = _worldToScreen(point.X, point.Y);
-        _buffer.AddPoint(x, y, _strokeColor);
+
+        if (ApplicationSettings.Instance.DrawPointAsPatch)
+        {
+            _buffer.AddPoint(x, y, PointMarker.PatchRadius + 0.5, _strokeColor);
+            if (_hasFill) _buffer.AddPoint(x, y, PointMarker.PatchRadius - 0.5, _fillColor);
+        }
+        else
+        {
+            _buffer.AddPoint(x, y, PointMarker.DotRadius + 0.5, _strokeColor);
+        }
+
         SegmentsSubmitted++;
     }
 

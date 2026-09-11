@@ -276,6 +276,7 @@ number, and gets **both** a body in `docs/NOTES.md` and a line here.
 142. A property's **accessor list** answers with `get;`/`set;` alone; a property or parameter initialiser's expected type hangs off the member, not a declarator.
 143. An Auto-Run tick **stands down** on unchanged source that is interactive or that just failed; a silent run's runtime error is reported, not counted.
 144. A **shape-typed** declaration is named whatever its initializer (`VPoint p = q.AsVPoint();`) via the execute-path-only `ShapeNamingHelper` tree; `var` with a method call cannot be — the rewriter is syntax-only.
+145. A `VPoint` is a **fixed-screen-size marker** (`Rendering/PointMarker.cs`): LOD must never size-cull it (`LodPolicy.Classify(shape, …)`), the rasterizer draws the same disc, the GPU sink declines it; Auto records a frame's time by the backend that **actually** drew it.
 
 ## Keyboard Shortcuts (Key Bindings)
 

@@ -62,6 +62,16 @@ public static class LodPolicy
     }
 
     /// <summary>
+    /// <see cref="Classify(double, double)"/> for a particular shape — the overload the renderer
+    /// uses. A <see cref="C2VGeometry.VPoint"/> is always drawn in full: its bounds are a single
+    /// coordinate, so its world extent is zero at every zoom and the size test skips it, but what it
+    /// draws is a marker of fixed screen size (<see cref="PointMarker"/>) that is never sub-pixel.
+    /// Without this every point on the canvas was invisible except while selected (note 145).
+    /// </summary>
+    public static LodLevel Classify(C2VGeometry.IDrawable shape, double worldExtent, double scale)
+        => shape is C2VGeometry.VPoint ? LodLevel.Full : Classify(worldExtent, scale);
+
+    /// <summary>
     /// Segments to flatten a curve into, given its on-screen radius. Proportional to the square
     /// root because the error of a polygonal approximation falls off with the square of the segment
     /// count — so doubling the segments on a circle four times the size keeps the same smoothness,
