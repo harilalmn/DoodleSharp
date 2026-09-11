@@ -9,6 +9,8 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+## [2026.9.0] - 2026-09-11
+
 ### Added
 
 - **Polar points: `new VXYZ(angleInDegrees, distance, fromPoint)`.** Builds the point `distance`
