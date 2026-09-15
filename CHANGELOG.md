@@ -9,6 +9,8 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+## [2026.9.1] - 2026-09-15
+
 ### Added
 
 - **MCP support: drive DoodleSharp from Claude Code, and let it see the result.** A new `DoodleSharp.Mcp.exe` bridge lets an
