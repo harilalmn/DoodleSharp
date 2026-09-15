@@ -24,6 +24,9 @@
     <Compile Remove="Bench\**" />
     <Compile Remove="C2VGeometry\**" />
     <Compile Remove="RegionSample\**" />
+    <!-- The MCP bridge is its own console exe. It links Mcp\McpBridgeProtocol.cs (which IS ours)
+         rather than referencing this project, so nothing under McpBridge\ belongs in this build. -->
+    <Compile Remove="McpBridge\**" />
     <Compile Remove="Sample Projects\**" />
   </ItemGroup>
 

@@ -5481,6 +5481,54 @@ Full reference, including how to read a journal and how to add instrumentation:
 
 ---
 
+## MCP: driving DoodleSharp from Claude Code
+
+DoodleSharp ships an MCP server, so an AI agent can run the project you have open and see what
+happened. The agent edits your `.cs` files with its own file tools; DoodleSharp supplies the half
+a filesystem cannot — actually compiling and running them.
+
+### Setup
+
+Register the bridge once:
+
+```bash
+claude mcp add doodlesharp -- "C:\Program Files\DoodleSharp\mcp\DoodleSharp.Mcp.exe"
+```
+
+Then open DoodleSharp with a project and ask Claude to work on it:
+
+> Open my Sorting sketch's `StartViz.cs`, make the bars sort one comparison per frame, and run it.
+
+### Tools
+
+| Tool | What it does |
+|------|--------------|
+| `doodle_get_status` | Which project is open, its path, how many files and shapes, and whether the editor has unsaved changes |
+| `doodle_run_project` | Re-reads the project's files from disk, compiles and runs it, and reports compiler errors, any runtime error, the program's console output, and the shape count |
+| `doodle_capture_canvas` | Renders the canvas to a PNG and returns it as an image, so the agent can see what the code drew rather than only whether it compiled |
+
+`doodle_capture_canvas` fits the whole drawing in frame by default (so the agent does not photograph
+an empty corner of the viewport and conclude your code drew nothing) and takes optional `maxWidth`,
+`maxHeight`, `includeGrid` and `zoomExtents` arguments. It never renders the F10 frame-timing
+readout, selection handles or other canvas chrome into the image.
+
+### What to expect
+
+- **DoodleSharp has to be running** with a project open. The tools drive the live window — they are
+  not a headless renderer. If the app is closed, the tool says so rather than failing obscurely.
+- **One window serves.** If you have several DoodleSharp windows open, the first one to start owns
+  the connection; the others do not respond to MCP. This is deliberate — "run the project" should
+  not be answered by whichever window won a race.
+- **Your unsaved edits are safe.** `doodle_run_project` re-reads from disk, but a file you are
+  part-way through editing in DoodleSharp is kept as you left it and reported as a conflict, so you
+  will know the agent's run did not include your change.
+- **Errors come back with a file and a line** but no column — the compiler that produces them runs
+  on the instrumented execute path, where columns are shifted (see note 21 in `docs/NOTES.md`).
+- **Nothing is exposed but these two tools.** The bridge cannot read or write your files, change
+  settings, or export; it can ask the open window what it holds, and ask it to run.
+
+---
+
 ## Getting Help
 
 - **Built-in Help**: **Help ▸ Shape Reference** (`F1`) opens the API reference — every public type

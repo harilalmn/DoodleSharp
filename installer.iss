@@ -10,6 +10,7 @@
 ; Paths - adjust if your layout differs
 ; C:\Work\Nicety\Projects\DoodleSharp\bin\Release\net9.0-windows
 #define BuildOutput "bin\Release\net9.0-windows"
+#define McpBridgeOutput "McpBridge\bin\Release\net9.0"
 #define SampleProjects "Sample Projects"
 
 [Setup]
@@ -122,6 +123,18 @@ Source: "{#BuildOutput}\ru\*"; DestDir: "{app}\ru"; Flags: ignoreversion recurse
 Source: "{#BuildOutput}\tr\*"; DestDir: "{app}\tr"; Flags: ignoreversion recursesubdirs
 Source: "{#BuildOutput}\zh-Hans\*"; DestDir: "{app}\zh-Hans"; Flags: ignoreversion recursesubdirs
 Source: "{#BuildOutput}\zh-Hant\*"; DestDir: "{app}\zh-Hant"; Flags: ignoreversion recursesubdirs
+
+; MCP bridge (DoodleSharp.Mcp.exe) - the stdio server Claude Code launches to drive the running
+; application. Installed into its own subfolder, and this is the one place a wildcard is right
+; rather than the explicit per-DLL enumeration used above: the bridge is a separate console
+; project with its own 39-assembly dependency closure (the Microsoft.Extensions.* hosting stack
+; plus ModelContextProtocol), and nothing else builds into that directory, so a wildcard cannot
+; pick up something that was not meant to ship. Enumerating them individually would be a list
+; nobody could keep correct across an SDK bump.
+; Deliberately NOT next to DoodleSharp.exe: several of those assemblies also exist in the app's
+; own output at different versions, and flattening the two sets together is how you get an app
+; that loads the wrong one.
+Source: "{#McpBridgeOutput}\*"; DestDir: "{app}\mcp"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Sample projects
 Source: "{#SampleProjects}\*"; DestDir: "{app}\Samples"; Flags: ignoreversion recursesubdirs

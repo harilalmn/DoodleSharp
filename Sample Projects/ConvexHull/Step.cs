@@ -28,9 +28,12 @@ namespace ConvexHull
             Mid = Start + new VXYZ(0, rise);
             End = Mid + new VXYZ(Going, 0);
 
-            Start.Draw();
-            Mid.Draw();
-            End.Draw();
+            // Start/Mid/End are VXYZ — coordinates, not shapes, so they have nothing to draw.
+            // A visible dot is a VPoint built from the coordinate.
+            VPoint startMarker = new VPoint(Start);
+            VPoint midMarker = new VPoint(Mid);
+            VPoint endMarker = new VPoint(End);
+
             VPolyline pl = new VPolyline(new VXYZ[]{Start, Mid, End});
             pl.Draw();
 

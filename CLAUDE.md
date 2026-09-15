@@ -54,6 +54,10 @@ DoodleSharp/
 │                       #   note 90) and Mouse/MouseInfo (canvas mouse events, note 95)
 ├── Docking/            # LayoutFile (versioned layout envelope) + ScreenBounds (off-screen
 │                       #   recovery). The DockingManager itself lives in MainWindow.xaml; see note 100
+├── Mcp/                # MCP: the wire protocol (compiled into the bridge too), the named-pipe
+│                       #   server, and MainWindow's command implementations. See note 146.
+├── McpBridge/          # DoodleSharp.Mcp.exe (separate project): the stdio MCP server Claude Code
+│                       #   launches. Built by CI, installed to {app}\mcp.
 ├── Commands/           # TransactionManager + undo/redo commands
 ├── Export/             # DXF, PDF, GIF, video exporters (SVG lives in Canvas/SvgExporter.cs)
 ├── Documentation/      # DocGenerator: the F1 Help content (three name-keyed dictionaries) and
@@ -277,6 +281,7 @@ number, and gets **both** a body in `docs/NOTES.md` and a line here.
 143. An Auto-Run tick **stands down** on unchanged source that is interactive or that just failed; a silent run's runtime error is reported, not counted.
 144. A **shape-typed** declaration is named whatever its initializer (`VPoint p = q.AsVPoint();`) via the execute-path-only `ShapeNamingHelper` tree; `var` with a method call cannot be — the rewriter is syntax-only.
 145. A `VPoint` is a **fixed-screen-size marker** (`Rendering/PointMarker.cs`): LOD must never size-cull it (`LodPolicy.Classify(shape, …)`), the rasterizer draws the same disc, the GPU sink declines it; Auto records a frame's time by the backend that **actually** drew it.
+146. **MCP** (`Mcp/`, `McpBridge/`) — a stdio bridge exe plus a named pipe, not HTTP; the protocol file is compiled into both; every command hops to the Dispatcher, unwraps **twice**, and never throws; `RefreshProjectFromDisk` is the refresh entry point and is called **once**; diagnostics carry a line but **never a column** (note 21); canvas capture is the **fourth capture path** and obeys note 93; `ImageContentBlock.Data` takes **base64 text as UTF-8 bytes**, not image bytes; one window serves.
 
 ## Keyboard Shortcuts (Key Bindings)
 

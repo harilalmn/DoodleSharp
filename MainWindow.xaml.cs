@@ -291,6 +291,9 @@ public partial class MainWindow : Window
         // booleans when there is no layout file yet, or when the one on disk cannot be trusted.
         RestoreLayout();
 
+        // After the canvas exists: every command the listener serves acts on a live window.
+        StartMcpServer();
+
         _ = CheckForUpdatesAsync();
     }
 
@@ -4019,9 +4022,15 @@ public partial class MainWindow : Window
         return ext == ".cs";
     }
 
-    private void RefreshProjectFromDisk()
+    /// <returns>
+    /// What the refresh did, or null if there was no project or it failed. Callers that only want
+    /// the side effects ignore it; <see cref="McpRunProjectAsync"/> needs it as data, and needs it
+    /// from <em>this</em> call — asking <c>RefreshFilesFromDisk</c> itself a second time reports
+    /// that nothing changed, because the first call already took the change.
+    /// </returns>
+    private Project.VizCodeProject.DiskRefreshResult? RefreshProjectFromDisk()
     {
-        if (_currentProject == null) return;
+        if (_currentProject == null) return null;
 
         try
         {
@@ -4065,10 +4074,12 @@ public partial class MainWindow : Window
             }
 
             ReportDiskRefresh(refresh);
+            return refresh;
         }
         catch (Exception ex)
         {
             SetStatus($"Error refreshing project: {ex.Message}", isError: true);
+            return null;
         }
     }
 
@@ -5027,6 +5038,9 @@ public partial class MainWindow : Window
         // Same for Auto-Run: a tick during teardown would compile and execute into a dying window.
         _autoRunTimer?.Stop();
 
+        // And for the MCP listener, which is the same hazard reached from outside the process.
+        StopMcpServer();
+
         // After the prompt, so a cancelled close does not persist a layout the user keeps editing.
         SaveLayout();
 
@@ -5270,17 +5284,23 @@ public partial class MainWindow : Window
     /// than a constant because three unrelated things re-run the code silently, and reporting an
     /// Auto-Run tick as "Parameters:" names a panel the user may not even have open.
     /// </param>
-    private async Task RunSilentlyAsync(string label)
+    /// <returns>
+    /// The compilation result, or null if the run never started (no files, no entry point) or threw
+    /// on the way. The three in-app callers ignore it — they report through the status bar and the
+    /// console. It exists for <see cref="McpRunProjectAsync"/>, which is answering a pipe rather
+    /// than a user and has to hand the diagnostics back as data.
+    /// </returns>
+    private async Task<Execution.CompilationResult?> RunSilentlyAsync(string label)
     {
         if (_currentProject == null || _currentProject.Files.Count == 0)
-            return;
+            return null;
 
         // Save current editor content
         SaveCurrentEditorContent();
 
         // Verify entry point exists
         if (_currentProject.EntryPointFile == null)
-            return;
+            return null;
 
         try
         {
@@ -5344,10 +5364,13 @@ public partial class MainWindow : Window
                     }
                 }
             }
+
+            return result;
         }
         catch
         {
             // Silently ignore errors during auto-update
+            return null;
         }
         finally
         {
