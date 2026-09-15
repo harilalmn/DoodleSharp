@@ -429,6 +429,19 @@ named, why the warning?", then "the two points are seen only when selected".
 - [x] **Tests** — `VXYZPolarConstructorTests` (7), `ShapeNamingRewriteTests` (3, compile + emit + run), `PointVisibilityTests` (14, including an offscreen `RenderCanvas` capture that read 0 lit pixels before the fix). Suite 1206 → 1223
 - [x] **Measured** — Auto `zoom-decades` bench, two runs each before and after: within noise on every scene
 
+### Phase: MCP — An Agent Runs the Sketch and Looks at the Canvas (2026-09-15)
+The agent already has file tools; what it cannot do from the filesystem is run the code and see what
+it drew. So the surface is three tools and deliberately no file editing.
+- [x] **`McpBridge/` (`DoodleSharp.Mcp.exe`)** — stdio MCP server (ModelContextProtocol 2.2.0) that Claude Code or Claude Desktop launches and whose lifetime it manages
+- [x] **`Mcp/McpPipeServer.cs`** — named pipe, ACL'd to the current user; not HTTP, which would need the ASP.NET Core shared framework and a loopback port in front of an arbitrary-C#-execution engine
+- [x] **`Mcp/McpBridgeProtocol.cs` compiled into both assemblies** — linked, not referenced; DoodleSharp is a `net9.0-windows` WinExe and a reference would drag WPF into a console process
+- [x] **`doodle_get_status` / `doodle_run_project` / `doodle_capture_canvas`** — status, run-and-report, and a PNG returned as an MCP image block
+- [x] **Two silent bugs, both found end-to-end** — the double refresh that ran stale code while reporting success, and `ImageContentBlock.Data` taking base64-as-UTF-8 rather than image bytes
+- [x] **Diagnostics carry a line, never a column** — the execute path's stack-guard injection preserves line numbers but shifts every column on its line (note 21)
+- [x] **ConvexHull sample fixed** — `.Draw()` on `VXYZ` values; now `VPoint` markers
+- [x] **Tests** — `Tests/McpSurfaceTests.cs` (7) plus `ExportFidelityTests.TheMcpCaptureSuppressesTheOverlayToo`, and `AutoUpdateRemovalTests` re-pinned for `RunSilentlyAsync`'s new return type. Suite 1223 → 1231
+- [x] **Verified against the running app** — run, edit the `.cs` on disk, run again (3 → 12 shapes), inject a compile error, capture the canvas and look at the PNG
+
 ---
 
 ## Implementation Statistics

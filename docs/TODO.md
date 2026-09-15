@@ -189,6 +189,13 @@ Core timeline playback is implemented; items below are advanced timeline UX poli
 
 ## Completed Features
 
+### Recently Completed (2026-09-15) — MCP
+- [x] **An agent can drive the running window** — `DoodleSharp.Mcp.exe` (`McpBridge/`) is a stdio MCP server that Claude Code or Claude Desktop launches; it forwards to the open application over a named pipe. Three tools: `doodle_get_status`, `doodle_run_project` (re-read from disk, compile, run, report diagnostics + console output) and `doodle_capture_canvas` (a PNG the agent can look at). The surface deliberately excludes file editing — the agent already has file tools; what it cannot do from the filesystem is run the code and see what it drew. Not HTTP: the SDK's Streamable HTTP transport needs the ASP.NET Core shared framework, a second runtime prerequisite on top of the .NET Desktop Runtime the installer already asks for, and would put an unauthenticated loopback port in front of an engine whose job is executing arbitrary C# in-process. CLAUDE.md note 146, `Tests/McpSurfaceTests.cs`.
+- [x] **The run command refreshes through the window, exactly once** — calling `VizCodeProject.RefreshFilesFromDisk` and then `MainWindow.RefreshProjectFromDisk` means the second correctly reports nothing to do, so the editor is never updated, and `RunSilentlyAsync` then saves that stale buffer back over the file it just re-read. The agent's edit was read from disk, discarded, and the old code ran while the tool reported success. Found only by an end-to-end test that edited a file on disk and checked the shape count changed.
+- [x] **`ImageContentBlock.Data` carries base64 text as UTF-8 bytes, not image bytes** — handing it the raw PNG compiles and ships a corrupt picture: the serializer decodes it as UTF-8, so the PNG magic `0x89` becomes U+FFFD. Nothing throws and the block still looks well-formed. Found by reading the bytes back off the wire.
+- [x] **Canvas capture is the fourth capture path** and suppresses the overlay per note 93 — it matters more here than for the three export paths, because a person looking at an exported PNG can tell a selection handle is chrome and an agent cannot.
+- [x] **The ConvexHull sample compiles again** — `Step.cs` called `.Draw()` on `VXYZ` values, which are coordinates rather than shapes; it now builds `VPoint` markers. Verified by running it through the new MCP tools.
+
 ### Shapes (15 total)
 - [x] VPoint, VLine, VCircle, VRectangle, VEllipse, VArc
 - [x] VPolygon, VPolyline, VBezier, VSpline
