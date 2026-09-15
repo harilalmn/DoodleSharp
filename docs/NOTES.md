@@ -495,3 +495,73 @@ from this fork; a new note takes the next unused number.
     - **The rasterizers drew a point as one pixel.** `HairlineRasterizer.DrawPoint` set a single pixel; it is now `DrawDisc`, and `RasterPrimitiveSink.EmitPoint` sizes it from `PointMarker` exactly as the vector `DrawPoint` does — radius + 0.5 for the one-pixel pen centred on the edge, and the patch's fill 0.5 inside, so "Draw point as patch" now reaches the rasterizer as well. The **GPU sink declines `VPoint`** instead: its geometry is uploaded once in world units (note 88), which cannot express a size in screen pixels, so the point goes to the vector layer the way text does. The radii live in `PointMarker` and nowhere else — `RenderCanvas.PointRadius` is an alias of it.
     - **Auto flipped backends on alternate repaints of a small scene.** `RedrawAll` sampled `_rasterActive` *before* `RedrawAllCore` chose the backend, so the first raster frame after a switch was timed and recorded as a vector frame. That frame is slow (bitmap setup, first-use JIT — 70 ms in the probe), so two frames later Auto switched up again. The frame's backend is now recorded where it is chosen (`_frameUsedRaster`). Separately, a switch-up is refused below `RasterSwitchDownShapes`, because the very next frame would switch straight back: under that count a raster frame could only ever be a one-frame flap, and on a static scene that frame is what stays on screen. Note 83's two thresholds are unchanged.
     - Guarded by `Tests/PointVisibilityTests.cs`, whose end-to-end check is the probe's own measurement — a `RenderCanvas` on an STA thread, a white point, `RenderTargetBitmap`, lit pixels counted around it, on Legacy and Managed — which read **0** on both before the fix. That is the point — the user named it — and the docs that said "method results are always unnamed" were updated to say "unless the variable is declared with the shape type". Guarded by `Tests/ShapeNamingRewriteTests.cs`, which compiles the execute path, emits, and runs it.
+
+146. **MCP support (`Mcp/`, `McpBridge/`)** — an agent drives the running window through two tools,
+    `doodle_get_status` and `doodle_run_project`. The pieces and the reasoning:
+    - **The surface deliberately excludes file editing.** Claude Code already reads and writes the
+      project's `.cs` files; what it cannot do from the filesystem is run them and learn what
+      happened. So the tools expose only what the app knows. `doodle_run_project` **re-reads from
+      disk first**, and that refresh is the whole joint between the two halves — without it the
+      command compiles whatever the editor was last told about and reports a confident result for
+      code that no longer exists.
+    - **Two processes, a pipe between them.** `McpBridge/` is a plain `net9.0` console exe
+      (`DoodleSharp.Mcp.exe`) that Claude Code launches over stdio and whose lifetime it manages; it
+      forwards each call to the app over a named pipe. The SDK's Streamable HTTP transport would
+      have removed the second process, but it needs the ASP.NET Core shared framework — a second
+      runtime prerequisite for an installer that already has to talk the user through installing the
+      .NET Desktop Runtime — and it would put an unauthenticated loopback TCP port in front of an
+      engine whose job is executing arbitrary C# in-process. The pipe's ACL is the whole security
+      story here, and it is set to the current user in `CreatePipe`.
+    - **`Mcp/McpBridgeProtocol.cs` is compiled into both assemblies**, linked by the bridge's csproj
+      rather than referenced: DoodleSharp is a `net9.0-windows` `WinExe`, and referencing it would
+      drag WPF into a console process. One definition, two compilations, no drift. `DoodleSharp.csproj`
+      excludes `McpBridge\**` from its own glob.
+    - **Every command runs on the Dispatcher and nothing is allowed to throw.** Commands arrive on a
+      pool thread and touch `MainWindow`, the canvas and the compiler. `DispatchAsync` hops to the UI
+      thread and **unwraps twice** — `InvokeAsync` returns a task for the outer delegate, so awaiting
+      only that would report success the moment the compile was *scheduled*. Every failure becomes an
+      `ok: false` reply, because an exception escaping a handler closes the app exactly as notes 134
+      and 137 describe, and a crash an agent can trigger remotely is that bug with a worse story.
+    - **`RefreshProjectFromDisk` is the refresh entry point, not `VizCodeProject.RefreshFilesFromDisk`,
+      and it must be called exactly once.** The project-level call updates the file model; only the
+      window pushes the new text into the open editor. Calling both in sequence is worse than calling
+      either: the second correctly reports nothing to do, so the editor is never updated, and
+      `RunSilentlyAsync` then starts by saving that stale buffer back over the file it just re-read —
+      the run silently uses the old code. This shipped broken and was caught only by an end-to-end
+      test that edited a file on disk and checked the shape count changed. `RefreshProjectFromDisk`
+      returns its `DiskRefreshResult` for this reason.
+    - **`RunSilentlyAsync` returns its `CompilationResult`.** The three in-app callers ignore it and
+      report through the status bar; the MCP command is answering a pipe and needs the diagnostics as
+      data.
+    - **Diagnostics are reported with a line but never a column.** They come from the execute-path
+      compilation, which injects a stack guard at the top of every method body (note 21). The
+      injection is trivia-free so line numbers survive it, but it is ~86 characters wide and every
+      column on the line it was inserted into is off by that much. `DiagnosticPayload.Column` carries
+      what Roslyn said; the formatter does not print it.
+    - **One window serves.** The pipe is created with `maxNumberOfServerInstances: 1`, so a second
+      DoodleSharp gets an `IOException`, logs `MCP.PIPE.TAKEN` and does not serve — an agent asking
+      "run the project" must not be answered by whichever of three windows won a race. A second
+      concurrent command therefore queues, which is correct for one canvas; the bridge waits 90s for
+      its turn and distinguishes **busy** from **not running** by probing `\.\pipe\DoodleSharp.mcp`
+      first, polling briefly because the app recreates the instance between connections and a single
+      sample inside that window would report a running app as closed.
+    - **`doodle_capture_canvas` is the tool that makes the rest worth having**, because an agent
+      reading only diagnostics knows whether its code *compiled*, not whether it drew the right
+      thing. It is the **fourth capture path** and obeys note 93 — `SuppressOverlayForCapture`,
+      or the F10 readout and selection handles are rendered into the image, and unlike a human
+      looking at an exported PNG the agent has no way to tell that chrome is not geometry. It
+      fits the drawing with `ZoomExtents` by default: the alternative is photographing whichever
+      region the viewport happened to show and letting the caller conclude from an empty picture
+      that its code drew nothing. Scaling is fit-only, never up. An empty canvas is captioned in
+      words, because a blank image is indistinguishable from a rendering failure.
+    - **`ImageContentBlock.Data` takes the already-base64 text as UTF-8 bytes, not the image
+      bytes.** Assigning the raw PNG compiles and silently ships a corrupt picture: the serializer
+      decodes what it is given as UTF-8 into a JSON string, so every byte that is not valid UTF-8
+      — starting with the PNG magic `0x89` — becomes U+FFFD. Nothing throws and the block still
+      looks well-formed. Found by reading the bytes back off the wire, and pinned by
+      `TheImageBlockCarriesBase64TextNotRawBytes`.
+    - **The installer uses a wildcard for `{app}\mcp`**, against the explicit-enumeration convention
+      everywhere else in `installer.iss`, because the bridge is a separate project with a
+      39-assembly dependency closure and nothing else builds into that directory. It is installed to
+      a subfolder, not beside `DoodleSharp.exe`: several of those assemblies also exist in the app's
+      output at different versions.

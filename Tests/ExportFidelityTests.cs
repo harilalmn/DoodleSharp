@@ -67,6 +67,24 @@ public class ExportFidelityTests
     }
 
     /// <summary>
+    /// The MCP canvas capture is the fourth capture path (note 146) and obeys the same rule, but it
+    /// lives in <c>Mcp/MainWindow.Mcp.cs</c> rather than <c>MainWindow.xaml.cs</c>, so the theory
+    /// above does not reach it. It is the path where leaking the overlay would matter most: the
+    /// three above hand a picture to a person, who can see that a selection handle is chrome. This
+    /// one hands it to an agent, which cannot.
+    /// </summary>
+    [Fact]
+    public void TheMcpCaptureSuppressesTheOverlayToo()
+    {
+        var source = File.ReadAllText(
+            Path.Combine(ArrowheadConsistencyTests.RepoRoot(), "Mcp", "MainWindow.Mcp.cs"));
+
+        Assert.Contains("SuppressOverlayForCapture()", source, StringComparison.Ordinal);
+        Assert.Contains("EnsureCanvasReadyForCapture();", source, StringComparison.Ordinal);
+        Assert.Contains("rtb.Render(ViewportHost)", source, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// <c>Intersect</c>, <c>Difference</c> and <c>Xor</c> all took <c>segmentsPerCurve</c> on their
     /// collection folds; <c>Union</c> did not, so it was the one operation that silently ignored the
     /// caller's chosen precision and always sampled curves at the default.

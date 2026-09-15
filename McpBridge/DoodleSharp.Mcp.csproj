@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>DoodleSharp.Mcp</AssemblyName>
+    <RootNamespace>DoodleSharp.Mcp</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Linked, not referenced. DoodleSharp is a net9.0-windows WinExe; referencing it would drag
+         WPF into a console process that has no use for it (and could not be loaded by a
+         non-Windows-targeting host at all). Compiling the one protocol file into both assemblies
+         keeps a single definition of the wire format without the dependency. -->
+    <Compile Include="..\Mcp\McpBridgeProtocol.cs" Link="McpBridgeProtocol.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.0" />
+  </ItemGroup>
+
+</Project>

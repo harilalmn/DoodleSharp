@@ -9,6 +9,27 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+### Added
+
+- **MCP support: drive DoodleSharp from Claude Code, and let it see the result.** A new `DoodleSharp.Mcp.exe` bridge lets an
+  AI agent run the project you have open and read back what happened. Register it once with
+  `claude mcp add doodlesharp -- "C:\Program Files\DoodleSharp\mcp\DoodleSharp.Mcp.exe"`, then ask
+  Claude to edit your sketch and run it. Three tools are exposed: `doodle_get_status` (which
+  project is open, how many shapes are on the canvas), `doodle_run_project` (re-read the files from
+  disk, compile, run, and report compiler errors, runtime errors and console output), and
+  `doodle_capture_canvas` (render the canvas to a PNG the agent can actually look at, fitted to the
+  whole drawing and free of selection handles and other canvas chrome). The agent
+  edits your `.cs` files with its own file tools; DoodleSharp supplies the half a filesystem
+  cannot — actually running the code. Requires DoodleSharp to be open with a project loaded, and
+  only one window serves at a time. Your unsaved editor changes are never overwritten: a file you
+  are part-way through editing is kept as you left it, and the tool says so.
+
+### Fixed
+
+- **The ConvexHull sample project compiles again.** `Step.cs` called `.Draw()` on `VXYZ` values,
+  which are coordinates rather than shapes and have nothing to draw; it now creates `VPoint`
+  markers from them.
+
 ## [2026.9.0] - 2026-09-11
 
 ### Added

@@ -96,7 +96,13 @@ public class AutoUpdateRemovalTests
         var code = Read("MainWindow.xaml.cs");
 
         Assert.DoesNotContain("AutoRunCodeAsync", code, StringComparison.Ordinal);
-        Assert.Contains("private async Task RunSilentlyAsync(string label)", code, StringComparison.Ordinal);
+
+        // The return type is not decoration: the MCP command answers a pipe rather than a user, so
+        // it needs the diagnostics as data instead of as a status-bar string (note 146). The three
+        // in-app callers below still ignore it.
+        Assert.Contains(
+            "private async Task<Execution.CompilationResult?> RunSilentlyAsync(string label)",
+            code, StringComparison.Ordinal);
 
         // Three callers, and the count is pinned so a fourth has to be argued for here. Two are the
         // Global Parameters paths (no resident assembly, and after a write-back); the third is the
