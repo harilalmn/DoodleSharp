@@ -103,6 +103,16 @@ DoodleSharp is a desktop application that enables users to visualize 2D geometri
 | FR-054 | Export SVG | Done | Export as vector graphics |
 | FR-055 | Auto Save | Done | Periodically save all modified files; prompts for a location when the project has never been saved |
 
+### 2.6 Agent Integration (MCP)
+
+| ID | Feature | Status | Description |
+|----|---------|--------|-------------|
+| FR-060 | MCP bridge | Done | `DoodleSharp.Mcp.exe`, a stdio MCP server Claude Code or Claude Desktop launches, talking to the running window over a named pipe |
+| FR-061 | Project status tool | Done | `doodle_get_status` — which project is open, file and shape counts, unsaved-edit state |
+| FR-062 | Run tool | Done | `doodle_run_project` — re-read from disk, compile, run, report diagnostics, runtime errors and console output |
+| FR-063 | Canvas capture tool | Done | `doodle_capture_canvas` — the canvas as a PNG image block, fitted to the drawing, free of overlay chrome |
+| FR-064 | No file surface | By design | The agent edits `.cs` files with its own tools; MCP exposes only what the filesystem cannot answer |
+
 ---
 
 ## 3. Non-Functional Requirements
@@ -256,6 +266,13 @@ DoodleSharp is a desktop application that enables users to visualize 2D geometri
 - **Reactivity by re-execution, not a dependency graph** — the registry lives in the host assembly so it outlives the collectible user `AssemblyLoadContext`. Changing a value simply re-runs `Main()`, recomputing every derived value at once, which is always correct and needs no invalidation logic.
 - **Declare-vs-override** — `Set(...)` is an idempotent declaration, so re-running the code does not discard a value dialled in from the panel; but editing the literal in code wins and clears the override. Declarations deleted from the code are pruned on the next successful run.
 - **Global Parameters panel (`Windows > Global Parameters`, `F6`)** — lists every parameter grouped by `group:`. Numbers get a value box plus a `[min] [slider] [max]` row, booleans a checkbox, strings a text box, dates a runtime-only text box. Dragging a slider re-executes the code against the already-compiled assembly, so the canvas tracks the drag with no compile latency; on release the new value is written back into the `GlobalParameters.Set(...)` literal that declared it, replacing only the number and preserving the other arguments, the undo history and the caret. The `min`/`max` boxes retarget the slider only and are never written to source.
+
+### Version 2026.9.1 (Implemented) — MCP: An Agent Runs the Sketch and Looks at the Canvas
+- **Claude can drive the open window** — registering `DoodleSharp.Mcp.exe` with Claude Code or Claude Desktop gives the assistant three tools: ask which project is open, run it and read back the compiler errors, runtime errors and console output, and capture the canvas as an image it can actually look at. The loop that matters is edit-run-see: the assistant changes your `.cs` file with its own file tools, asks DoodleSharp to run it, and looks at what was drawn instead of guessing from the code.
+- **It runs what is on disk, and says so** — the run tool re-reads the project's files first, because the assistant edits them outside the editor. A file you are part-way through editing in DoodleSharp is never overwritten: it is kept as you left it and reported as a conflict, so you know the run did not include your change.
+- **Only what the filesystem cannot answer** — the tools deliberately expose no file reading or writing. The assistant already has those; what it cannot do without the application is compile and execute the sketch and see the result.
+- **One window serves** — if several DoodleSharp windows are open the first one owns the connection, so "run the project" is never answered by whichever window won a race. The application has to be running with a project open; if it is not, the tools say that rather than failing obscurely.
+- **The ConvexHull sample compiles again** — it called `.Draw()` on `VXYZ` coordinate values, which are not shapes and have nothing to draw.
 
 ### Version 2026.9.0 (Implemented) — Polar Points, and Points That Draw
 - **Polar points** — `new VXYZ(angleInDegrees, distance, fromPoint)` is the point `distance` away from `fromPoint` at an angle counter-clockwise from +X; `fromPoint` is optional and means the origin. Two plain numbers are still Cartesian (`new VXYZ(45, 100)` is (45, 100)), because C# prefers the overload that fills in no default — polar from the origin is written with the third argument or with named arguments.

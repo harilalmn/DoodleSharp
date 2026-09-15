@@ -496,8 +496,9 @@ from this fork; a new note takes the next unused number.
     - **Auto flipped backends on alternate repaints of a small scene.** `RedrawAll` sampled `_rasterActive` *before* `RedrawAllCore` chose the backend, so the first raster frame after a switch was timed and recorded as a vector frame. That frame is slow (bitmap setup, first-use JIT — 70 ms in the probe), so two frames later Auto switched up again. The frame's backend is now recorded where it is chosen (`_frameUsedRaster`). Separately, a switch-up is refused below `RasterSwitchDownShapes`, because the very next frame would switch straight back: under that count a raster frame could only ever be a one-frame flap, and on a static scene that frame is what stays on screen. Note 83's two thresholds are unchanged.
     - Guarded by `Tests/PointVisibilityTests.cs`, whose end-to-end check is the probe's own measurement — a `RenderCanvas` on an STA thread, a white point, `RenderTargetBitmap`, lit pixels counted around it, on Legacy and Managed — which read **0** on both before the fix. That is the point — the user named it — and the docs that said "method results are always unnamed" were updated to say "unless the variable is declared with the shape type". Guarded by `Tests/ShapeNamingRewriteTests.cs`, which compiles the execute path, emits, and runs it.
 
-146. **MCP support (`Mcp/`, `McpBridge/`)** — an agent drives the running window through two tools,
-    `doodle_get_status` and `doodle_run_project`. The pieces and the reasoning:
+146. **MCP support (`Mcp/`, `McpBridge/`)** — an agent drives the running window through three tools:
+    `doodle_get_status`, `doodle_run_project` and `doodle_capture_canvas`. The pieces and the
+    reasoning:
     - **The surface deliberately excludes file editing.** Claude Code already reads and writes the
       project's `.cs` files; what it cannot do from the filesystem is run them and learn what
       happened. So the tools expose only what the app knows. `doodle_run_project` **re-reads from

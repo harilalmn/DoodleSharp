@@ -33,6 +33,7 @@ DoodleSharp is a visual programming environment that lets you write C# code to c
 - **Auto Save**: Optionally write every modified file to disk on a timer, with a prompt to pick a location if the project has never been saved
 - **Diagnostic Journals**: Every session writes a detailed, crash-proof journal to `%TEMP%\DoodleSharp` — machine and GPU details, every file opened, every run, and full exception chains — so a crash on any machine can be diagnosed from one file. See [Diagnostic Journals](#diagnostic-journals)
 - **NuGet Integration**: Add external packages to extend functionality
+- **MCP Server**: Let Claude Code or Claude Desktop drive the open window — `doodle_get_status`, `doodle_run_project` and `doodle_capture_canvas` let an agent run the project it just edited and look at what it drew. See [MCP](#mcp-driving-doodlesharp-from-claude-code)
 - **Built-in Help**: Comprehensive API documentation with examples
 - **Code Minimap**: VSCode-style minimap with syntax coloring, viewport indicator, and error marker navigation
 
@@ -137,6 +138,21 @@ each tick rebuilds the drawing from your code.
 - **It does not save anything to disk.** Auto-Run flushes the editor into the in-memory file so the
   right text is compiled; writing to disk is [Auto Save](#auto-save)'s job and is a separate setting
 
+### Sample Projects
+
+Six worked projects ship with the app, installed to `Samples` under the install folder (and in
+`Sample Projects/` in this repository). Open one with File > Open Project and press `F5` — each is a
+complete `.vizproj` written the same way your own projects are:
+
+| Project | What it shows |
+|---------|---------------|
+| **ConvexHull** | Three hull algorithms (Graham scan, Jarvis march, monotone chain) racing side by side, stepped through the [animation system](#animation-system) |
+| **ParcelSubdivision** | `BooleanOps.Intersect`/`Difference` plus a bisection search, cutting a parcel into N equal-area pieces |
+| **PathFinder** | A* over a `VSpatialGrid` with an animated frontier — the search is written out by hand rather than calling `VSpatialGrid.FindPath`, so you can watch it think |
+| **ProceduralArt** | An L-system tree, a Penrose tiling, a Hilbert curve and Truchet tiles in one carousel |
+| **ViewportShowcase** | Four independent studies in one drawing, each in its own [viewport](#viewports--dividing-the-drawing-surface) cell with its own pan and zoom |
+| **VisibilityGraph** | A visibility graph and Dijkstra shortest path through an obstacle field, then the visibility polygon animated at ten points along the route to find the most-seeing one |
+
 ---
 
 ## Supported Shapes
@@ -168,6 +184,11 @@ each tick rebuilds the drawing from your code.
 | **VHatch** | Pattern fill within boundary | `new VHatch(polygon, BuiltInHatch.ANSI31, scale)` — the boundary can also be a `List<VXYZ>`, and the pattern a name string or a `HatchType` |
 
 > **VXYZ vs VPoint**: `VXYZ` is the coordinate/vector type used for all position parameters, properties, and return types (e.g., `new VXYZ(10, 20)`). It is immutable and never appears on the canvas, so it is safe for intermediate maths. `VPoint` is a *shape* that draws a dot — constructing one adds a marker to the canvas. Use `new VXYZ(x, y)` wherever you just need a coordinate.
+>
+> A point has no size in world units, so its marker is a **fixed number of screen pixels** and stays
+> the same size at any zoom: a 1.5-pixel dot by default, or a 5-pixel disc with Settings → **Draw
+> Point As Patch** on (off by default). It is drawn identically by all three renderers, and is never
+> dropped when a dense drawing simplifies itself.
 
 > **Polar points**: `new VXYZ(angleDegrees, distance, fromPoint)` is the point `distance` away from `fromPoint`, at an angle in **degrees** counter-clockwise from +X (90 is straight up). Z comes from `fromPoint`; a negative distance lands on the opposite side; `fromPoint` can be a `VPoint`.
 >
@@ -3115,10 +3136,11 @@ alloc    12.4 KB/frame   gen0 3
 | `visible` / `examined` | Shapes actually drawn versus shapes the culling index had to look at. A large gap means the drawing is spread thin relative to the view |
 | `alloc` / `gen0` | Bytes allocated per frame and garbage collections in the window — a rising `gen0` during animation is what to report if playback stutters |
 
-You can leave it on while exporting. PNG, GIF and MP4 export blank the whole overlay layer for the
-duration of the capture, so the readout — along with selection handles, the rubber band, snap markers
-and the measuring overlay — stays out of the exported image or video. The vector exporters (SVG, PDF,
-DXF) write shapes rather than the screen, so they never saw it in the first place.
+You can leave it on while exporting. PNG, GIF and MP4 export — and the
+[MCP canvas capture](#mcp-driving-doodlesharp-from-claude-code) — blank the whole overlay layer for
+the duration of the capture, so the readout, along with selection handles, the rubber band, snap
+markers and the measuring overlay, stays out of the exported image or video. The vector exporters
+(SVG, PDF, DXF) write shapes rather than the screen, so they never saw it in the first place.
 
 ---
 
@@ -5495,6 +5517,21 @@ Register the bridge once:
 claude mcp add doodlesharp -- "C:\Program Files\DoodleSharp\mcp\DoodleSharp.Mcp.exe"
 ```
 
+Claude Desktop takes the same executable in its `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "doodlesharp": {
+      "command": "C:\\Program Files\\DoodleSharp\\mcp\\DoodleSharp.Mcp.exe"
+    }
+  }
+}
+```
+
+The bridge is installed beside the app (`mcp\DoodleSharp.Mcp.exe` under the install folder) and is
+launched by the agent, not by you — it needs no window of its own.
+
 Then open DoodleSharp with a project and ask Claude to work on it:
 
 > Open my Sorting sketch's `StartViz.cs`, make the bars sort one comparison per frame, and run it.
@@ -5508,24 +5545,41 @@ Then open DoodleSharp with a project and ask Claude to work on it:
 | `doodle_capture_canvas` | Renders the canvas to a PNG and returns it as an image, so the agent can see what the code drew rather than only whether it compiled |
 
 `doodle_capture_canvas` fits the whole drawing in frame by default (so the agent does not photograph
-an empty corner of the viewport and conclude your code drew nothing) and takes optional `maxWidth`,
-`maxHeight`, `includeGrid` and `zoomExtents` arguments. It never renders the F10 frame-timing
-readout, selection handles or other canvas chrome into the image.
+an empty corner of the viewport and conclude your code drew nothing) and takes four optional
+arguments: `maxWidth` and `maxHeight` (1024 each by default, clamped to 64–4096; the image is scaled
+down to fit, never up), `includeGrid` (false — the reference grid is left out unless you ask for it)
+and `zoomExtents` (true; set it false to photograph your current view instead). It never renders the
+F10 frame-timing readout, selection handles or other canvas chrome into the image, and an empty
+canvas is said so in words as well as shown, because a blank picture and a failed render look alike.
+A [divided drawing](#viewports--dividing-the-drawing-surface) is captured whole — every cell in one
+image, each fitted to its own shapes.
 
 ### What to expect
 
 - **DoodleSharp has to be running** with a project open. The tools drive the live window — they are
-  not a headless renderer. If the app is closed, the tool says so rather than failing obscurely.
+  not a headless renderer. If the app is closed, the tool says so rather than failing obscurely, and
+  `doodle_get_status` answers either way, saying when no project is open.
+- **Nothing listens on the network.** The bridge reaches the window through a named pipe whose
+  permissions are set to your Windows account alone — no TCP port, no firewall prompt. That matters
+  here more than usual, because what is on the other end of it compiles and runs arbitrary C# inside
+  the app.
 - **One window serves.** If you have several DoodleSharp windows open, the first one to start owns
   the connection; the others do not respond to MCP. This is deliberate — "run the project" should
   not be answered by whichever window won a race.
 - **Your unsaved edits are safe.** `doodle_run_project` re-reads from disk, but a file you are
   part-way through editing in DoodleSharp is kept as you left it and reported as a conflict, so you
   will know the agent's run did not include your change.
-- **Errors come back with a file and a line** but no column — the compiler that produces them runs
-  on the instrumented execute path, where columns are shifted (see note 21 in `docs/NOTES.md`).
-- **Nothing is exposed but these two tools.** The bridge cannot read or write your files, change
-  settings, or export; it can ask the open window what it holds, and ask it to run.
+- **Errors come back with a file and a line** but no column. The code is compiled with a
+  stack-overflow guard injected into every method body, which keeps line numbers exact but shifts
+  the columns on the line it was inserted into — a column pointing confidently at the wrong
+  character is worse than none.
+- **One command at a time.** The window serves commands in order, so a `doodle_capture_canvas` that
+  arrives while a run is still going waits its turn rather than photographing a half-drawn canvas.
+  A call that waits more than 90 seconds for its turn, or a run that takes more than two minutes,
+  comes back as a message saying which of the two happened.
+- **Nothing is exposed but these three tools.** The bridge cannot read or write your files, change
+  settings, or export; it can ask the open window what it holds, ask it to run, and look at the
+  result.
 
 ---
 
