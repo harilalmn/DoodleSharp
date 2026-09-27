@@ -9,6 +9,14 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+### Fixed
+
+- **DoodleSharp no longer crashes the moment the main window opens after a panel was floated and then
+  hidden.** The saved window layout kept an empty floating window for that panel, and restoring it
+  took the app down on every launch until the layout file was deleted by hand. Empty floating
+  windows are now dropped when a layout is loaded and never written when it is saved. A layout that
+  already has one simply loads.
+
 ## [2026.9.1] - 2026-09-15
 
 ### Added

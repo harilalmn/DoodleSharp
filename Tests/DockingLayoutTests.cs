@@ -96,6 +96,81 @@ public class DockingLayoutTests
             new[] { "ds.tool.canvas", "ds.tool.retired" }));
     }
 
+    // ── Empty floating windows (note 147) ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Cut down from a real layout.xml that crashed every launch. The Canvas floated maximized on a
+    /// second monitor and was then hidden, so the floating window survives with an empty pane that the
+    /// hidden Canvas names as its PreviousContainer.
+    /// </summary>
+    private const string LayoutWithEmptyFloatingWindow = """
+        <LayoutRoot>
+          <RootPanel Orientation="Horizontal" />
+          <FloatingWindows>
+            <LayoutAnchorableFloatingWindow>
+              <LayoutAnchorablePaneGroup FloatingLeft="-776" FloatingTop="120" IsMaximized="true" Orientation="Horizontal">
+                <LayoutAnchorablePane FloatingLeft="-776" IsMaximized="true" Id="62492eef-1393-477f-a74a-1030333e92be" />
+              </LayoutAnchorablePaneGroup>
+            </LayoutAnchorableFloatingWindow>
+          </FloatingWindows>
+          <Hidden>
+            <LayoutAnchorable Title="Canvas" ContentId="ds.tool.canvas" PreviousContainerId="62492eef-1393-477f-a74a-1030333e92be" PreviousContainerIndex="0" />
+          </Hidden>
+        </LayoutRoot>
+        """;
+
+    [Fact]
+    public void AnEmptyFloatingWindowIsPruned()
+    {
+        var pruned = LayoutFile.PruneEmptyFloatingWindows(LayoutWithEmptyFloatingWindow, out var removed);
+
+        Assert.Equal(1, removed);
+        Assert.DoesNotContain("LayoutAnchorableFloatingWindow", pruned);
+
+        // The hidden panel itself must survive: it is the thing the user wants back.
+        Assert.Contains("ContentId=\"ds.tool.canvas\"", pruned);
+    }
+
+    [Fact]
+    public void AFloatingWindowHoldingAPanelIsKept()
+    {
+        var xml = """
+            <LayoutRoot>
+              <FloatingWindows>
+                <LayoutAnchorableFloatingWindow>
+                  <LayoutAnchorablePaneGroup>
+                    <LayoutAnchorablePane>
+                      <LayoutAnchorable ContentId="ds.tool.console" />
+                    </LayoutAnchorablePane>
+                  </LayoutAnchorablePaneGroup>
+                </LayoutAnchorableFloatingWindow>
+              </FloatingWindows>
+            </LayoutRoot>
+            """;
+
+        Assert.Same(xml, LayoutFile.PruneEmptyFloatingWindows(xml, out var removed));
+        Assert.Equal(0, removed);
+    }
+
+    [Theory]
+    [InlineData("<LayoutRoot><RootPanel /></LayoutRoot>")]
+    [InlineData("not xml at all")]
+    [InlineData("<LayoutRoot><FloatingWindows>")]
+    [InlineData("")]
+    public void ALayoutWithNothingToPruneComesBackUnchanged(string xml)
+    {
+        Assert.Equal(xml, LayoutFile.PruneEmptyFloatingWindows(xml, out var removed));
+        Assert.Equal(0, removed);
+    }
+
+    [Fact]
+    public void TheLayoutIsPrunedOnBothRestoreAndSave()
+    {
+        // The restore-side prune stops the crash; the save-side prune stops a new file carrying the
+        // same trap. Dropping either one lets the bug back in.
+        Assert.Equal(2, MainWindowCode().Split("LayoutFile.PruneEmptyFloatingWindows(").Length - 1);
+    }
+
     // ── Off-screen recovery ──────────────────────────────────────────────────────────────────────
 
     private static readonly Rect TwoMonitors = new(0, 0, 3840, 1080);

@@ -566,3 +566,22 @@ from this fork; a new note takes the next unused number.
       39-assembly dependency closure and nothing else builds into that directory. It is installed to
       a subfolder, not beside `DoodleSharp.exe`: several of those assemblies also exist in the app's
       output at different versions.
+147. **An empty floating window in a saved layout crashes start-up; `LayoutFile.PruneEmptyFloatingWindows`
+    strips them on restore and on save.** If a panel is floating and the user hides it, AvalonDock
+    keeps the now-empty floating window, because the hidden panel names that pane as its
+    `PreviousContainer`. `SaveLayout` wrote it out unchanged. On the next launch, `Dock.Layout = restored`
+    builds a window for it and queues `Show()` with `Dispatcher.BeginInvoke`. The empty window is then
+    garbage-collected out of the model, which closes that window, and the queued `Show()` throws
+    *"Cannot … call Show … after a Window has closed"* from
+    `DockingManager.<CreateUIElementForModel>b__0`. That throw is in a dispatcher callback, so the
+    `try/catch` in `RestoreLayout` never sees it (the quarantine-and-default fallback never runs) and the
+    process dies. The crash comes before the close path, the only place the file is rewritten, so the app
+    crashed **on every launch** until the user deleted `%APPDATA%\DoodleSharp\layout.xml`. Found from a
+    user's journal: the Canvas had floated maximized on a second monitor and was then hidden.
+    - The prune works on the **XML string, before AvalonDock sees it**. Fixing it up after assignment
+      (`CollectGarbage`, clamping) is too late, because assigning the layout is what queues the `Show()`.
+      It is a pure function next to `Unwrap` so it can be tested without a window.
+    - A floating window is empty when it has no `LayoutAnchorable` or `LayoutDocument` descendant. The
+      hidden panel is untouched and comes back docked by default when it is shown.
+    - Both call sites are pinned by `TheLayoutIsPrunedOnBothRestoreAndSave`. Pruning on restore stops
+      the crash, and pruning on save stops a new file carrying the same trap.

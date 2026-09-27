@@ -6452,7 +6452,10 @@ public partial class MainWindow : Window
         var serializer = new System.Xml.Serialization.XmlSerializer(dto.GetType());
         using var writer = new System.IO.StringWriter();
         serializer.Serialize(writer, dto);
-        return writer.ToString();
+
+        // A floating window whose panel was hidden is saved empty, and restoring one crashes start-up
+        // (note 147). Never write one.
+        return Docking.LayoutFile.PruneEmptyFloatingWindows(writer.ToString(), out _);
     }
 
     /// <summary>
@@ -6462,6 +6465,14 @@ public partial class MainWindow : Window
     private void ApplyLayoutXml(string layoutXml)
     {
         if (string.IsNullOrWhiteSpace(layoutXml)) return;
+
+        // Must happen before AvalonDock sees the layout. An empty floating window gets a window built,
+        // closed and then Show()n from a queued callback, which kills the process outside this method's
+        // reach (note 147).
+        layoutXml = Docking.LayoutFile.PruneEmptyFloatingWindows(layoutXml, out var pruned);
+        if (pruned > 0)
+            Journal.Info("MW.LAYOUT.PRUNE", "Dropped empty floating windows from the saved layout",
+                $"count={pruned}");
 
         _isApplyingLayout = true;
         try

@@ -282,6 +282,7 @@ number, and gets **both** a body in `docs/NOTES.md` and a line here.
 144. A **shape-typed** declaration is named whatever its initializer (`VPoint p = q.AsVPoint();`) via the execute-path-only `ShapeNamingHelper` tree; `var` with a method call cannot be — the rewriter is syntax-only.
 145. A `VPoint` is a **fixed-screen-size marker** (`Rendering/PointMarker.cs`): LOD must never size-cull it (`LodPolicy.Classify(shape, …)`), the rasterizer draws the same disc, the GPU sink declines it; Auto records a frame's time by the backend that **actually** drew it.
 146. **MCP** (`Mcp/`, `McpBridge/`) — a stdio bridge exe plus a named pipe, not HTTP; the protocol file is compiled into both; every command hops to the Dispatcher, unwraps **twice**, and never throws; `RefreshProjectFromDisk` is the refresh entry point and is called **once**; diagnostics carry a line but **never a column** (note 21); canvas capture is the **fourth capture path** and obeys note 93; `ImageContentBlock.Data` takes **base64 text as UTF-8 bytes**, not image bytes; one window serves.
+147. An **empty floating window** in a saved layout crashed every launch (AvalonDock's deferred `Show()` on a closed window, outside any catch); `LayoutFile.PruneEmptyFloatingWindows` strips them from the XML **before** AvalonDock sees it, on restore and on save.
 
 ## Keyboard Shortcuts (Key Bindings)
 

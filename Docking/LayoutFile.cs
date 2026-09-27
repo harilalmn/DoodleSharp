@@ -76,6 +76,54 @@ internal static class LayoutFile
     }
 
     /// <summary>
+    /// Removes every floating window that holds no content — no <c>LayoutAnchorable</c> and no
+    /// <c>LayoutDocument</c> anywhere beneath it.
+    ///
+    /// <para>
+    /// AvalonDock leaves such a window behind when the panel floating in it is hidden: the empty pane is
+    /// kept as the panel's <c>PreviousContainer</c>, and it gets saved as it is. Restoring it is fatal.
+    /// Assigning the layout builds a window for it and queues <c>Show()</c> on the dispatcher. The
+    /// empty window is then garbage-collected out of the model, which closes that window, and the queued
+    /// <c>Show()</c> throws on a closed window. It throws inside a dispatcher callback, outside any
+    /// catch, on every launch (note 147). Removing the window here means AvalonDock never sees it.
+    /// The hidden panel then comes back docked by default.
+    /// </para>
+    ///
+    /// <para>Never throws. Input that will not parse comes back unchanged, for the deserializer to reject.</para>
+    /// </summary>
+    internal static string PruneEmptyFloatingWindows(string layoutXml, out int removed)
+    {
+        removed = 0;
+        if (string.IsNullOrWhiteSpace(layoutXml)) return layoutXml;
+
+        XDocument doc;
+        try
+        {
+            doc = XDocument.Parse(layoutXml, LoadOptions.PreserveWhitespace);
+        }
+        catch (System.Xml.XmlException)
+        {
+            return layoutXml;
+        }
+
+        var empty = doc.Descendants()
+            .Where(e => e.Name.LocalName == "FloatingWindows")
+            .SelectMany(fw => fw.Elements())
+            .Where(window => !window.Descendants().Any(d =>
+                d.Name.LocalName is "LayoutAnchorable" or "LayoutDocument"))
+            .ToList();
+
+        if (empty.Count == 0) return layoutXml;
+
+        foreach (var window in empty) window.Remove();
+        removed = empty.Count;
+
+        // XDocument.ToString drops the declaration; keep it when there was one so the result stays a
+        // drop-in replacement for what the serializer produced.
+        return doc.Declaration is { } decl ? decl + Environment.NewLine + doc.ToString() : doc.ToString();
+    }
+
+    /// <summary>
     /// The registered panels that a restored layout does not mention — panels added since it was
     /// saved. AvalonDock simply omits them, so without this they would not exist at all and their
     /// menu entry would silently do nothing. The caller re-inserts each one, hidden.
