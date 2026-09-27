@@ -9,6 +9,8 @@ tags; this file is the curated, human-friendly summary.
 
 ## [Unreleased]
 
+## [2026.9.2] - 2026-09-27
+
 ### Fixed
 
 - **DoodleSharp no longer crashes the moment the main window opens after a panel was floated and then
