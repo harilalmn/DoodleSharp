@@ -78,3 +78,6 @@ Bench/snapshots/
 # Working notes for a round of reported bugs — kept beside the docs while the round is open,
 # but it is a scratch checklist, not documentation, and a stale one blocks the release script.
 docs/bugs_and_new_feature_requirements.md
+
+# LinkedIn post drafts and images - private, never published with this public repository.
+docs/LinkedIn/
